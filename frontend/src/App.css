@@ -1,0 +1,76 @@
+/* ═══════════════════════════════════════════
+   App Layout
+   ═══════════════════════════════════════════ */
+
+.app-container {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 24px 40px;
+}
+
+/* ── Dashboard Grid ────────────────────── */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.main-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.side-column {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Analytics Row (Confidence + Heatmap side-by-side) ── */
+.analytics-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+/* ── Metric Cards Row ──────────────────── */
+.metrics-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+/* ── Section title ─────────────────────── */
+.section-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+/* ── Responsive ────────────────────────── */
+@media (max-width: 1200px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .analytics-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .metrics-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .app-container {
+    padding: 0 12px 20px;
+  }
+}
