@@ -18,6 +18,7 @@ import sys
 import json
 import asyncio
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 import cv2
@@ -75,37 +76,41 @@ async def verify_api_key(request: Request):
     if key != API_KEY:
         raise HTTPException(401, "Invalid or missing API key")
 
-# ── Processor (lazy loaded) ──────────────────────────────────
+# ── Processor (lazy loaded, thread-safe) ─────────────────────
 _processor = None
 _active_mode = config.ACTIVE_MODEL
+_processor_lock = threading.Lock()
 
 def _get_processor():
     global _processor, _active_mode
-    if _processor is None:
-        mode = _active_mode
-        if mode in ("cnn_scratch", "resnet18", "mobilenetv2"):
-            try:
-                _processor = VideoProcessor(model_name=mode)
-                logger.info(f"{mode} VideoProcessor initialised")
-            except Exception as e:
-                logger.warning(f"{mode} unavailable ({e}), falling back to demo")
-                mode = "demo"
+    with _processor_lock:
+        if _processor is None:
+            mode = _active_mode
+            if mode in ("cnn_scratch", "resnet18", "mobilenetv2"):
+                try:
+                    _processor = VideoProcessor(model_name=mode)
+                    logger.info(f"{mode} VideoProcessor initialised")
+                except Exception as e:
+                    logger.warning(f"{mode} unavailable ({e}), falling back to demo")
+                    mode = "demo"
+                    _active_mode = "demo"
 
-        if mode == "demo" or _processor is None:
-            from src.inference.demo_processor import DemoProcessor
-            _processor = DemoProcessor()
-            _active_mode = "demo"
-            logger.info("DemoProcessor initialised")
+            if mode == "demo" or _processor is None:
+                from src.inference.demo_processor import DemoProcessor
+                _processor = DemoProcessor()
+                _active_mode = "demo"
+                logger.info("DemoProcessor initialised")
     return _processor
 
 def _reset_processor():
     global _processor
-    if _processor is not None:
-        try:
-            _processor.stop_processing()
-        except Exception:
-            pass
-    _processor = None
+    with _processor_lock:
+        if _processor is not None:
+            try:
+                _processor.stop_processing()
+            except Exception:
+                pass
+        _processor = None
 
 def _resolve_model_name():
     """Resolve active model name for prediction — if 'demo', find best trained model."""
@@ -198,6 +203,9 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
     - rows: number of grid rows (default: 3)
     - cols: number of grid columns (default: 6)
     """
+    if not 1 <= rows <= 50 or not 1 <= cols <= 50:
+        raise HTTPException(400, "rows and cols must each be between 1 and 50")
+
     allowed = (".jpg", ".jpeg", ".png", ".bmp")
     if not file.filename.lower().endswith(allowed):
         raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")

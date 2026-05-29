@@ -20,7 +20,7 @@ SPOTS_CONFIG_PATH = BASE_DIR / "spots_config.json"
 
 # PKLot dataset root — set this to your downloaded PKLot path
 # Expected structure: PKLOT_ROOT/PKLotSegmented/{PUC,UFPR04,UFPR05}/.../Occupied|Empty
-PKLOT_ROOT = os.getenv("PKLOT_ROOT", r"D:\PKLot\PKLotSegmented")
+PKLOT_ROOT = os.getenv("PKLOT_ROOT", "")
 
 # Ensure directories exist
 for d in (DATA_DIR, UPLOAD_DIR, MODEL_DIR, OUTPUT_DIR):
