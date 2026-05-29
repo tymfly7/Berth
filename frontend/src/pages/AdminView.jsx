@@ -3,16 +3,13 @@ import '../App.css'
 import Header from '../components/Header'
 import VideoFeed from '../components/VideoFeed'
 import MetricCards from '../components/MetricCards'
-import ControlPanel from '../components/ControlPanel'
 import HeatmapView from '../components/HeatmapView'
 import AnalyticsChart from '../components/AnalyticsChart'
 import ConfidenceGauge from '../components/ConfidenceGauge'
-import TrainingPanel from '../components/TrainingPanel'
-import ModelStatus from '../components/ModelStatus'
-import RoiManager from '../components/RoiManager'
 import ServerStatus from '../components/ServerStatus'
 import CameraManager from '../components/CameraManager'
 import MultiCameraGrid from '../components/MultiCameraGrid'
+import SettingsPanel from '../components/SettingsPanel'
 
 const WS_URL = `ws://${window.location.hostname}:8000/ws/video`
 const API_BASE = `http://${window.location.hostname}:8000`
@@ -145,13 +142,10 @@ export default function AdminView() {
             <HeatmapView heatmap={heatmap} />
           </div>
 
-          <ModelStatus modelInfo={modelInfo} apiAction={apiAction} />
-          <TrainingPanel apiAction={apiAction} apiBase={API_BASE} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} />
         </div>
 
         <div className="side-column">
-          <ControlPanel apiAction={apiAction} apiBase={API_BASE} />
-          <RoiManager />
+          <SettingsPanel apiAction={apiAction} apiBase={API_BASE} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} />
         </div>
       </div>
     </div>

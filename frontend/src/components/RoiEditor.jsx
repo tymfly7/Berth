@@ -60,14 +60,16 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
     ctx.clearRect(0, 0, W, H)
 
     rois.forEach((roi, idx) => {
-      const color = roi.color || COLORS[idx % COLORS.length]
-      const pts = roi.polygon.map(([x, y]) => [x * W, y * H])
       const isSelected = roi.id === selectedId
+      const isDrawing = inProgress.length > 0
+      const color = isDrawing && !isSelected ? '#2ecc71' : (roi.color || COLORS[idx % COLORS.length])
+      const fillColor = isDrawing && !isSelected ? 'rgba(46,204,113,0.25)' : hexToRgba(color, 0.3)
+      const pts = roi.polygon.map(([x, y]) => [x * W, y * H])
 
       ctx.beginPath()
       pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
       ctx.closePath()
-      ctx.fillStyle = hexToRgba(color, 0.3)
+      ctx.fillStyle = fillColor
       ctx.fill()
       ctx.strokeStyle = isSelected ? '#ffffff' : color
       ctx.lineWidth = isSelected ? 3 : 2

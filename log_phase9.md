@@ -49,6 +49,14 @@ All four ROI mutations are undoable: polygon draw, rectangle draw, Delete Select
 
 ---
 
+## Settings UI Refactor
+- SettingsPanel: collapsible panel with Controls, ROI Manager, Training
+- ROI modal: enlarged editor opens on image upload
+- Green ROIs: all polygons green during active drawing
+- Model test buttons: Test button added next to each model
+
+---
+
 ## Fix — CNN Classifier Head (`cnn_scratch.py`)
 
 **Files changed:** `backend/src/models/cnn_scratch.py`, `backend/src/train/trainer.py`, `backend/src/inference/classifier.py`

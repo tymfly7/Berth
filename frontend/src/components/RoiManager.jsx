@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import RoiEditor from './RoiEditor'
 
+
 const API_BASE = `http://${window.location.hostname}:8000`
 const CAMERA_ID = 'default'
 
@@ -8,6 +9,9 @@ export default function RoiManager() {
   const [rois, setRois] = useState([])
   const [bgImage, setBgImage] = useState(null)
   const [saveMsg, setSaveMsg] = useState(null)
+  const [modalOpen, setModalOpen] = useState(false)
+
+  useEffect(() => { if (bgImage) setModalOpen(true) }, [bgImage])
 
   useEffect(() => {
     fetch(`${API_BASE}/api/roi/${CAMERA_ID}`)
@@ -92,9 +96,7 @@ export default function RoiManager() {
         </label>
       </div>
 
-      {bgImage ? (
-        <RoiEditor backgroundImage={bgImage} rois={rois} onRoisChange={setRois} />
-      ) : (
+      {!bgImage && (
         <div style={{
           border: '2px dashed rgba(255,255,255,0.15)', borderRadius: 6,
           padding: '32px 16px', textAlign: 'center',
@@ -106,6 +108,11 @@ export default function RoiManager() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
         <button onClick={handleSave} style={saveBtnStyle}>Save ROIs</button>
+        {bgImage && (
+          <button onClick={() => setModalOpen(true)} style={{ ...saveBtnStyle, background: 'rgba(255,255,255,0.1)' }}>
+            ✏️ Edit ROIs
+          </button>
+        )}
         {saveMsg && (
           <span style={{
             fontSize: '0.8rem',
@@ -168,6 +175,44 @@ export default function RoiManager() {
           >
             Clear All
           </button>
+        </div>
+      )}
+
+      {modalOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.8)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            position: 'relative',
+            width: '90vw', height: '90vh',
+            background: 'var(--bg-card, #1a1a2e)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-color)',
+            display: 'flex', flexDirection: 'column',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '12px 20px', borderBottom: '1px solid var(--border-color)',
+              flexShrink: 0,
+            }}>
+              <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>ROI Editor — click to add polygon points, double-click to close</span>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button onClick={handleSave} style={saveBtnStyle}>Save ROIs</button>
+                <button onClick={() => setModalOpen(false)} style={{ ...saveBtnStyle, background: 'rgba(255,255,255,0.1)' }}>Close</button>
+              </div>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+              <RoiEditor backgroundImage={bgImage} rois={rois} onRoisChange={setRois} />
+            </div>
+            {saveMsg && (
+              <div style={{ padding: '8px 20px', fontSize: '0.8rem', color: saveMsg.startsWith('Error') ? 'var(--color-occupied, #e74c3c)' : 'var(--color-vacant, #2ecc71)' }}>
+                {saveMsg}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
