@@ -12,15 +12,11 @@ import logging
 import threading
 import time
 from pathlib import Path
-import config
-import torch
-from src.models.model_factory import create_model
-from src.train.trainer import Trainer
-from src.data_prep.preprocessor import prepare_dataset
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import matplotlib
 import torch
+import config
 from src.models.model_factory import create_model, list_available_models
 from src.train.trainer import Trainer
 from src.data_prep.preprocessor import prepare_dataset
