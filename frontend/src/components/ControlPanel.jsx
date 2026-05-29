@@ -142,13 +142,15 @@ export default function ControlPanel({ apiAction, apiBase }) {
       <div className="section-title" style={{ marginTop: 4 }}>Model</div>
       <div style={style.row}>
         {['cnn_scratch', 'resnet18', 'mobilenetv2'].map((m) => (
-          <button
-            key={m}
-            className="btn btn-ghost btn-sm"
-            onClick={() => handleAction(`/api/use-model/${m}`, `Loading ${m}`)}
-          >
-            🧠 {m}
-          </button>
+          <div key={m} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => handleAction(`/api/use-model/${m}`, `Loading ${m}`)}>
+              🧠 {m}
+            </button>
+            <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.72rem', padding: '4px 8px' }}
+              onClick={() => handleAction(`/api/test-model/${m}`, `Testing ${m}`)}>
+              Test
+            </button>
+          </div>
         ))}
       </div>
 
