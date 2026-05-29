@@ -31,8 +31,9 @@ class VideoProcessor:
         model_name (str): Model architecture to use for inference.
     """
 
-    def __init__(self, model_name=None):
+    def __init__(self, model_name=None, camera_id: str = "default"):
         self.model_name = model_name or config.ACTIVE_MODEL
+        self.camera_id = camera_id
         self._source = 0          # 0 = first webcam; str = video file path
 
         self.running = False
@@ -50,7 +51,7 @@ class VideoProcessor:
     def _load_detector(self):
         from src.inference.slot_detector import SlotDetector
         try:
-            detector = SlotDetector(model_name=self.model_name)
+            detector = SlotDetector(model_name=self.model_name, camera_id=self.camera_id)
             if detector.classifier.is_loaded():
                 logger.info(f"VideoProcessor ready: {self.model_name}")
             else:
@@ -110,7 +111,7 @@ class VideoProcessor:
                         continue
 
                 frame = cv2.resize(raw_frame, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
-                result = self._detector.detect(frame)
+                result = self._detector.detect(frame, camera_id=self.camera_id)
                 annotated = self._detector.draw_overlay(frame.copy(), result)
 
                 cv2.putText(
@@ -194,8 +195,12 @@ class VideoProcessor:
             for sid, data in self._heatmap.items():
                 total = data["total_count"]
                 occ = data["occupied_count"]
+                try:
+                    slot_id = int(sid)
+                except (ValueError, TypeError):
+                    slot_id = sid
                 result.append({
-                    "slot_id": int(sid),
+                    "slot_id": slot_id,
                     "occupancy_rate": round(occ / total * 100, 1) if total else 0,
                     "total_observations": total,
                 })

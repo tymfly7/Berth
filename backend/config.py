@@ -48,7 +48,9 @@ ACTIVE_MODEL = os.getenv("SMARTPARK_MODEL", "demo")
 # ---------------------------------------------------------------------------
 CNN_SCRATCH_PATH  = MODEL_DIR / "best_cnn_scratch.pth"
 RESNET18_PATH     = MODEL_DIR / "best_resnet18.pth"
+RESNET50_PATH     = MODEL_DIR / "best_resnet50.pth"
 MOBILENET_PATH    = MODEL_DIR / "best_mobilenetv2.pth"
+MOBILENETV4_PATH  = MODEL_DIR / "best_mobilenetv4.pth"
 CNN_INPUT_SIZE    = 128
 CNN_CONFIDENCE_THRESHOLD = 0.6
 
