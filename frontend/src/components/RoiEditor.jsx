@@ -38,6 +38,8 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
   const [livePoint, setLivePoint] = useState(null)
   const [rectStart, setRectStart] = useState(null)
   const [liveRect, setLiveRect] = useState(null)
+  const [past, setPast] = useState([])
+  const [future, setFuture] = useState([])
 
   const getPoint = useCallback((e) => {
     const canvas = canvasRef.current
@@ -92,10 +94,16 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
       ctx.lineWidth = 1.5
       ctx.stroke()
       ctx.setLineDash([])
-      pts.forEach(([x, y]) => {
+      pts.forEach(([x, y], i) => {
+        const isFirst = i === 0
+        const nearClose = isFirst && livePoint && pts.length >= 3 && (() => {
+          const dx = (livePoint[0] - inProgress[0][0]) * W
+          const dy = (livePoint[1] - inProgress[0][1]) * H
+          return Math.sqrt(dx * dx + dy * dy) < 15
+        })()
         ctx.beginPath()
-        ctx.arc(x, y, 4, 0, Math.PI * 2)
-        ctx.fillStyle = '#ffffff'
+        ctx.arc(x, y, nearClose ? 8 : 4, 0, Math.PI * 2)
+        ctx.fillStyle = nearClose ? '#2ecc71' : '#ffffff'
         ctx.fill()
       })
     }
@@ -130,16 +138,55 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
     return () => window.removeEventListener('resize', handleResize)
   }, [syncSize, redraw])
 
+  const commitChange = useCallback((newRois) => {
+    setPast(p => [...p, rois])
+    setFuture([])
+    onRoisChange(newRois)
+  }, [rois, onRoisChange])
+
+  const undo = useCallback(() => {
+    if (past.length === 0) return
+    const prev = past[past.length - 1]
+    setPast(p => p.slice(0, -1))
+    setFuture(f => [rois, ...f])
+    onRoisChange(prev)
+  }, [past, rois, onRoisChange])
+
+  const redo = useCallback(() => {
+    if (future.length === 0) return
+    const next = future[0]
+    setFuture(f => f.slice(1))
+    setPast(p => [...p, rois])
+    onRoisChange(next)
+  }, [future, rois, onRoisChange])
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setInProgress([])
+        setLivePoint(null)
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+        e.preventDefault()
+        undo()
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
+        e.preventDefault()
+        redo()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [undo, redo])
+
   useEffect(() => { redraw() }, [redraw])
 
   const makeRoi = useCallback((polygon) => {
-    onRoisChange([...rois, {
+    commitChange([...rois, {
       id: `roi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       label: `Slot ${rois.length + 1}`,
       polygon,
       color: COLORS[rois.length % COLORS.length],
     }])
-  }, [rois, onRoisChange])
+  }, [rois, commitChange])
 
   const handleClick = useCallback((e) => {
     const pt = getPoint(e)
@@ -148,9 +195,25 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
         const hit = [...rois].reverse().find(r => pointInPolygon(pt[0], pt[1], r.polygon))
         if (hit) { setSelectedId(hit.id); return }
       }
+
+      if (inProgress.length >= 3) {
+        const canvas = canvasRef.current
+        const W = canvas ? canvas.width : 1
+        const H = canvas ? canvas.height : 1
+        const [fx, fy] = inProgress[0]
+        const dx = (pt[0] - fx) * W
+        const dy = (pt[1] - fy) * H
+        if (Math.sqrt(dx * dx + dy * dy) < 15) {
+          makeRoi(inProgress)
+          setInProgress([])
+          setLivePoint(null)
+          return
+        }
+      }
+
       setInProgress(prev => [...prev, pt])
     }
-  }, [mode, inProgress, rois, getPoint])
+  }, [mode, inProgress, rois, getPoint, makeRoi])
 
   const handleDblClick = useCallback((e) => {
     if (mode !== 'polygon') return
@@ -225,7 +288,7 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
           style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
           disabled={!selectedId}
           onClick={() => {
-            onRoisChange(rois.filter(r => r.id !== selectedId))
+            commitChange(rois.filter(r => r.id !== selectedId))
             setSelectedId(null)
           }}
         >
@@ -233,7 +296,7 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
         </button>
         <button
           style={btnStyle(false)}
-          onClick={() => { onRoisChange([]); setSelectedId(null); setInProgress([]) }}
+          onClick={() => { commitChange([]); setSelectedId(null); setInProgress([]) }}
         >
           Clear All
         </button>

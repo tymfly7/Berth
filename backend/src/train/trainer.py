@@ -102,8 +102,8 @@ class Trainer:
         self.lr_patience   = lr_patience   or config.LR_SCHEDULER_PATIENCE
         self.lr_factor     = lr_factor     or config.LR_SCHEDULER_FACTOR
 
-        # Loss function: Binary Cross Entropy (model has sigmoid, so use BCE not BCEWithLogits)
-        self.criterion = nn.BCELoss()
+        # Loss function: BCEWithLogitsLoss — fuses sigmoid + BCE for numerical stability
+        self.criterion = nn.BCEWithLogitsLoss()
 
         # Optimizer: Adam with weight decay (L2 regularization)
         self.optimizer = optim.Adam(
@@ -255,7 +255,7 @@ class Trainer:
 
         for images, labels in loader:
             images = images.to(self.device)
-            labels = labels.to(self.device).unsqueeze(1)
+            labels = labels.to(self.device).float().unsqueeze(1)
 
             # Forward pass
             outputs = self.model(images)
@@ -286,7 +286,7 @@ class Trainer:
 
         for images, labels in loader:
             images = images.to(self.device)
-            labels = labels.to(self.device).unsqueeze(1)
+            labels = labels.to(self.device).float().unsqueeze(1)
 
             outputs = self.model(images)
             loss = self.criterion(outputs, labels)
