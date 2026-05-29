@@ -39,7 +39,7 @@
 .metrics-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 10px;
 }
 
 /* ── Section title ─────────────────────── */

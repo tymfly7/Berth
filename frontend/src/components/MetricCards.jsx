@@ -1,35 +1,43 @@
 const cardStyle = {
-  padding: '20px',
+  padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
-  gap: '8px',
+  gap: '6px',
   position: 'relative',
   overflow: 'hidden',
 }
 
 const iconWrap = {
-  width: 40,
-  height: 40,
+  width: 30,
+  height: 30,
   borderRadius: 'var(--radius-sm)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontSize: '1.2rem',
+  fontSize: '0.95rem',
 }
 
 const bigNum = {
-  fontSize: '2rem',
+  fontSize: '1.5rem',
   fontWeight: 800,
   lineHeight: 1,
-  letterSpacing: '-1px',
+  letterSpacing: '-0.5px',
 }
 
 const label = {
-  fontSize: '0.75rem',
+  fontSize: '0.68rem',
   fontWeight: 500,
   color: 'var(--text-secondary)',
   textTransform: 'uppercase',
   letterSpacing: '0.5px',
+}
+
+function occupancyColor(pct) {
+  const p = Math.min(100, Math.max(0, pct)) / 100
+  const hue = 120 - p * 120        // 120 (green) → 0 (red)
+  const sat = 65 + p * 35          // 65% → 100%
+  const lit = 44 - p * 10          // 44% → 34% (darker = more intense)
+  return `hsl(${hue}, ${sat}%, ${lit}%)`
 }
 
 const CARDS = [
@@ -90,12 +98,7 @@ export default function MetricCards({ metrics }) {
                 className="progress-bar-fill"
                 style={{
                   width: `${metrics.occupancy_percent}%`,
-                  background:
-                    metrics.occupancy_percent > 85
-                      ? 'var(--color-occupied)'
-                      : metrics.occupancy_percent > 60
-                      ? 'var(--color-warning)'
-                      : 'var(--color-vacant)',
+                  background: occupancyColor(metrics.occupancy_percent),
                 }}
               />
             </div>

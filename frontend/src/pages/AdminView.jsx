@@ -9,7 +9,6 @@ import AnalyticsChart from '../components/AnalyticsChart'
 import ConfidenceGauge from '../components/ConfidenceGauge'
 import TrainingPanel from '../components/TrainingPanel'
 import ModelStatus from '../components/ModelStatus'
-import AlertBanner from '../components/AlertBanner'
 import RoiManager from '../components/RoiManager'
 import ServerStatus from '../components/ServerStatus'
 import CameraManager from '../components/CameraManager'
@@ -129,7 +128,6 @@ export default function AdminView() {
     <div className="app-container">
       <Header connected={connected} model={modelInfo?.active_model || 'demo'} />
       <ServerStatus />
-      <AlertBanner occupancy={metrics.occupancy_percent} />
 
       <div className="metrics-row fade-in">
         <MetricCards metrics={metrics} />

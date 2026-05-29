@@ -86,10 +86,10 @@ class ParkingCNN(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout(0.4),
             nn.Linear(256, 64),
+            nn.BatchNorm1d(64),
             nn.ReLU(inplace=True),
             nn.Dropout(0.2),
             nn.Linear(64, num_classes),
-            nn.Sigmoid(),
         )
 
     def forward(self, x):

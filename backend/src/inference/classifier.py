@@ -89,9 +89,9 @@ class ParkingClassifier:
         # Preprocess
         tensor = self.transform(image).unsqueeze(0).to(self.device)
 
-        # Inference
+        # Inference — model outputs raw logit; apply sigmoid to get probability
         output = self.model(tensor)
-        prob = output.squeeze().item()
+        prob = torch.sigmoid(output).squeeze().item()
 
         # Interpret result
         if prob > 0.5:
@@ -135,7 +135,7 @@ class ParkingClassifier:
             tensors.append(self.transform(img))
 
         batch = torch.stack(tensors).to(self.device)
-        outputs = self.model(batch).squeeze(1)
+        outputs = torch.sigmoid(self.model(batch)).squeeze(1)
 
         results = []
         for prob in outputs.cpu().numpy():

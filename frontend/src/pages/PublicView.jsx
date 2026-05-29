@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import MetricCards from '../components/MetricCards'
-import AlertBanner from '../components/AlertBanner'
 
 const API_BASE = `http://${window.location.hostname}:8000`
 
@@ -65,7 +64,6 @@ export default function PublicView() {
         </div>
       </div>
 
-      <AlertBanner occupancy={metrics.occupancy_percent} />
 
       {/* Available spots — large number */}
       <div style={{
