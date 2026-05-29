@@ -74,3 +74,51 @@
     padding: 0 12px 20px;
   }
 }
+
+/* ── Server Status Bar ─────────────────── */
+.server-status-bar {
+  height: 0;
+  overflow: hidden;
+  transition: height 0.3s ease, margin-bottom 0.3s ease;
+  margin-bottom: 0;
+}
+
+.server-status-bar--active {
+  height: 28px;
+  margin-bottom: 8px;
+}
+
+.server-status-progress {
+  height: 4px;
+  background: var(--border-color);
+  width: 100%;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.server-status-fill {
+  height: 100%;
+  background: var(--gradient-accent);
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+.server-status-fill--pulse {
+  width: 100%;
+  animation: server-status-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes server-status-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%       { opacity: 1; }
+}
+
+.server-status-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  margin-top: 3px;
+  font-family: monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
