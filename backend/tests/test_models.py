@@ -1,14 +1,10 @@
-import importlib.util
-
-import pytest
 import torch
+import pytest
 
 from src.models.cnn_scratch import ParkingCNN
-from src.models.cnn_transfer import ParkingResNet, ParkingMobileNet, ParkingMobileNetV4
+from src.models.cnn_transfer import ParkingResNet, ParkingMobileNetV4
 
 _dummy = torch.randn(1, 3, 224, 224)
-
-_timm_available = importlib.util.find_spec("timm") is not None
 
 
 # ── ParkingCNN ────────────────────────────────────────────────────────────────
@@ -25,7 +21,7 @@ def test_parkingcnn_params():
     assert ParkingCNN().count_parameters()["trainable"] > 0
 
 
-# ── ParkingResNet (resnet50) ──────────────────────────────────────────────────
+# ── ParkingResNet (ResNet50) ──────────────────────────────────────────────────
 
 def test_parkingresnet_forward():
     model = ParkingResNet(pretrained=False)
@@ -36,12 +32,19 @@ def test_parkingresnet_forward():
 
 
 def test_parkingresnet_params():
-    assert ParkingResNet(pretrained=False).count_parameters()["trainable"] > 0
+    model = ParkingResNet(pretrained=False)
+    params = model.count_parameters()
+    assert params["trainable"] > 0
+
+
+def test_parkingresnet_no_sigmoid():
+    model = ParkingResNet(pretrained=False)
+    for module in model.classifier.modules():
+        assert not isinstance(module, torch.nn.Sigmoid), "Head must not contain Sigmoid"
 
 
 # ── ParkingMobileNetV4 ────────────────────────────────────────────────────────
 
-@pytest.mark.skipif(not _timm_available, reason="timm not installed")
 def test_parkingmobilenetv4_forward():
     model = ParkingMobileNetV4(pretrained=False)
     model.eval()
@@ -50,6 +53,13 @@ def test_parkingmobilenetv4_forward():
     assert out.shape == (1, 1)
 
 
-@pytest.mark.skipif(not _timm_available, reason="timm not installed")
 def test_parkingmobilenetv4_params():
-    assert ParkingMobileNetV4(pretrained=False).count_parameters()["trainable"] > 0
+    model = ParkingMobileNetV4(pretrained=False)
+    params = model.count_parameters()
+    assert params["trainable"] > 0
+
+
+def test_parkingmobilenetv4_no_sigmoid():
+    model = ParkingMobileNetV4(pretrained=False)
+    for module in model.classifier.modules():
+        assert not isinstance(module, torch.nn.Sigmoid), "Head must not contain Sigmoid"

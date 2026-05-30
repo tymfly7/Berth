@@ -39,20 +39,25 @@ API_KEY = os.getenv("SMARTPARK_API_KEY", "")           # empty = auth disabled
 UPLOAD_RATE_LIMIT = os.getenv("SMARTPARK_UPLOAD_RATE_LIMIT", "10/minute")
 
 # ---------------------------------------------------------------------------
-# Active model  ("cnn_scratch", "resnet18", "mobilenetv2", "demo")
+# Active model  ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26", "demo")
 # ---------------------------------------------------------------------------
 ACTIVE_MODEL = os.getenv("SMARTPARK_MODEL", "demo")
 
 # ---------------------------------------------------------------------------
 # Model paths
 # ---------------------------------------------------------------------------
-CNN_SCRATCH_PATH  = MODEL_DIR / "best_cnn_scratch.pth"
-RESNET18_PATH     = MODEL_DIR / "best_resnet18.pth"
-RESNET50_PATH     = MODEL_DIR / "best_resnet50.pth"
-MOBILENET_PATH    = MODEL_DIR / "best_mobilenetv2.pth"
-MOBILENETV4_PATH  = MODEL_DIR / "best_mobilenetv4.pth"
-YOLO26_PATH       = MODEL_DIR / "best_yolo26.pt"
-CNN_INPUT_SIZE    = 128
+CNN_SCRATCH_PATH      = MODEL_DIR / "best_cnn_scratch.pth"
+RESNET18_PATH         = MODEL_DIR / "best_resnet18.pth"
+RESNET50_PATH         = MODEL_DIR / "best_resnet50.pth"
+MOBILENET_PATH        = MODEL_DIR / "best_mobilenetv2.pth"
+MOBILENETV4_PATH      = MODEL_DIR / "best_mobilenetv4.pth"
+YOLO26_PATH           = MODEL_DIR / "best_yolo26_detect.pt"
+YOLO26_CLASSIFY_PATH  = MODEL_DIR / "best_yolo26_classify.pt"
+YOLO26_DETECT_PATH    = MODEL_DIR / "best_yolo26_detect.pt"
+YOLO_DATASET_DIR         = DATA_DIR  / "yolo_detect_dataset"
+YOLO_GOPRO_DIR           = DATA_DIR  / "yolo_data" / "parking_rois_gopro"
+CLASSIFY_YOLO_DATA_DIR   = BASE_DIR  / "classify_yolo_data"
+CNN_INPUT_SIZE    = 224
 CNN_CONFIDENCE_THRESHOLD = 0.6
 
 # ---------------------------------------------------------------------------
@@ -71,8 +76,12 @@ LR_SCHEDULER_PATIENCE = 2
 LR_SCHEDULER_FACTOR  = 0.1
 NUM_WORKERS          = int(os.getenv("SMARTPARK_WORKERS", "2"))
 
-# Subset size for quick testing (0 = use full dataset)
+# Subset size for CNN models (0 = full dataset)
 SUBSET_SIZE = int(os.getenv("SMARTPARK_SUBSET", "2000"))
+
+# Smaller input size for YOLO classify — spots are pre-cropped so 64 px is
+# enough and is ~10x faster than 224 px.
+YOLO_CLASSIFY_IMG_SIZE = int(os.getenv("SMARTPARK_YOLO_CLASSIFY_IMGSZ", "64"))
 
 # ---------------------------------------------------------------------------
 # Inference / streaming
@@ -81,6 +90,9 @@ FRAME_WIDTH   = 900
 FRAME_HEIGHT  = 500
 STREAM_FPS    = 20
 JPEG_QUALITY  = 80
+
+# Live YouTube HLS URLs expire; cache resolved stream URLs for this long.
+YOUTUBE_STREAM_CACHE_TTL = int(os.getenv("SMARTPARK_YT_CACHE_TTL", "240"))  # seconds
 
 # ---------------------------------------------------------------------------
 # Alerts

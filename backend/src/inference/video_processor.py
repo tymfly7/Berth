@@ -35,6 +35,7 @@ class VideoProcessor:
         self.model_name = model_name or config.ACTIVE_MODEL
         self.camera_id = camera_id
         self._source = 0          # 0 = first webcam; str = video file path
+        self._source_type = "auto"  # auto | usb | rtsp | file | youtube
 
         self.running = False
         self._thread = None
@@ -79,37 +80,101 @@ class VideoProcessor:
         if self._thread:
             self._thread.join(timeout=3)
 
-    def set_video_source(self, source):
+    def set_video_source(self, source, source_type="auto"):
         was_running = self.running
         if was_running:
             self.stop_processing()
         self._source = source
+        self._source_type = source_type or "auto"
         if was_running:
             self.start_processing()
-        logger.info(f"Video source: {source}")
+        logger.info(f"Video source: {source} (type={self._source_type})")
 
     # ── Background loop ────────────────────────────────────────────────────
 
-    def _loop(self):
-        cap = cv2.VideoCapture(self._source)
-        if not cap.isOpened():
-            logger.error(f"Cannot open video source: {self._source}")
-            self.running = False
-            return
+    def _is_youtube(self):
+        return self._source_type == "youtube"
 
+    def _is_file(self):
+        # Explicit file type, or a bare string path under the legacy "auto" mode.
+        return self._source_type == "file" or (
+            self._source_type == "auto" and isinstance(self._source, str)
+        )
+
+    def _open_capture(self, force_refresh=False):
+        """
+        Open a cv2.VideoCapture for the current source.
+
+        For youtube sources the watch URL is resolved to a live HLS stream URL
+        first (re-resolved when force_refresh is set, since those URLs expire).
+        Returns an opened VideoCapture, or None on failure.
+        """
+        if self._is_youtube():
+            from src.cameras.youtube_resolver import (
+                resolve_stream_url, YouTubeResolveError,
+            )
+            try:
+                stream_url = resolve_stream_url(self._source, force_refresh=force_refresh)
+            except YouTubeResolveError as e:
+                logger.error(f"YouTube resolve failed for '{self._source}': {e}")
+                return None
+            cap = cv2.VideoCapture(stream_url)
+        else:
+            cap = cv2.VideoCapture(self._source)
+
+        if not cap.isOpened():
+            cap.release()
+            return None
+        return cap
+
+    def _loop(self):
+        cap = self._open_capture()
+        if cap is None:
+            logger.error(f"Cannot open video source: {self._source}")
+            if not self._is_youtube():
+                # Non-live sources don't auto-recover; give up as before.
+                self.running = False
+                return
+
+        fail_count = 0
         try:
             while self.running:
+                if cap is None:
+                    # (Re)connect — re-resolve youtube URLs which expire.
+                    cap = self._open_capture(force_refresh=True)
+                    if cap is None:
+                        logger.warning(
+                            f"Reconnect failed for {self._source}, retrying in 2s..."
+                        )
+                        time.sleep(2.0)
+                        continue
+                    logger.info(f"Reconnected to source: {self._source}")
+                    fail_count = 0
+
                 ret, raw_frame = cap.read()
                 if not ret:
-                    if isinstance(self._source, str):
+                    if self._is_file():
                         # Loop video file back to start
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        continue
+                    elif self._is_youtube():
+                        fail_count += 1
+                        if fail_count >= 5:
+                            logger.warning(
+                                "YouTube frame grabs failing — re-resolving stream URL"
+                            )
+                            cap.release()
+                            cap = None
+                            time.sleep(2.0)
+                        else:
+                            time.sleep(0.1)
                         continue
                     else:
                         logger.warning("Camera frame grab failed, retrying...")
                         time.sleep(0.1)
                         continue
 
+                fail_count = 0
                 frame = cv2.resize(raw_frame, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
                 result = self._detector.detect(frame, camera_id=self.camera_id)
                 annotated = self._detector.draw_overlay(frame.copy(), result)
@@ -137,7 +202,8 @@ class VideoProcessor:
 
                 time.sleep(1.0 / config.STREAM_FPS)
         finally:
-            cap.release()
+            if cap is not None:
+                cap.release()
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
