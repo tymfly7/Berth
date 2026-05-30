@@ -416,7 +416,7 @@ def use_demo():
 @app.post("/api/use-model/{model_name}", dependencies=[Depends(verify_api_key)])
 def use_model(model_name: str):
     global _active_mode
-    valid = ["cnn_scratch", "resnet18", "resnet50", "mobilenetv2", "mobilenetv4", "demo"]
+    valid = ["cnn_scratch", "resnet18", "resnet50", "mobilenetv2", "mobilenetv4", "yolo26", "demo"]
     if model_name not in valid:
         raise HTTPException(400, f"Invalid model. Choose from: {valid}")
     _reset_processor()
@@ -424,6 +424,28 @@ def use_model(model_name: str):
     proc = _get_processor()
     proc.start_processing()
     return {"message": f"Switched to {model_name}"}
+
+@app.post("/api/test-model/{model_name}", dependencies=[Depends(verify_api_key)])
+def test_model(model_name: str):
+    if model_name == "yolo26":
+        raise HTTPException(400, "YOLO26 uses a detection interface — per-patch accuracy testing is not supported.")
+    testable = ["cnn_scratch", "resnet50", "resnet18", "mobilenetv2", "mobilenetv4"]
+    if model_name not in testable:
+        raise HTTPException(400, f"Unknown model '{model_name}'. Testable: {testable}")
+    try:
+        import torch
+        from src.models.model_factory import load_model
+        from src.data_prep.preprocessor import prepare_dataset
+        from src.eval.evaluator import evaluate_model
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = load_model(model_name, device=device)
+        _, _, test_loader = prepare_dataset()
+        metrics = evaluate_model(model, test_loader, device=device)
+        return {"model": model_name, **metrics}
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Test failed: {e}")
 
 @app.get("/api/model/info", dependencies=[Depends(verify_api_key)])
 def model_info():
@@ -445,10 +467,10 @@ def model_info():
         "active_model": _active_mode,
         "available_models": {
             "cnn_scratch":  config.CNN_SCRATCH_PATH.exists(),
-            "resnet18":     config.RESNET18_PATH.exists(),
             "resnet50":     config.RESNET50_PATH.exists(),
             "mobilenetv2":  config.MOBILENET_PATH.exists(),
             "mobilenetv4":  config.MOBILENETV4_PATH.exists(),
+            "yolo26":       config.YOLO26_PATH.exists(),
         },
         "dataset_ready": dataset_ready,
         "dataset_count": dataset_count,
@@ -461,6 +483,8 @@ def model_info():
 @app.post("/api/train/start", dependencies=[Depends(verify_api_key)])
 def start_training(request: Request, model_name: str = "cnn_scratch",
                    compare_all: bool = False):
+    if model_name == "yolo26":
+        raise HTTPException(400, "YOLO26 requires the Ultralytics CLI training pipeline. Use: yolo train data=parking.yaml model=yolo26n.pt")
     from src.train.train_manager import TrainManager
     mgr = TrainManager()
     if mgr.is_training():

@@ -25,11 +25,7 @@ import config
 logger = logging.getLogger("smartpark.downloader")
 
 
-def organize_pklot(
-    source_root=None,
-    target_root=None,
-    max_per_class=0,
-):
+def organize_pklot(source_root=None, target_root=None, max_per_class=0,):
     """
     Organize PKLot dataset into a flat occupied/vacant structure.
 

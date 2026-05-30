@@ -1,5 +1,13 @@
 import { useState, useRef } from 'react'
 
+const MODELS = [
+  { id: 'cnn_scratch', label: 'CNN Scratch'  },
+  { id: 'resnet50',    label: 'ResNet-50'    },
+  { id: 'mobilenetv2', label: 'MobileNetV2'  },
+  { id: 'mobilenetv4', label: 'MobileNetV4'  },
+  { id: 'yolo26',      label: 'YOLO26'       },
+]
+
 const style = {
   section: { padding: '20px' },
   row: {
@@ -12,6 +20,16 @@ const style = {
     height: 1,
     background: 'var(--border-color)',
     margin: '16px 0',
+  },
+  select: {
+    flex: 1,
+    background: 'var(--bg-secondary)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--border-color)',
+    borderRadius: 'var(--radius-sm)',
+    padding: '4px 8px',
+    fontSize: '0.8rem',
+    cursor: 'pointer',
   },
   uploadZone: {
     border: '2px dashed var(--border-color)',
@@ -51,6 +69,7 @@ export default function ControlPanel({ apiAction, apiBase }) {
   const [dragging, setDragging] = useState(false)
   const [resultImage, setResultImage] = useState(null)
   const [resultData, setResultData] = useState(null)
+  const [selectedModel, setSelectedModel] = useState('cnn_scratch')
   const fileRef = useRef(null)
 
   const handleAction = async (endpoint, label) => {
@@ -140,18 +159,24 @@ export default function ControlPanel({ apiAction, apiBase }) {
 
       {/* Model selection */}
       <div className="section-title" style={{ marginTop: 4 }}>Model</div>
-      <div style={style.row}>
-        {['cnn_scratch', 'resnet18', 'mobilenetv2'].map((m) => (
-          <div key={m} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => handleAction(`/api/use-model/${m}`, `Loading ${m}`)}>
-              🧠 {m}
-            </button>
-            <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.72rem', padding: '4px 8px' }}
-              onClick={() => handleAction(`/api/test-model/${m}`, `Testing ${m}`)}>
-              Test
-            </button>
-          </div>
-        ))}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+        <select
+          value={selectedModel}
+          onChange={e => setSelectedModel(e.target.value)}
+          style={style.select}
+        >
+          {MODELS.map(({ id, label }) => (
+            <option key={id} value={id}>{label}</option>
+          ))}
+        </select>
+        <button className="btn btn-ghost btn-sm"
+          onClick={() => handleAction(`/api/use-model/${selectedModel}`, `Loading ${MODELS.find(m => m.id === selectedModel)?.label}`)}>
+          🧠 Load
+        </button>
+        <button className="btn btn-ghost btn-sm"
+          onClick={() => handleAction(`/api/test-model/${selectedModel}`, `Testing ${MODELS.find(m => m.id === selectedModel)?.label}`)}>
+          Test
+        </button>
       </div>
 
       <div style={style.divider} />
@@ -190,18 +215,3 @@ export default function ControlPanel({ apiAction, apiBase }) {
         <div style={{ marginTop: 12 }}>
           <img
             src={`data:image/jpeg;base64,${resultImage}`}
-            alt="Analyzed parking lot"
-            style={style.resultImg}
-          />
-          {resultData && (
-            <div style={style.resultStats}>
-              <span className="badge badge-vacant">🟢 {resultData.available} Available</span>
-              <span className="badge badge-occupied">🔴 {resultData.occupied} Occupied</span>
-              <span className="badge badge-info">📊 {resultData.occupancy_percent}%</span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}

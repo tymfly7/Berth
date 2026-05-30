@@ -51,6 +51,7 @@ RESNET18_PATH     = MODEL_DIR / "best_resnet18.pth"
 RESNET50_PATH     = MODEL_DIR / "best_resnet50.pth"
 MOBILENET_PATH    = MODEL_DIR / "best_mobilenetv2.pth"
 MOBILENETV4_PATH  = MODEL_DIR / "best_mobilenetv4.pth"
+YOLO26_PATH       = MODEL_DIR / "best_yolo26.pt"
 CNN_INPUT_SIZE    = 128
 CNN_CONFIDENCE_THRESHOLD = 0.6
 

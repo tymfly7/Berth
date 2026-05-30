@@ -30,9 +30,11 @@ export default function ModelStatus({ modelInfo, apiAction }) {
   }
 
   const models = [
-    { name: 'cnn_scratch', label: 'CNN (Scratch)', available: modelInfo.available_models?.cnn_scratch },
-    { name: 'resnet18', label: 'ResNet18', available: modelInfo.available_models?.resnet18 },
-    { name: 'mobilenetv2', label: 'MobileNetV2', available: modelInfo.available_models?.mobilenetv2 },
+    { name: 'cnn_scratch',  label: 'CNN Scratch',  available: modelInfo.available_models?.cnn_scratch  },
+    { name: 'resnet50',     label: 'ResNet-50',    available: modelInfo.available_models?.resnet50     },
+    { name: 'mobilenetv2',  label: 'MobileNetV2',  available: modelInfo.available_models?.mobilenetv2  },
+    { name: 'mobilenetv4',  label: 'MobileNetV4',  available: modelInfo.available_models?.mobilenetv4  },
+    { name: 'yolo26',       label: 'YOLO26',       available: modelInfo.available_models?.yolo26       },
   ]
 
   return (

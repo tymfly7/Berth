@@ -1,8 +1,26 @@
 import { useState, useEffect, useRef } from 'react'
 
+const MODELS = [
+  { id: 'cnn_scratch', label: 'CNN Scratch'  },
+  { id: 'resnet50',    label: 'ResNet-50'    },
+  { id: 'mobilenetv2', label: 'MobileNetV2'  },
+  { id: 'mobilenetv4', label: 'MobileNetV4'  },
+  { id: 'yolo26',      label: 'YOLO26'       },
+]
+
 const style = {
   container: { padding: '20px' },
   row: { display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
+  select: {
+    flex: 1,
+    background: 'var(--bg-secondary)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--border-color)',
+    borderRadius: 'var(--radius-sm)',
+    padding: '4px 8px',
+    fontSize: '0.8rem',
+    cursor: 'pointer',
+  },
   logBox: {
     background: 'rgba(0,0,0,0.3)',
     borderRadius: 'var(--radius-sm)',
@@ -110,6 +128,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState(null)
   const [uploadError, setUploadError] = useState(null)
+  const [selectedModel, setSelectedModel] = useState('cnn_scratch')
   const msgTimer = useRef(null)
 
   const pollStatus = async () => {
@@ -133,6 +152,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
   }, [])
 
   const startTraining = async (modelName, compareAll = false) => {
+    setTraining({ status: 'training', model_name: modelName })
     const endpoint = `/api/train/start?model_name=${modelName}&compare_all=${compareAll}`
     await apiAction(endpoint)
     pollStatus()
@@ -239,18 +259,23 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
       </div>
 
       {/* ── Training controls ────────────────────────────── */}
-      <div style={style.row}>
-        <button className="btn btn-primary btn-sm" disabled={isActive}
-                onClick={() => startTraining('cnn_scratch')}>
-          Train CNN
-        </button>
-        <button className="btn btn-ghost btn-sm" disabled={isActive}
-                onClick={() => startTraining('resnet18')}>
-          Train ResNet
-        </button>
-        <button className="btn btn-ghost btn-sm" disabled={isActive}
-                onClick={() => startTraining('mobilenetv2')}>
-          Train MobileNet
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <select
+          value={selectedModel}
+          onChange={e => setSelectedModel(e.target.value)}
+          style={style.select}
+          disabled={isActive}
+        >
+          {MODELS.map(({ id, label }) => (
+            <option key={id} value={id}>{label}</option>
+          ))}
+        </select>
+        <button
+          className={`btn btn-sm ${(isActive ? training?.model_name : modelInfo?.active_model) === selectedModel ? 'btn-primary' : 'btn-ghost'}`}
+          disabled={isActive}
+          onClick={() => startTraining(selectedModel)}
+        >
+          🏋️ Train
         </button>
         <button className="btn btn-success btn-sm" disabled={isActive}
                 onClick={() => startTraining('cnn_scratch', true)}>
@@ -290,22 +315,4 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
                 <span>{training.elapsed}s</span>
               </div>
 
-              <div className="progress-bar" style={{ marginTop: 8 }}>
-                <div
-                  className="progress-bar-fill"
-                  style={{
-                    width: `${training.total_epochs ? (training.epoch / training.total_epochs * 100) : 0}%`,
-                    background: 'var(--gradient-accent)',
-                  }}
-                />
-              </div>
-            </>
-          )}
-          <div style={{ ...style.logBox, marginTop: 8 }}>
-            {training.message || 'Waiting...'}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
+   

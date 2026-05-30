@@ -64,6 +64,7 @@ def get_model_path(name):
         "resnet18":     config.RESNET18_PATH,
         "mobilenetv2":  config.MOBILENET_PATH,
         "mobilenetv4":  config.MOBILENETV4_PATH,
+        "yolo26":       config.YOLO26_PATH,
     }
     return paths.get(name)
 
