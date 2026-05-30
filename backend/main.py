@@ -9,7 +9,7 @@ Features:
   - API key auth (optional via SMARTPARK_API_KEY)
   - Rate limiting on uploads
   - Training management endpoints
-  - Model switching (demo / cnn_scratch / resnet18 / mobilenetv2)
+  - Model switching (demo / cnn_scratch / resnet50 / mobilenetv4)
   - Demo mode fallback when no model/camera available
   - Multi-camera registry with persistent activation
 """
@@ -26,7 +26,7 @@ import threading
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 import cv2
 import numpy as np
 import uvicorn
@@ -125,14 +125,25 @@ def _get_processor():
     with _processor_lock:
         if _processor is None:
             mode = _active_mode
-            if mode in ("cnn_scratch", "resnet18", "mobilenetv2"):
+            supported = ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify")
+            if mode in supported:
                 try:
                     _processor = VideoProcessor(model_name=mode)
                     logger.info(f"{mode} VideoProcessor initialised")
                 except Exception as e:
-                    logger.warning(f"{mode} unavailable ({e}), falling back to demo")
+                    logger.warning(
+                        f"WARN: {mode} VideoProcessor failed ({e}) — falling back to demo. "
+                        "Train the model first or check the model file."
+                    )
                     mode = "demo"
                     _active_mode = "demo"
+            elif mode != "demo":
+                logger.warning(
+                    f"WARN: model '{mode}' is not a supported VideoProcessor model "
+                    f"{supported} — falling back to demo."
+                )
+                mode = "demo"
+                _active_mode = "demo"
 
             if mode == "demo" or _processor is None:
                 from src.inference.demo_processor import DemoProcessor
@@ -153,13 +164,13 @@ def _reset_processor():
 
 def _resolve_model_name():
     """Resolve active model name for prediction — if 'demo', find best trained model."""
-    if _active_mode in ("cnn_scratch", "resnet18", "mobilenetv2"):
+    if _active_mode in ("cnn_scratch", "resnet50", "mobilenetv4"):
         return _active_mode
     # In demo mode, try to find a trained model
     for name, path in [
         ("cnn_scratch", config.CNN_SCRATCH_PATH),
-        ("resnet18", config.RESNET18_PATH),
-        ("mobilenetv2", config.MOBILENET_PATH),
+        ("resnet50", config.RESNET50_PATH),
+        ("mobilenetv4", config.MOBILENETV4_PATH),
     ]:
         if path.exists():
             return name
@@ -358,6 +369,246 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
     finally:
         _finish_op(op_id)
 
+
+@app.post("/api/analyze-roi", dependencies=[Depends(verify_api_key)])
+@limiter.limit(config.UPLOAD_RATE_LIMIT)
+async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id: str = "default"):
+    """
+    Analyze a parking lot image using saved ROI polygons for the given camera.
+    Each ROI polygon is classified as occupied/vacant using the active model.
+    """
+    op_id = _register_op("roi_analysis", "Analyzing with ROIs…")
+    try:
+        allowed = (".jpg", ".jpeg", ".png", ".bmp")
+        if not file.filename.lower().endswith(allowed):
+            raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
+
+        content = await file.read()
+        nparr = np.frombuffer(content, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            raise HTTPException(400, "Could not decode image")
+
+        rois = RoiStore.get_rois(camera_id)
+        if not rois:
+            raise HTTPException(400, "No ROIs saved for this camera. Draw and save ROIs first.")
+
+        model_name = _resolve_model_name()
+        if model_name is None:
+            raise HTTPException(400, "No trained model available. Train a model first.")
+        try:
+            from src.inference.classifier import ParkingClassifier
+            clf = ParkingClassifier(model_name=model_name)
+            clf.load()
+            if not clf.is_loaded():
+                raise Exception(f"Model '{model_name}' not loaded.")
+        except Exception as e:
+            raise HTTPException(400, str(e))
+
+        h, w = frame.shape[:2]
+        annotated = frame.copy()
+        slots = []
+        available = 0
+        occupied = 0
+        total_conf = 0.0
+
+        for roi in rois:
+            polygon = roi.get("polygon", [])
+            if len(polygon) < 3:
+                continue
+
+            xs = [max(0, min(w - 1, int(p[0] * w))) for p in polygon]
+            ys = [max(0, min(h - 1, int(p[1] * h))) for p in polygon]
+            x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            crop = frame[y1:y2, x1:x2]
+            pred = clf.predict_batch([crop])[0]
+            status = pred["status"]
+            conf = pred["confidence"]
+            total_conf += conf
+
+            color = (0, 200, 0) if status == "vacant" else (0, 0, 220)
+            overlay_color = (0, 255, 0) if status == "vacant" else (0, 0, 255)
+            if status == "vacant":
+                available += 1
+            else:
+                occupied += 1
+
+            pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in polygon], np.int32)
+            overlay = annotated.copy()
+            cv2.fillPoly(overlay, [pts], overlay_color)
+            cv2.addWeighted(overlay, 0.3, annotated, 0.7, 0, annotated)
+            cv2.polylines(annotated, [pts], True, color, 2)
+
+            cx, cy = sum(xs) // len(xs), sum(ys) // len(ys)
+            label_text = f"{roi.get('label', 'Slot')} {status[:3].upper()} {conf:.0%}"
+            cv2.putText(annotated, label_text, (cx - 20, cy),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+
+            slots.append({
+                "id": roi.get("id"),
+                "label": roi.get("label", "Slot"),
+                "status": status,
+                "confidence": round(conf, 4),
+            })
+
+        total = len(slots)
+        occ_pct = round(100.0 * occupied / total, 1) if total > 0 else 0
+        avg_conf = round(total_conf / total, 4) if total > 0 else 0
+
+        import base64
+        _, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        img_b64 = base64.b64encode(buffer).decode("utf-8")
+
+        return {
+            "type": "roi_analysis",
+            "model": _active_mode,
+            "total": total,
+            "available": available,
+            "occupied": occupied,
+            "occupancy_percent": occ_pct,
+            "avg_confidence": avg_conf,
+            "slots": slots,
+            "annotated_image": img_b64,
+        }
+    finally:
+        _finish_op(op_id)
+
+
+# ── Analyze misparked vehicles (YOLO + ROI geometry) ────
+@app.post("/api/analyze-misparked", dependencies=[Depends(verify_api_key)])
+@limiter.limit(config.UPLOAD_RATE_LIMIT)
+async def analyze_misparked(
+    request: Request,
+    file: UploadFile = File(...),
+    camera_id: str = "default",
+):
+    """
+    Detect misparked vehicles in an uploaded parking lot image.
+
+    Runs YOLO26 to locate all vehicles, loads the camera's ROI polygons,
+    then classifies each vehicle as ok / straddling / outside_markings.
+
+    Returns JSON with per-slot occupancy, a misparked-vehicle list, a
+    misparked count (int) for the metrics shape, and a base64-encoded
+    annotated image with misparked cars highlighted in orange.
+    """
+    op_id = _register_op("misparked_analysis", "Detecting misparked vehicles…")
+    try:
+        allowed = (".jpg", ".jpeg", ".png", ".bmp")
+        if not file.filename.lower().endswith(allowed):
+            raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
+
+        content = await file.read()
+        nparr = np.frombuffer(content, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if frame is None:
+            raise HTTPException(400, "Could not decode image")
+
+        rois = RoiStore.get_rois(camera_id)
+        if not rois:
+            raise HTTPException(
+                400,
+                f"No ROIs saved for camera '{camera_id}'. Draw and save ROIs first.",
+            )
+
+        # Load YOLO26 detector — surface a clear error if weights are missing
+        try:
+            from src.models.yolo_detector import ParkingYOLO26
+            detector = ParkingYOLO26(str(config.YOLO26_PATH))
+        except FileNotFoundError:
+            raise HTTPException(
+                400,
+                f"YOLO26 model weights not found at '{config.YOLO26_PATH}'. "
+                "Train a YOLO26 detector first via the Ultralytics CLI "
+                "(yolo train data=parking.yaml model=yolo26n.pt) and save "
+                "the best.pt as models/best_yolo26.pt.",
+            )
+        except RuntimeError as exc:
+            raise HTTPException(400, str(exc))
+
+        h, w = frame.shape[:2]
+        detections = detector.predict_frame(frame)
+        cars = [{"bbox": d["bbox"], "confidence": d["confidence"]} for d in detections]
+
+        from src.inference.parking_geometry import aggregate_lot, classify_vehicle_parking
+        lot = aggregate_lot(cars, rois, w, h)
+
+        # ── Annotate image ────────────────────────────────────────────────────
+        annotated = frame.copy()
+
+        # Draw slot outlines colour-coded by occupancy
+        for slot in lot["slots"]:
+            roi = next((r for r in rois if r.get("id") == slot["id"]), None)
+            if roi is None:
+                continue
+            polygon = roi.get("polygon", [])
+            if len(polygon) < 3:
+                continue
+            pts = np.array(
+                [[int(p[0] * w), int(p[1] * h)] for p in polygon], np.int32
+            )
+            slot_color = (0, 200, 0) if slot["status"] == "vacant" else (0, 0, 200)
+            overlay = annotated.copy()
+            cv2.fillPoly(overlay, [pts], slot_color)
+            cv2.addWeighted(overlay, 0.20, annotated, 0.80, 0, annotated)
+            cv2.polylines(annotated, [pts], True, slot_color, 2)
+            xs = [int(p[0] * w) for p in polygon]
+            ys = [int(p[1] * h) for p in polygon]
+            cx, cy = sum(xs) // len(xs), sum(ys) // len(ys)
+            cv2.putText(
+                annotated,
+                slot.get("label", ""),
+                (cx - 10, cy),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.4,
+                (255, 255, 255),
+                1,
+            )
+
+        # Draw each detected car — orange for misparked, light green for ok
+        for car in cars:
+            clf = classify_vehicle_parking(car["bbox"], rois, w, h)
+            x1, y1, x2, y2 = (int(v) for v in car["bbox"])
+            if clf["status"] == "misparked":
+                color = (0, 165, 255)   # BGR orange
+                reason_short = "STRADDLE" if clf["reason"] == "straddling" else "OUTSIDE"
+                label = f"MISPK {reason_short}"
+            else:
+                color = (144, 238, 144)  # light green
+                label = f"OK {car['confidence']:.0%}"
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(
+                annotated,
+                label,
+                (x1 + 2, max(y1 - 4, 14)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                color,
+                1,
+            )
+
+        import base64
+        _, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        img_b64 = base64.b64encode(buffer).decode("utf-8")
+
+        return {
+            "type": "misparked_analysis",
+            "camera_id": camera_id,
+            "total": lot["total"],
+            "available": lot["available"],
+            "occupied": lot["occupied"],
+            "misparked": lot["misparked_count"],        # int for metrics shape
+            "misparked_vehicles": lot["misparked"],     # detailed list
+            "slots": lot["slots"],
+            "annotated_image": img_b64,
+        }
+    finally:
+        _finish_op(op_id)
+
+
 # ── Public metrics (no auth) ─────────────────────────────
 @app.get("/api/public/metrics")
 def get_public_metrics():
@@ -416,7 +667,7 @@ def use_demo():
 @app.post("/api/use-model/{model_name}", dependencies=[Depends(verify_api_key)])
 def use_model(model_name: str):
     global _active_mode
-    valid = ["cnn_scratch", "resnet18", "resnet50", "mobilenetv2", "mobilenetv4", "yolo26", "demo"]
+    valid = ["cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26", "demo"]
     if model_name not in valid:
         raise HTTPException(400, f"Invalid model. Choose from: {valid}")
     _reset_processor()
@@ -427,9 +678,9 @@ def use_model(model_name: str):
 
 @app.post("/api/test-model/{model_name}", dependencies=[Depends(verify_api_key)])
 def test_model(model_name: str):
-    if model_name == "yolo26":
-        raise HTTPException(400, "YOLO26 uses a detection interface — per-patch accuracy testing is not supported.")
-    testable = ["cnn_scratch", "resnet50", "resnet18", "mobilenetv2", "mobilenetv4"]
+    if model_name in ("yolo26", "yolo26_detect"):
+        raise HTTPException(400, "YOLO26 detect uses a detection interface — per-patch accuracy testing is not supported.")
+    testable = ["cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify"]
     if model_name not in testable:
         raise HTTPException(400, f"Unknown model '{model_name}'. Testable: {testable}")
     try:
@@ -439,7 +690,8 @@ def test_model(model_name: str):
         from src.eval.evaluator import evaluate_model
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = load_model(model_name, device=device)
-        _, _, test_loader = prepare_dataset()
+        data = prepare_dataset()
+        test_loader = data["test_loader"]
         metrics = evaluate_model(model, test_loader, device=device)
         return {"model": model_name, **metrics}
     except FileNotFoundError as e:
@@ -466,11 +718,11 @@ def model_info():
     return {
         "active_model": _active_mode,
         "available_models": {
-            "cnn_scratch":  config.CNN_SCRATCH_PATH.exists(),
-            "resnet50":     config.RESNET50_PATH.exists(),
-            "mobilenetv2":  config.MOBILENET_PATH.exists(),
-            "mobilenetv4":  config.MOBILENETV4_PATH.exists(),
-            "yolo26":       config.YOLO26_PATH.exists(),
+            "cnn_scratch":     config.CNN_SCRATCH_PATH.exists(),
+            "resnet50":        config.RESNET50_PATH.exists(),
+            "mobilenetv4":     config.MOBILENETV4_PATH.exists(),
+            "yolo26_classify": config.YOLO26_CLASSIFY_PATH.exists(),
+            "yolo26":          config.YOLO26_DETECT_PATH.exists(),
         },
         "dataset_ready": dataset_ready,
         "dataset_count": dataset_count,
@@ -483,16 +735,21 @@ def model_info():
 @app.post("/api/train/start", dependencies=[Depends(verify_api_key)])
 def start_training(request: Request, model_name: str = "cnn_scratch",
                    compare_all: bool = False):
-    if model_name == "yolo26":
-        raise HTTPException(400, "YOLO26 requires the Ultralytics CLI training pipeline. Use: yolo train data=parking.yaml model=yolo26n.pt")
+    valid_models = ["cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26_detect"]
+    if model_name not in valid_models:
+        raise HTTPException(400, f"Unknown model '{model_name}'. Choose from: {valid_models}")
     from src.train.train_manager import TrainManager
     mgr = TrainManager()
     if mgr.is_training():
         raise HTTPException(409, "Training already in progress")
-    occ = config.DATA_DIR / "occupied"
-    vac = config.DATA_DIR / "vacant"
-    if not occ.exists() or not vac.exists():
-        raise HTTPException(400, "Dataset not found. Prepare it first.")
+    # YOLO detect uses the gopro annotated dataset, not the occupied/vacant folders
+    if model_name not in ("yolo26_classify", "yolo26_detect"):
+        occ = config.DATA_DIR / "occupied"
+        vac = config.DATA_DIR / "vacant"
+        if not occ.exists() or not vac.exists():
+            raise HTTPException(400, "Dataset not found. Prepare it first.")
+    if model_name == "yolo26_detect" and not config.YOLO_GOPRO_DIR.exists():
+        raise HTTPException(400, "Gopro annotated dataset not found. Expected: backend/data/yolo_data/parking_rois_gopro/")
     result = mgr.start_training(model_name, compare_all=compare_all)
     op_id = _register_op("training", f"Training {model_name}…")
 
@@ -601,6 +858,76 @@ def delete_roi(camera_id: str, roi_id: str):
         raise HTTPException(404, f"ROI '{roi_id}' not found")
     return {"deleted": roi_id}
 
+
+@app.post("/api/roi/{camera_id}/propose", dependencies=[Depends(verify_api_key)])
+@limiter.limit(config.UPLOAD_RATE_LIMIT)
+async def propose_rois(
+    request: Request,
+    camera_id: str,
+    use_line_detection: bool = False,
+    file: Optional[UploadFile] = File(default=None),
+):
+    """
+    Auto-detect candidate parking-spot ROIs from an image.
+
+    Accepts an uploaded image (multipart form field 'file'), or falls back to
+    the saved snapshot for this camera if no file is provided.
+
+    Returns PROPOSED ROIs — NOT persisted. The admin must accept proposals and
+    save them via POST /api/roi/{camera_id} before they are stored.
+
+    Query params:
+      use_line_detection (bool): Snap candidate boxes to painted line markings
+                                  via Canny + HoughLinesP (default: false).
+
+    Honest constraints:
+      Proposals reliably cover OCCUPIED spots. Empty spots are only detected
+      when use_line_detection=True and markings are clearly visible. Always
+      review proposals before accepting them.
+    """
+    if file is not None:
+        allowed = (".jpg", ".jpeg", ".png", ".bmp")
+        if not file.filename.lower().endswith(allowed):
+            raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
+        content = await file.read()
+    else:
+        snap_path = RoiStore.get_snapshot_path(camera_id)
+        if snap_path is None:
+            raise HTTPException(
+                400,
+                "No image uploaded and no snapshot found for this camera. "
+                "Upload a reference image first.",
+            )
+        with open(snap_path, "rb") as fh:
+            content = fh.read()
+
+    nparr = np.frombuffer(content, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(400, "Could not decode image")
+
+    try:
+        from src.inference.roi_proposer import propose_from_frames
+        proposals = propose_from_frames(
+            frames=[frame],
+            camera_id=camera_id,
+            use_line_detection=use_line_detection,
+        )
+    except Exception as exc:
+        logger.error(f"ROI proposal failed for camera '{camera_id}': {exc}")
+        raise HTTPException(500, f"Proposal failed: {exc}")
+
+    return {
+        "camera_id": camera_id,
+        "proposals": proposals,
+        "count": len(proposals),
+        "warning": (
+            "Proposals are based on vehicle detections (occupied spots). "
+            "Empty spots may be missed. Review and edit all proposals before saving."
+        ),
+    }
+
+
 # ── Camera registry endpoints ────────────────────────────
 
 @app.get("/api/cameras")
@@ -619,8 +946,8 @@ async def add_camera(request: Request):
         raise HTTPException(400, "name is required")
     if not source:
         raise HTTPException(400, "source is required")
-    if type_ not in ("usb", "rtsp", "file"):
-        raise HTTPException(400, "type must be usb, rtsp, or file")
+    if type_ not in ("usb", "rtsp", "file", "youtube"):
+        raise HTTPException(400, "type must be usb, rtsp, file, or youtube")
 
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "cam"
     cam_id = f"{slug}-{uuid.uuid4().hex[:6]}"

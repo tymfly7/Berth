@@ -13,24 +13,24 @@ print("=" * 60)
 print("\n[1] Testing model architectures...")
 import torch
 from src.models.cnn_scratch import ParkingCNN
-from src.models.cnn_transfer import ParkingResNet, ParkingMobileNet
+from src.models.cnn_transfer import ParkingResNet, ParkingMobileNetV4
 
 dummy = torch.randn(2, 3, 224, 224)
 
 cnn = ParkingCNN()
 p = cnn.count_parameters()
 out = cnn(dummy)
-print(f"    CNN Scratch:  {p['total']:,} params, output={out.shape}")
+print(f"    CNN Scratch:    {p['total']:,} params, output={out.shape}")
 
-resnet = ParkingResNet()
+resnet = ParkingResNet(pretrained=False)
 p = resnet.count_parameters()
 out = resnet(dummy)
-print(f"    ResNet18:     {p['total']:,} params ({p['trainable']:,} trainable), output={out.shape}")
+print(f"    ResNet50:       {p['total']:,} params ({p['trainable']:,} trainable), output={out.shape}")
 
-mobile = ParkingMobileNet()
-p = mobile.count_parameters()
-out = mobile(dummy)
-print(f"    MobileNetV2:  {p['total']:,} params ({p['trainable']:,} trainable), output={out.shape}")
+mobilev4 = ParkingMobileNetV4(pretrained=False)
+p = mobilev4.count_parameters()
+out = mobilev4(dummy)
+print(f"    MobileNetV4:    {p['total']:,} params ({p['trainable']:,} trainable), output={out.shape}")
 print("    [OK] All models work!")
 
 # 2. Test model factory
@@ -39,7 +39,7 @@ from src.models.model_factory import create_model, list_available_models
 models = list_available_models()
 print(f"    Available models: {models}")
 for name in models:
-    m = create_model(name)
+    m = create_model(name, pretrained=False)
     print(f"    Created: {name} [OK]")
 
 # 3. Test demo processor

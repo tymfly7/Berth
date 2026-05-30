@@ -58,8 +58,9 @@ def evaluate_model(model, test_loader, device=None):
         images = images.to(device)
         outputs = model(images)
 
-        probs = outputs.squeeze().cpu().numpy()
-        preds = (outputs.squeeze() > 0.5).float().cpu().numpy()
+        probs_t = torch.sigmoid(outputs).squeeze()
+        probs = probs_t.cpu().numpy()
+        preds = (probs_t > 0.5).float().cpu().numpy()
         labels_np = labels.cpu().numpy()
 
         # Handle single-element batches

@@ -15,6 +15,9 @@ slowapi>=0.1.9
 Pillow>=10.0.0
 opencv-python>=4.9.0
 
+# YouTube live-stream resolution (resolve watch URL -> direct HLS stream)
+yt-dlp>=2024.1.0
+
 # Metrics & plotting
 scikit-learn>=1.4.0
 matplotlib>=3.8.0

@@ -52,6 +52,7 @@ class CameraRegistry:
                 return int(src)
             except (ValueError, TypeError):
                 return 0
+        # youtube: return the raw watch URL — resolution happens in VideoProcessor.
         return src
 
     def _restore_active(self):
@@ -111,7 +112,7 @@ class CameraRegistry:
                 mn = model_name or config.ACTIVE_MODEL
                 roi_id = cam.get("roi_camera_id") or id
                 proc = VideoProcessor(model_name=mn, camera_id=roi_id)
-                proc.set_video_source(self._resolve_source(cam))
+                proc.set_video_source(self._resolve_source(cam), source_type=cam["type"])
                 proc.start_processing()
                 self._processors[id] = proc
                 self._cameras[id]["active"] = True

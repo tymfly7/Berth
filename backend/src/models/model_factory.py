@@ -4,23 +4,16 @@ Model Factory — Create Models by Name
 Provides a unified interface to instantiate any supported model architecture.
 """
 
-import sys
-import warnings
-from pathlib import Path
-
 import torch
 import config
 from src.models.cnn_scratch import ParkingCNN
-from src.models.cnn_transfer import ParkingResNet, ParkingMobileNet, ParkingMobileNetV4
+from src.models.cnn_transfer import ParkingResNet, ParkingMobileNetV4
 
 
-# Registry of all available models
 MODEL_REGISTRY = {
-    "cnn_scratch":  ParkingCNN,
-    "resnet50":     ParkingResNet,
-    "resnet18":     ParkingResNet,   # deprecated alias — use 'resnet50'
-    "mobilenetv2":  ParkingMobileNet,
-    "mobilenetv4":  ParkingMobileNetV4,
+    "cnn_scratch": ParkingCNN,
+    "resnet50": ParkingResNet,
+    "mobilenetv4": ParkingMobileNetV4,
 }
 
 
@@ -29,8 +22,7 @@ def create_model(name, **kwargs):
     Create a model by name.
 
     Args:
-        name (str): Model name — one of 'cnn_scratch', 'resnet50', 'mobilenetv2',
-                    'mobilenetv4'. 'resnet18' is a deprecated alias for 'resnet50'.
+        name (str): Model name — one of 'cnn_scratch', 'resnet50', 'mobilenetv4'.
         **kwargs: Additional arguments passed to the model constructor
 
     Returns:
@@ -39,32 +31,19 @@ def create_model(name, **kwargs):
     Raises:
         ValueError: If model name is not recognized
     """
-    if name == "resnet18":
-        warnings.warn(
-            "resnet18 key is deprecated, use resnet50",
-            DeprecationWarning,
-            stacklevel=2,
-        )
     if name not in MODEL_REGISTRY:
         raise ValueError(
             f"Unknown model '{name}'. Available: {list(MODEL_REGISTRY.keys())}"
         )
-
-    model = MODEL_REGISTRY[name](**kwargs)
-    return model
+    return MODEL_REGISTRY[name](**kwargs)
 
 
 def get_model_path(name):
     """Get the default save path for a model by name."""
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
     paths = {
-        "cnn_scratch":  config.CNN_SCRATCH_PATH,
-        "resnet50":     config.RESNET50_PATH,
-        "resnet18":     config.RESNET18_PATH,
-        "mobilenetv2":  config.MOBILENET_PATH,
-        "mobilenetv4":  config.MOBILENETV4_PATH,
-        "yolo26":       config.YOLO26_PATH,
+        "cnn_scratch": config.CNN_SCRATCH_PATH,
+        "resnet50": config.RESNET50_PATH,
+        "mobilenetv4": config.MOBILENETV4_PATH,
     }
     return paths.get(name)
 

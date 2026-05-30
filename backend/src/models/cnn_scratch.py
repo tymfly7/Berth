@@ -14,7 +14,7 @@ Architecture:
     → Global Average Pooling
     → FC(512→256) → BN → ReLU → Dropout(0.4)
     → FC(256→64)  → ReLU → Dropout(0.2)
-    → FC(64→1)    → Sigmoid
+    → FC(64→1)
 """
 
 import torch
@@ -86,7 +86,6 @@ class ParkingCNN(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout(0.4),
             nn.Linear(256, 64),
-            nn.BatchNorm1d(64),
             nn.ReLU(inplace=True),
             nn.Dropout(0.2),
             nn.Linear(64, num_classes),

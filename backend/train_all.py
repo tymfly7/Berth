@@ -38,7 +38,7 @@ if __name__ == "__main__":
     print("  SMART PARKING AI - Train All Models (CPU)")
     print("=" * 65)
     print(f"  Dataset:    {config.PKLOT_ROOT}")
-    print(f"  Images:     1000/class = 2000 total")
+    print(f"  Images:     1000/class = 2000 total (per model)")
     print(f"  Epochs:     {config.EPOCHS}")
     print(f"  Batch Size: {config.BATCH_SIZE}")
     print(f"  Device:     CPU")
@@ -81,13 +81,13 @@ if __name__ == "__main__":
     )
 
     device = torch.device("cpu")
-    model_names = ["cnn_scratch", "resnet18", "mobilenetv2"]
+    model_names = ["cnn_scratch", "resnet50", "mobilenetv4"]
     all_results = []
     total_train_start = time.time()
 
     for i, name in enumerate(model_names, 1):
         print(f"\n{'='*65}")
-        print(f"  MODEL {i}/3: {name}")
+        print(f"  MODEL {i}/{len(model_names)}: {name.upper()}")
         print(f"{'='*65}")
         model_start = time.time()
 

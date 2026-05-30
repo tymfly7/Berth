@@ -47,6 +47,9 @@ class ParkingClassifier:
 
     def load(self):
         """Load the trained model weights."""
+        if self.model_name == "yolo26_classify":
+            self._load_yolo_classify()
+            return
         from src.models.model_factory import load_model
         try:
             self.model = load_model(self.model_name, device=self.device)
@@ -54,9 +57,46 @@ class ParkingClassifier:
         except FileNotFoundError as e:
             logger.warning(f"⚠️  {e}")
             self.model = None
+        self._yolo_classify = None
+
+    def _load_yolo_classify(self):
+        """Load a YOLO26 classify model (Ultralytics API)."""
+        try:
+            from ultralytics import YOLO
+            model_path = config.YOLO26_CLASSIFY_PATH
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"YOLO26 classify weights not found at '{model_path}'. Train it first."
+                )
+            self._yolo_classify = YOLO(str(model_path))
+            self.model = True  # sentinel so is_loaded() returns True
+            logger.info(f"✅ Loaded YOLO26 classify model on {self.device}")
+        except FileNotFoundError as e:
+            logger.warning(f"⚠️  {e}")
+            self.model = None
+            self._yolo_classify = None
 
     def is_loaded(self):
         return self.model is not None
+
+    def _to_pil(self, image):
+        """Convert any image input to a RGB PIL Image."""
+        if isinstance(image, (str, Path)):
+            return Image.open(image).convert("RGB")
+        if isinstance(image, np.ndarray):
+            if len(image.shape) == 3 and image.shape[2] == 3:
+                return Image.fromarray(image[:, :, ::-1])  # BGR → RGB
+            return Image.fromarray(image)
+        return image  # assume PIL already
+
+    def _yolo_result_to_dict(self, result) -> dict:
+        """Convert a single Ultralytics classify result to a prediction dict."""
+        probs = result.probs.data.cpu().numpy()
+        # Class 0 = vacant, Class 1 = occupied (matches yolo_converter class order)
+        prob_occupied = float(probs[1]) if len(probs) > 1 else 0.5
+        if prob_occupied > 0.5:
+            return {"status": "occupied", "confidence": round(prob_occupied, 4), "probability": round(prob_occupied, 4)}
+        return {"status": "vacant", "confidence": round(1.0 - prob_occupied, 4), "probability": round(prob_occupied, 4)}
 
     @torch.no_grad()
     def predict(self, image):
@@ -76,24 +116,21 @@ class ParkingClassifier:
         if self.model is None:
             return {"status": "unknown", "confidence": 0.0, "probability": 0.5}
 
+        if getattr(self, "_yolo_classify", None) is not None:
+            pil_img = self._to_pil(image)
+            results = self._yolo_classify.predict(pil_img, verbose=False)
+            return self._yolo_result_to_dict(results[0])
+
         # Convert input to PIL Image
-        if isinstance(image, str) or isinstance(image, Path):
-            image = Image.open(image).convert("RGB")
-        elif isinstance(image, np.ndarray):
-            # Assume BGR from OpenCV — convert to RGB
-            if len(image.shape) == 3 and image.shape[2] == 3:
-                image = Image.fromarray(image[:, :, ::-1])
-            else:
-                image = Image.fromarray(image)
+        pil_img = self._to_pil(image)
 
         # Preprocess
-        tensor = self.transform(image).unsqueeze(0).to(self.device)
+        tensor = self.transform(pil_img).unsqueeze(0).to(self.device)
 
         # Inference — model outputs raw logit; apply sigmoid to get probability
         output = self.model(tensor)
         prob = torch.sigmoid(output).squeeze().item()
 
-        # Interpret result
         if prob > 0.5:
             status = "occupied"
             confidence = prob
@@ -122,17 +159,16 @@ class ParkingClassifier:
             return [{"status": "unknown", "confidence": 0.0, "probability": 0.5}
                     for _ in images]
 
+        if getattr(self, "_yolo_classify", None) is not None:
+            pil_images = [self._to_pil(img) for img in images]
+            results = self._yolo_classify.predict(pil_images, verbose=False)
+            return [self._yolo_result_to_dict(r) for r in results]
+
         # Preprocess all images
         tensors = []
         for img in images:
-            if isinstance(img, np.ndarray):
-                if len(img.shape) == 3 and img.shape[2] == 3:
-                    img = Image.fromarray(img[:, :, ::-1])
-                else:
-                    img = Image.fromarray(img)
-            elif isinstance(img, (str, Path)):
-                img = Image.open(img).convert("RGB")
-            tensors.append(self.transform(img))
+            pil_img = self._to_pil(img) if not isinstance(img, Image.Image) else img
+            tensors.append(self.transform(pil_img))
 
         batch = torch.stack(tensors).to(self.device)
         outputs = torch.sigmoid(self.model(batch)).squeeze(1)
