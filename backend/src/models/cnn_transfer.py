@@ -144,7 +144,11 @@ class ParkingMobileNetV4(nn.Module):
             num_classes=0,
             global_pool='avg',
         )
-        num_features = self.backbone.num_features
+        # num_features can misreport the pooled output size in some timm versions;
+        # probe with a dummy pass to get the real dimension.
+        import torch
+        with torch.no_grad():
+            num_features = self.backbone(torch.zeros(1, 3, 224, 224)).shape[1]
 
         if freeze_backbone:
             for param in self.backbone.parameters():
@@ -191,12 +195,18 @@ class ParkingYOLO26:
     #       separate training workflow and a dataset converted to YOLO format.
     """
 
-    def __init__(self, model_path: str = "yolo26n.pt"):
+    def __init__(self, model_path: str):
         try:
             from ultralytics import YOLO
         except ImportError:
             raise RuntimeError("pip install ultralytics")
 
+        from pathlib import Path
+        if not Path(model_path).exists():
+            raise FileNotFoundError(
+                f"YOLO26 model not found at '{model_path}'. "
+                "Train it first via the Training panel."
+            )
         self.model = YOLO(model_path)
 
     def predict_frame(self, frame_bgr: np.ndarray) -> list:
