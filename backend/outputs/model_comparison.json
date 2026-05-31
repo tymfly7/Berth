@@ -1,0 +1,60 @@
+[
+  {
+    "model": "cnn_scratch",
+    "type": "classification",
+    "epochs": 5,
+    "train_time": 472.9,
+    "best_val_acc": 98.33,
+    "test_accuracy": 96.69,
+    "test_precision": 94.67,
+    "test_recall": 98.61,
+    "test_f1": 96.6,
+    "total_samples": 302,
+    "total_params": 9619521,
+    "trainable_params": 9619521
+  },
+  {
+    "model": "resnet50",
+    "type": "classification",
+    "epochs": 5,
+    "train_time": 348.6,
+    "best_val_acc": 99.0,
+    "test_accuracy": 98.01,
+    "test_precision": 97.26,
+    "test_recall": 98.61,
+    "test_f1": 97.93,
+    "total_samples": 302,
+    "total_params": 24557633,
+    "trainable_params": 1049601
+  },
+  {
+    "model": "mobilenetv4",
+    "type": "classification",
+    "epochs": 5,
+    "train_time": 106.9,
+    "best_val_acc": 98.33,
+    "test_accuracy": 98.34,
+    "test_precision": 97.28,
+    "test_recall": 99.31,
+    "test_f1": 98.28,
+    "total_samples": 302,
+    "total_params": 2821217,
+    "trainable_params": 328193
+  },
+  {
+    "model": "yolo26_classify",
+    "type": "classification",
+    "epochs": 5,
+    "train_time": 618.0,
+    "test_accuracy": 91.43
+  },
+  {
+    "model": "yolo26",
+    "type": "detection",
+    "epochs": 5,
+    "train_time": 336.8,
+    "test_accuracy": 0.1,
+    "test_precision": 0.57,
+    "test_recall": 5.59
+  }
+]

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import ControlPanel from './ControlPanel'
-import RoiManager from './RoiManager'
 import TrainingPanel from './TrainingPanel'
 import ModelStatus from './ModelStatus'
+import CameraManager from './CameraManager'
 
 const toggleBtnStyle = {
   width: '100%',
@@ -26,8 +26,8 @@ const dividerStyle = {
   margin: '0',
 }
 
-function SubSection({ title, children }) {
-  const [open, setOpen] = useState(true)
+function SubSection({ title, children, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <div>
       <button style={toggleBtnStyle} onClick={() => setOpen(o => !o)}>
@@ -39,7 +39,7 @@ function SubSection({ title, children }) {
   )
 }
 
-export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchModelInfo }) {
+export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchModelInfo, onCamerasChange }) {
   const [open, setOpen] = useState(true)
 
   return (
@@ -51,14 +51,14 @@ export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchMode
 
       {open && (
         <>
-          <SubSection title="Controls">
-            <ControlPanel apiAction={apiAction} apiBase={apiBase} />
+          <SubSection title="Camera Registry" defaultOpen={false}>
+            <CameraManager compact onCamerasChange={onCamerasChange} />
           </SubSection>
 
           <div style={dividerStyle} />
 
-          <SubSection title="ROI Manager">
-            <RoiManager />
+          <SubSection title="Controls">
+            <ControlPanel apiAction={apiAction} apiBase={apiBase} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} />
           </SubSection>
 
           <div style={dividerStyle} />
@@ -70,7 +70,7 @@ export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchMode
               modelInfo={modelInfo}
               fetchModelInfo={fetchModelInfo}
             />
-            <ModelStatus modelInfo={modelInfo} apiAction={apiAction} />
+            <ModelStatus modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} apiBase={apiBase} />
           </SubSection>
         </>
       )}

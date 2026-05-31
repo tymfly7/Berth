@@ -1,15 +1,15 @@
 task: classify
 mode: train
 model: yolo26n-cls.yaml
-data: D:\Documents\School Project\backend\data
+data: D:\Documents\School Project\backend\classify_yolo_data
 epochs: 5
 time: null
 patience: 100
 batch: 32
-imgsz: 224
+imgsz: 64
 save: true
 save_period: -1
-cache: false
+cache: ram
 device: cpu
 workers: 8
 project: D:\Documents\School Project\backend\outputs\yolo26_classify

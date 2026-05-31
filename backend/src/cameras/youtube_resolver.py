@@ -93,7 +93,13 @@ def resolve_stream_url(watch_url: str, force_refresh: bool = False,
         ) from e
 
     try:
-        with YoutubeDL({"quiet": True, "no_warnings": True, "format": "best"}) as ydl:
+        # Prefer 480p or lower: smaller HLS segments download faster, reducing
+        # the blocking time per cap.read() call and improving perceived FPS.
+        with YoutubeDL({
+            "quiet": True,
+            "no_warnings": True,
+            "format": "best[height<=480]/best",
+        }) as ydl:
             info = ydl.extract_info(watch_url, download=False)
     except Exception as e:
         logger.error(f"yt-dlp failed to resolve '{watch_url}': {e}")

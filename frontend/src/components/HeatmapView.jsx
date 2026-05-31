@@ -99,7 +99,7 @@ export default function HeatmapView({ heatmap }) {
     })
   }, [rois, heatmap])
 
-  if (rois.length > 0) {
+  if (rois.length > 0 && heatmap && heatmap.length > 0) {
     return (
       <div className="glass-card" style={{ padding: '20px' }}>
         <div className="section-title">🔥 Usage Heatmap</div>

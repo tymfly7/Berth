@@ -141,15 +141,7 @@ class DemoProcessor:
             "occupied": occ,
             "occupancy_percent": round(100.0 * occ / total, 1) if total else 0,
             "avg_confidence": round(0.9 + random.random() * 0.09, 4),
-            "slots": [
-                {
-                    "id": s["id"],
-                    "status": "occupied" if self._slot_states[s["id"]] else "vacant",
-                    "confidence": round(0.85 + random.random() * 0.14, 4),
-                    "bbox": [s["x"], s["y"], s["width"], s["height"]],
-                }
-                for s in DEMO_SLOTS
-            ],
+            "slots": [],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 

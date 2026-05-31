@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import MetricCards from '../components/MetricCards'
+import LotMap from '../components/LotMap'
 
 const API_BASE = `http://${window.location.hostname}:8000`
 
@@ -91,6 +92,13 @@ export default function PublicView() {
           spots available
         </div>
       </div>
+
+      {/* Lot map */}
+      {metrics.slots.length > 0 && (
+        <div style={{ width: '100%', maxWidth: 860, marginBottom: 24 }}>
+          <LotMap slots={metrics.slots} />
+        </div>
+      )}
 
       {/* Metric cards */}
       <div style={{

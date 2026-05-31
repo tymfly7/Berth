@@ -29,11 +29,21 @@ function getCentroid(pts) {
   ]
 }
 
-export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
-  const imgRef = useRef(null)
+export default function RoiEditor({
+  backgroundImage = null,
+  rois,
+  onRoisChange,
+  proposals = [],
+  onProposalsChange = null,
+  overlay = false,
+  idPrefix = 'roi',
+}) {
+  const containerRef = useRef(null)
   const canvasRef = useRef(null)
+  const bgImgRef = useRef(null)
   const [mode, setMode] = useState('polygon')
   const [selectedId, setSelectedId] = useState(null)
+  const [selectedProposalId, setSelectedProposalId] = useState(null)
   const [inProgress, setInProgress] = useState([])
   const [livePoint, setLivePoint] = useState(null)
   const [rectStart, setRectStart] = useState(null)
@@ -59,6 +69,11 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
     const H = canvas.height
     ctx.clearRect(0, 0, W, H)
 
+    if (!overlay && bgImgRef.current) {
+      ctx.drawImage(bgImgRef.current, 0, 0, W, H)
+    }
+
+    // Draw confirmed ROIs
     rois.forEach((roi, idx) => {
       const isSelected = roi.id === selectedId
       const isDrawing = inProgress.length > 0
@@ -86,6 +101,34 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
       ctx.shadowBlur = 0
     })
 
+    // Draw proposed ROIs with ghost/dashed style
+    proposals.forEach((prop) => {
+      const isSelected = prop.id === selectedProposalId
+      const pts = prop.polygon.map(([x, y]) => [x * W, y * H])
+
+      ctx.beginPath()
+      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
+      ctx.closePath()
+      ctx.fillStyle = isSelected ? 'rgba(100,200,255,0.25)' : 'rgba(100,200,255,0.12)'
+      ctx.fill()
+      ctx.setLineDash([7, 4])
+      ctx.strokeStyle = isSelected ? '#64c8ff' : 'rgba(100,200,255,0.65)'
+      ctx.lineWidth = isSelected ? 2.5 : 1.5
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      const [cx, cy] = getCentroid(pts)
+      ctx.shadowColor = 'rgba(0,0,0,0.8)'
+      ctx.shadowBlur = 3
+      ctx.fillStyle = isSelected ? '#64c8ff' : 'rgba(150,220,255,0.85)'
+      ctx.font = 'bold 11px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(`? ${prop.label}`, cx, cy)
+      ctx.shadowBlur = 0
+    })
+
+    // In-progress polygon drawing
     if (inProgress.length > 0) {
       const pts = inProgress.map(([x, y]) => [x * W, y * H])
       ctx.beginPath()
@@ -119,20 +162,28 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
       ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
       ctx.setLineDash([])
     }
-  }, [rois, selectedId, inProgress, livePoint, liveRect])
+  }, [rois, proposals, selectedId, selectedProposalId, inProgress, livePoint, liveRect])
 
   const syncSize = useCallback(() => {
-    const img = imgRef.current
+    const container = containerRef.current
     const canvas = canvasRef.current
-    if (!img || !canvas) return
-    canvas.width = img.clientWidth
-    canvas.height = img.clientHeight
-  }, [])
+    if (!container || !canvas) return
+    const w = container.clientWidth
+    const h = overlay ? container.clientHeight : Math.max(container.clientHeight, 300)
+    if (w > 0 && h > 0) { canvas.width = w; canvas.height = h }
+  }, [overlay])
 
   useEffect(() => {
-    syncSize()
-    redraw()
-  }, [backgroundImage, syncSize, redraw])
+    if (overlay || !backgroundImage) {
+      bgImgRef.current = null
+      syncSize()
+      redraw()
+      return
+    }
+    const img = new Image()
+    img.onload = () => { bgImgRef.current = img; syncSize(); redraw() }
+    img.src = backgroundImage
+  }, [backgroundImage, overlay, syncSize, redraw])
 
   useEffect(() => {
     const handleResize = () => { syncSize(); redraw() }
@@ -183,19 +234,69 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
 
   const makeRoi = useCallback((polygon) => {
     commitChange([...rois, {
-      id: `roi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id: `${idPrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       label: `Slot ${rois.length + 1}`,
       polygon,
       color: COLORS[rois.length % COLORS.length],
     }])
-  }, [rois, commitChange])
+  }, [rois, commitChange, idPrefix])
+
+  // Accept a single proposal: convert it to a confirmed ROI
+  const acceptProposal = useCallback((propId) => {
+    if (!onProposalsChange) return
+    const prop = proposals.find(p => p.id === propId)
+    if (!prop) return
+    const { proposed: _omit, ...base } = prop
+    commitChange([...rois, { ...base, color: COLORS[rois.length % COLORS.length] }])
+    onProposalsChange(proposals.filter(p => p.id !== propId))
+    setSelectedProposalId(null)
+  }, [proposals, rois, commitChange, onProposalsChange])
+
+  // Accept all proposals at once
+  const acceptAllProposals = useCallback(() => {
+    if (!onProposalsChange || proposals.length === 0) return
+    const newRois = proposals.map((prop, i) => {
+      const { proposed: _omit, ...base } = prop
+      return { ...base, color: COLORS[(rois.length + i) % COLORS.length] }
+    })
+    commitChange([...rois, ...newRois])
+    onProposalsChange([])
+    setSelectedProposalId(null)
+  }, [proposals, rois, commitChange, onProposalsChange])
+
+  const discardProposal = useCallback((propId) => {
+    if (!onProposalsChange) return
+    onProposalsChange(proposals.filter(p => p.id !== propId))
+    if (selectedProposalId === propId) setSelectedProposalId(null)
+  }, [proposals, onProposalsChange, selectedProposalId])
+
+  const discardAllProposals = useCallback(() => {
+    if (!onProposalsChange) return
+    onProposalsChange([])
+    setSelectedProposalId(null)
+  }, [onProposalsChange])
 
   const handleClick = useCallback((e) => {
     const pt = getPoint(e)
     if (mode === 'polygon') {
       if (inProgress.length === 0) {
+        // Check proposals first (they're on top visually)
+        if (proposals.length > 0) {
+          const hitProp = [...proposals].reverse().find(p => pointInPolygon(pt[0], pt[1], p.polygon))
+          if (hitProp) {
+            setSelectedProposalId(hitProp.id)
+            setSelectedId(null)
+            return
+          }
+        }
         const hit = [...rois].reverse().find(r => pointInPolygon(pt[0], pt[1], r.polygon))
-        if (hit) { setSelectedId(hit.id); return }
+        if (hit) {
+          setSelectedId(hit.id)
+          setSelectedProposalId(null)
+          return
+        }
+        setSelectedId(null)
+        setSelectedProposalId(null)
       }
 
       if (inProgress.length >= 3) {
@@ -215,7 +316,7 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
 
       setInProgress(prev => [...prev, pt])
     }
-  }, [mode, inProgress, rois, getPoint, makeRoi])
+  }, [mode, inProgress, rois, proposals, getPoint, makeRoi])
 
   const handleDblClick = useCallback((e) => {
     if (mode !== 'polygon') return
@@ -250,12 +351,21 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
       const minY = Math.min(rectStart[1], pt[1]), maxY = Math.max(rectStart[1], pt[1])
       makeRoi([[minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY]])
     } else {
-      const hit = [...rois].reverse().find(r => pointInPolygon(pt[0], pt[1], r.polygon))
-      setSelectedId(hit ? hit.id : null)
+      const hitProp = proposals.length > 0
+        ? [...proposals].reverse().find(p => pointInPolygon(pt[0], pt[1], p.polygon))
+        : null
+      if (hitProp) {
+        setSelectedProposalId(hitProp.id)
+        setSelectedId(null)
+      } else {
+        const hit = [...rois].reverse().find(r => pointInPolygon(pt[0], pt[1], r.polygon))
+        setSelectedId(hit ? hit.id : null)
+        setSelectedProposalId(null)
+      }
     }
     setRectStart(null)
     setLiveRect(null)
-  }, [mode, rectStart, rois, makeRoi, getPoint])
+  }, [mode, rectStart, rois, proposals, makeRoi, getPoint])
 
   const changeMode = (m) => {
     setMode(m)
@@ -275,11 +385,23 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
     fontSize: '0.78rem',
   })
 
-  if (!backgroundImage) return null
+  const proposalBtnStyle = (disabled) => ({
+    padding: '5px 11px',
+    borderRadius: 4,
+    border: '1px solid rgba(100,200,255,0.5)',
+    background: 'rgba(100,200,255,0.08)',
+    color: disabled ? 'rgba(100,200,255,0.35)' : '#64c8ff',
+    cursor: disabled ? 'default' : 'pointer',
+    fontSize: '0.78rem',
+  })
+
+  const hasProposals = proposals.length > 0
+  const selProp = selectedProposalId ? proposals.find(p => p.id === selectedProposalId) : null
 
   return (
-    <div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+    <div style={overlay ? { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' } : {}}>
+      {/* ── ROI drawing toolbar ── */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' } : {}) }}>
         <button style={btnStyle(mode === 'polygon')} onClick={() => changeMode('polygon')}>
           Polygon
         </button>
@@ -303,20 +425,75 @@ export default function RoiEditor({ backgroundImage, rois, onRoisChange }) {
           Clear All
         </button>
       </div>
-      <div style={{ position: 'relative', width: '100%' }}>
-        <img
-          ref={imgRef}
-          src={backgroundImage}
-          alt="reference"
-          draggable={false}
-          style={{ width: '100%', display: 'block', borderRadius: 4 }}
-          onLoad={() => { syncSize(); redraw() }}
-        />
+
+      {/* ── Proposals toolbar ── */}
+      {hasProposals && (
+        <div style={{
+          display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', alignItems: 'center',
+          padding: '7px 10px', borderRadius: overlay ? 0 : 5,
+          border: overlay ? 'none' : '1px solid rgba(100,200,255,0.3)',
+          background: overlay ? 'rgba(0,0,0,0.6)' : 'rgba(100,200,255,0.06)',
+          backdropFilter: overlay ? 'blur(4px)' : undefined,
+          borderBottom: overlay ? '1px solid rgba(100,200,255,0.2)' : undefined,
+        }}>
+          <span style={{ fontSize: '0.75rem', color: '#64c8ff', marginRight: 2 }}>
+            {proposals.length} proposal{proposals.length > 1 ? 's' : ''} — dashed blue
+          </span>
+          <button
+            style={proposalBtnStyle(!selProp)}
+            disabled={!selProp}
+            onClick={() => selProp && acceptProposal(selProp.id)}
+            title="Accept selected proposal and add it as a confirmed ROI"
+          >
+            Accept Selected
+          </button>
+          <button
+            style={proposalBtnStyle(false)}
+            onClick={acceptAllProposals}
+            title="Accept all proposals and add them as confirmed ROIs"
+          >
+            Accept All
+          </button>
+          <button
+            style={{ ...proposalBtnStyle(!selProp), borderColor: 'rgba(255,255,255,0.2)', color: selProp ? 'var(--text-muted,#aaa)' : 'rgba(150,150,150,0.4)' }}
+            disabled={!selProp}
+            onClick={() => selProp && discardProposal(selProp.id)}
+            title="Discard selected proposal"
+          >
+            Discard Selected
+          </button>
+          <button
+            style={{ ...proposalBtnStyle(false), borderColor: 'rgba(255,255,255,0.2)', color: 'var(--text-muted,#aaa)' }}
+            onClick={discardAllProposals}
+            title="Discard all proposals"
+          >
+            Discard All
+          </button>
+        </div>
+      )}
+
+      {/* ── Proposals caveat ── */}
+      {hasProposals && (
+        <div style={{
+          fontSize: '0.72rem', color: 'rgba(255,210,80,0.85)',
+          marginBottom: 8, paddingLeft: 2,
+        }}>
+          Proposals cover <strong>occupied spots</strong> (vehicles detected). Empty spots may be
+          missing. Click a dashed shape to select it, then accept or discard individually.
+        </div>
+      )}
+
+      {/* ── Canvas ── */}
+      <div ref={containerRef} style={overlay
+        ? { flex: 1, position: 'relative' }
+        : { position: 'relative', width: '100%', minHeight: 300, background: 'rgba(0,0,0,0.25)', borderRadius: 4 }
+      }>
         <canvas
           ref={canvasRef}
           style={{
-            position: 'absolute', top: 0, left: 0,
-            width: '100%', height: '100%',
+            display: 'block',
+            width: '100%',
+            height: overlay ? '100%' : undefined,
             cursor: 'crosshair',
           }}
           onClick={handleClick}
