@@ -18,8 +18,8 @@ import cv2
 
 logger = logging.getLogger("smartpark.roi_proposer")
 
-# COCO class IDs treated as vehicles
-_VEHICLE_CLASSES = frozenset([2, 3, 5, 7])  # car, motorcycle, bus, truck
+# Classes from the custom YOLO26 detect model (vacant=0, occupied=1)
+_VEHICLE_CLASSES = frozenset([0, 1])
 
 
 # ── IoU / clustering helpers ─────────────────────────────────────────────────

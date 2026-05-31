@@ -10,6 +10,8 @@ export default function RoiManager() {
   const [bgImage, setBgImage] = useState(null)
   const [saveMsg, setSaveMsg] = useState(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [proposals, setProposals] = useState([])
+  const [proposing, setProposing] = useState(false)
 
   useEffect(() => { if (bgImage) setModalOpen(true) }, [bgImage])
 
@@ -22,7 +24,7 @@ export default function RoiManager() {
 
   const showMsg = (msg) => {
     setSaveMsg(msg)
-    setTimeout(() => setSaveMsg(null), 3000)
+    setTimeout(() => setSaveMsg(null), 4000)
   }
 
   const handleImageUpload = (e) => {
@@ -65,6 +67,34 @@ export default function RoiManager() {
     setRois([])
   }
 
+  const handleAutoDetect = async () => {
+    if (!bgImage) {
+      showMsg('Upload a reference image first.')
+      return
+    }
+    setProposing(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/roi/${CAMERA_ID}/propose`, { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        showMsg(`Auto-detect failed: ${err.detail || res.statusText}`)
+        return
+      }
+      const data = await res.json()
+      if (data.proposals && data.proposals.length > 0) {
+        setProposals(data.proposals)
+        setModalOpen(true)
+        showMsg(`${data.proposals.length} candidate spot(s) detected — review in editor`)
+      } else {
+        showMsg('No candidate spots detected. Try a clearer or better-lit image.')
+      }
+    } catch (err) {
+      showMsg(`Auto-detect error: ${err.message}`)
+    } finally {
+      setProposing(false)
+    }
+  }
+
   const uploadBtnStyle = {
     display: 'inline-block', padding: '6px 14px', borderRadius: 4,
     background: 'var(--color-primary, #3498db)', color: '#fff',
@@ -77,23 +107,49 @@ export default function RoiManager() {
     cursor: 'pointer', fontSize: '0.85rem',
   }
 
+  const autoDetectBtnStyle = {
+    padding: '6px 14px', borderRadius: 4,
+    border: '1px solid rgba(100,200,255,0.5)',
+    background: proposing ? 'rgba(100,200,255,0.05)' : 'rgba(100,200,255,0.1)',
+    color: proposing ? 'rgba(100,200,255,0.45)' : '#64c8ff',
+    cursor: proposing ? 'default' : 'pointer',
+    fontSize: '0.8rem',
+  }
+
   return (
     <div className="glass-card" style={{ padding: '20px', marginTop: '16px' }}>
-      <div className="section-title">🗺️ ROI Manager</div>
+      <div className="section-title">ROI Manager</div>
 
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 6 }}>
           Reference Image
         </div>
-        <label style={uploadBtnStyle}>
-          Upload Image
-          <input
-            type="file"
-            accept="image/*"
-            onChange={handleImageUpload}
-            style={{ display: 'none' }}
-          />
-        </label>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <label style={uploadBtnStyle}>
+            Upload Image
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageUpload}
+              style={{ display: 'none' }}
+            />
+          </label>
+          {bgImage && (
+            <button
+              style={autoDetectBtnStyle}
+              disabled={proposing}
+              onClick={handleAutoDetect}
+              title="Run automatic vehicle detection to propose candidate parking spots"
+            >
+              {proposing ? 'Detecting…' : 'Auto-detect spots'}
+            </button>
+          )}
+        </div>
+        {bgImage && (
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted,#888)', marginTop: 5 }}>
+            Auto-detect finds occupied spots (vehicles visible). Empty spots may be missed — always review proposals.
+          </div>
+        )}
       </div>
 
       {!bgImage && (
@@ -110,13 +166,13 @@ export default function RoiManager() {
         <button onClick={handleSave} style={saveBtnStyle}>Save ROIs</button>
         {bgImage && (
           <button onClick={() => setModalOpen(true)} style={{ ...saveBtnStyle, background: 'rgba(255,255,255,0.1)' }}>
-            ✏️ Edit ROIs
+            Edit ROIs
           </button>
         )}
         {saveMsg && (
           <span style={{
             fontSize: '0.8rem',
-            color: saveMsg.startsWith('Error')
+            color: saveMsg.startsWith('Error') || saveMsg.startsWith('Auto-detect')
               ? 'var(--color-occupied, #e74c3c)'
               : 'var(--color-vacant, #2ecc71)',
           }}>
@@ -198,17 +254,33 @@ export default function RoiManager() {
               padding: '12px 20px', borderBottom: '1px solid var(--border-color)',
               flexShrink: 0,
             }}>
-              <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>ROI Editor — click to add polygon points, double-click to close</span>
+              <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+                ROI Editor
+                {proposals.length > 0
+                  ? ` — ${proposals.length} proposal${proposals.length > 1 ? 's' : ''} pending review`
+                  : ' — click to add polygon points, double-click to close'}
+              </span>
               <div style={{ display: 'flex', gap: 10 }}>
                 <button onClick={handleSave} style={saveBtnStyle}>Save ROIs</button>
                 <button onClick={() => setModalOpen(false)} style={{ ...saveBtnStyle, background: 'rgba(255,255,255,0.1)' }}>Close</button>
               </div>
             </div>
             <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-              <RoiEditor backgroundImage={bgImage} rois={rois} onRoisChange={setRois} />
+              <RoiEditor
+                backgroundImage={bgImage}
+                rois={rois}
+                onRoisChange={setRois}
+                proposals={proposals}
+                onProposalsChange={setProposals}
+              />
             </div>
             {saveMsg && (
-              <div style={{ padding: '8px 20px', fontSize: '0.8rem', color: saveMsg.startsWith('Error') ? 'var(--color-occupied, #e74c3c)' : 'var(--color-vacant, #2ecc71)' }}>
+              <div style={{
+                padding: '8px 20px', fontSize: '0.8rem',
+                color: saveMsg.startsWith('Error') || saveMsg.startsWith('Auto-detect')
+                  ? 'var(--color-occupied, #e74c3c)'
+                  : 'var(--color-vacant, #2ecc71)',
+              }}>
                 {saveMsg}
               </div>
             )}

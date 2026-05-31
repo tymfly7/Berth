@@ -131,7 +131,7 @@ const s = {
   },
 }
 
-export default function CameraManager({ onCamerasChange }) {
+export default function CameraManager({ onCamerasChange, compact = false }) {
   const [cameras, setCameras] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState(null)
@@ -203,39 +203,58 @@ export default function CameraManager({ onCamerasChange }) {
 
   const setField = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }))
 
+  const cFont = compact ? '0.75rem' : '0.82rem'
+  const cPad  = compact ? '4px 8px' : '8px 10px'
+
+  const compactTd = { ...s.td, padding: cPad, fontSize: cFont }
+  const compactTh = { ...s.th, padding: cPad, fontSize: '0.68rem' }
+
+  const compactInput  = { ...s.input,  fontSize: cFont, padding: '4px 8px' }
+  const compactSelect = { ...s.select, fontSize: cFont, padding: '4px 8px' }
+  const compactForm   = {
+    ...s.form,
+    gridTemplateColumns: compact ? '1fr' : '1fr 1fr',
+    gap: compact ? 7 : 10,
+    padding: compact ? '10px' : '14px',
+  }
+
   return (
-    <div style={s.card}>
-      <div style={s.title}>Camera Registry</div>
+    <div style={compact ? {} : s.card}>
+      {!compact && <div style={s.title}>Camera Registry</div>}
 
       {cameras.length === 0 ? (
-        <div style={s.empty}>No cameras registered.</div>
+        <div style={{ ...s.empty, fontSize: cFont }}>No cameras registered.</div>
       ) : (
-        <table style={s.table}>
+        <table style={{ ...s.table, fontSize: cFont }}>
           <thead>
             <tr>
-              <th style={s.th}>Name</th>
-              <th style={s.th}>Type</th>
-              <th style={s.th}>Source</th>
-              <th style={s.th}>Status</th>
-              <th style={s.th}>Actions</th>
+              <th style={compactTh}>Name</th>
+              <th style={compactTh}>Type</th>
+              {!compact && <th style={compactTh}>Source</th>}
+              <th style={compactTh}>Status</th>
+              <th style={compactTh}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {cameras.map(cam => (
               <tr key={cam.id}>
-                <td style={s.td}>{cam.name}</td>
-                <td style={s.td}>{cam.type}</td>
-                <td style={{ ...s.td, fontFamily: 'monospace', fontSize: '0.75rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {cam.source}
+                <td style={compactTd}>{cam.name}</td>
+                <td style={compactTd}>{cam.type}</td>
+                {!compact && (
+                  <td style={{ ...compactTd, fontFamily: 'monospace', fontSize: '0.7rem', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {cam.source}
+                  </td>
+                )}
+                <td style={compactTd}>
+                  <span style={{ ...s.badge(cam.active), fontSize: '0.68rem', padding: compact ? '1px 6px' : '2px 8px' }}>
+                    {cam.active ? 'Active' : 'Idle'}
+                  </span>
                 </td>
-                <td style={s.td}>
-                  <span style={s.badge(cam.active)}>{cam.active ? 'Active' : 'Idle'}</span>
-                </td>
-                <td style={s.td}>
-                  <button style={s.btn()} onClick={() => handleToggle(cam)}>
-                    {cam.active ? 'Deactivate' : 'Activate'}
+                <td style={compactTd}>
+                  <button style={{ ...s.btn(), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px', marginRight: 4 }} onClick={() => handleToggle(cam)}>
+                    {cam.active ? 'Off' : 'On'}
                   </button>
-                  <button style={s.btn('danger')} onClick={() => handleDelete(cam.id)}>Delete</button>
+                  <button style={{ ...s.btn('danger'), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px' }} onClick={() => handleDelete(cam.id)}>✕</button>
                 </td>
               </tr>
             ))}
@@ -243,40 +262,41 @@ export default function CameraManager({ onCamerasChange }) {
         </table>
       )}
 
-      <span style={s.addToggle} onClick={() => { setShowForm(v => !v); setError(null) }}>
+      <span style={{ ...s.addToggle, fontSize: cFont, marginTop: compact ? 10 : 16 }} onClick={() => { setShowForm(v => !v); setError(null) }}>
         {showForm ? '▲ Hide' : '＋ Add Camera'}
       </span>
 
       {showForm && (
-        <div style={s.form}>
+        <div style={compactForm}>
           <div>
-            <label style={s.label}>Name *</label>
-            <input style={s.input} value={form.name} onChange={setField('name')} placeholder="Lot A — Entrance" />
+            <label style={{ ...s.label, fontSize: '0.7rem' }}>Name *</label>
+            <input style={compactInput} value={form.name} onChange={setField('name')} placeholder="Lot A — Entrance" />
           </div>
           <div>
-            <label style={s.label}>Source *</label>
-            <input style={s.input} value={form.source} onChange={setField('source')} placeholder="0 for USB, rtsp://... or file path" />
-          </div>
-          <div>
-            <label style={s.label}>Type</label>
-            <select style={s.select} value={form.type} onChange={setField('type')}>
+            <label style={{ ...s.label, fontSize: '0.7rem' }}>Type</label>
+            <select style={compactSelect} value={form.type} onChange={setField('type')}>
               <option value="usb">USB</option>
               <option value="rtsp">RTSP</option>
               <option value="file">File</option>
+              <option value="youtube">YouTube Live</option>
             </select>
           </div>
-          <div>
-            <label style={s.label}>ROI Config ID (optional)</label>
-            <input style={s.input} value={form.roi_camera_id} onChange={setField('roi_camera_id')} placeholder="Defaults to camera id" />
+          <div style={{ gridColumn: compact ? 'auto' : 'span 2' }}>
+            <label style={{ ...s.label, fontSize: '0.7rem' }}>Source *</label>
+            <input style={compactInput} value={form.source} onChange={setField('source')} placeholder="0 · rtsp://… · /path · youtube URL" />
           </div>
-          <div style={s.formActions}>
-            <button style={s.btn('primary')} onClick={handleAdd}>Add</button>
-            <button style={s.btn()} onClick={() => { setShowForm(false); setError(null) }}>Cancel</button>
+          <div style={{ gridColumn: compact ? 'auto' : 'span 2' }}>
+            <label style={{ ...s.label, fontSize: '0.7rem' }}>ROI Config ID (optional)</label>
+            <input style={compactInput} value={form.roi_camera_id} onChange={setField('roi_camera_id')} placeholder="Defaults to camera id" />
+          </div>
+          <div style={{ ...s.formActions, gridColumn: compact ? 'auto' : '1 / -1' }}>
+            <button style={{ ...s.btn('primary'), fontSize: '0.75rem' }} onClick={handleAdd}>Add</button>
+            <button style={{ ...s.btn(), fontSize: '0.75rem' }} onClick={() => { setShowForm(false); setError(null) }}>Cancel</button>
           </div>
         </div>
       )}
 
-      {error && <div style={s.error}>{error}</div>}
+      {error && <div style={{ ...s.error, fontSize: '0.73rem' }}>{error}</div>}
     </div>
   )
 }

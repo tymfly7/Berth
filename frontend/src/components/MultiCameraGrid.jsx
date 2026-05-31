@@ -53,7 +53,7 @@ function gridColumns(count) {
   return '1fr 1fr 1fr'
 }
 
-export default function MultiCameraGrid({ cameras }) {
+export default function MultiCameraGrid({ cameras, bare = false }) {
   const [metricsMap, setMetricsMap] = useState({})
 
   const handleMetricsUpdate = useCallback((cameraId, metrics) => {
@@ -66,36 +66,36 @@ export default function MultiCameraGrid({ cameras }) {
   const totalOccupied  = Object.values(metricsMap).reduce((sum, m) => sum + (m.occupied  || 0), 0)
   const totalSlots     = totalAvailable + totalOccupied
 
-  if (active.length === 0) {
-    return (
-      <div style={s.card}>
-        <div style={s.title}>Live Camera Feeds</div>
-        <div style={s.empty}>No active cameras. Activate one above.</div>
-      </div>
-    )
-  }
-
-  return (
-    <div style={s.card}>
+  const inner = (
+    <>
       <div style={s.title}>Live Camera Feeds</div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: gridColumns(active.length), gap: 12 }}>
-        {active.map(cam => (
-          <CameraFeedCell
-            key={cam.id}
-            cameraId={cam.id}
-            name={cam.name}
-            onMetricsUpdate={handleMetricsUpdate}
-          />
-        ))}
-      </div>
+      {active.length === 0 ? (
+        <div style={s.empty}>No active cameras. Activate one in Camera Registry.</div>
+      ) : (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: gridColumns(active.length), gap: 12 }}>
+            {active.map(cam => (
+              <CameraFeedCell
+                key={cam.id}
+                cameraId={cam.id}
+                name={cam.name}
+                onMetricsUpdate={handleMetricsUpdate}
+              />
+            ))}
+          </div>
 
-      <div style={s.totalsRow}>
-        <span style={s.totalsLabel}>Unified Totals</span>
-        <span style={s.totalStat('var(--text-secondary)')}>{totalSlots} slots</span>
-        <span style={s.totalStat('var(--color-vacant)')}>■ {totalAvailable} avail</span>
-        <span style={s.totalStat('var(--color-occupied)')}>■ {totalOccupied} occ</span>
-      </div>
-    </div>
+          <div style={s.totalsRow}>
+            <span style={s.totalsLabel}>Unified Totals</span>
+            <span style={s.totalStat('var(--text-secondary)')}>{totalSlots} slots</span>
+            <span style={s.totalStat('var(--color-vacant)')}>■ {totalAvailable} avail</span>
+            <span style={s.totalStat('var(--color-occupied)')}>■ {totalOccupied} occ</span>
+          </div>
+        </>
+      )}
+    </>
   )
+
+  if (bare) return <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border-color)' }}>{inner}</div>
+  return <div style={s.card}>{inner}</div>
 }

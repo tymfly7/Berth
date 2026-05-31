@@ -1,12 +1,15 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import RoiEditor from './RoiEditor'
 
 const MODELS = [
-  { id: 'cnn_scratch', label: 'CNN Scratch'  },
-  { id: 'resnet50',    label: 'ResNet-50'    },
-  { id: 'mobilenetv2', label: 'MobileNetV2'  },
-  { id: 'mobilenetv4', label: 'MobileNetV4'  },
-  { id: 'yolo26',      label: 'YOLO26'       },
+  { id: 'cnn_scratch',     label: 'CNN Scratch'      },
+  { id: 'resnet50',        label: 'ResNet-50'        },
+  { id: 'mobilenetv4',     label: 'MobileNetV4'      },
+  { id: 'yolo26_classify', label: 'YOLO26 Classify'  },
+  { id: 'yolo26',          label: 'YOLO26 Detect'    },
 ]
+
+const TESTING_CAMERA_ID = 'ctrl_testing'
 
 const style = {
   section: { padding: '20px' },
@@ -20,16 +23,6 @@ const style = {
     height: 1,
     background: 'var(--border-color)',
     margin: '16px 0',
-  },
-  select: {
-    flex: 1,
-    background: 'var(--bg-secondary)',
-    color: 'var(--text-primary)',
-    border: '1px solid var(--border-color)',
-    borderRadius: 'var(--radius-sm)',
-    padding: '4px 8px',
-    fontSize: '0.8rem',
-    cursor: 'pointer',
   },
   uploadZone: {
     border: '2px dashed var(--border-color)',
@@ -61,24 +54,74 @@ const style = {
     marginTop: 10,
     fontSize: '0.8rem',
     justifyContent: 'center',
+    flexWrap: 'wrap',
   },
 }
 
-export default function ControlPanel({ apiAction, apiBase }) {
+export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModelInfo }) {
   const [status, setStatus] = useState('')
   const [dragging, setDragging] = useState(false)
   const [resultImage, setResultImage] = useState(null)
   const [resultData, setResultData] = useState(null)
   const [selectedModel, setSelectedModel] = useState('cnn_scratch')
+  const [uploadedImage, setUploadedImage] = useState(null)
+  const [rois, setRois] = useState([])
+  const [roiModalOpen, setRoiModalOpen] = useState(false)
+  const [roiMsg, setRoiMsg] = useState(null)
   const fileRef = useRef(null)
+  const uploadedFileRef = useRef(null)
+
+  const isDemo = !modelInfo || modelInfo.active_model === 'demo'
+
+  // Keep the model dropdown in sync with the server's active model
+  useEffect(() => {
+    if (modelInfo?.active_model && modelInfo.active_model !== 'demo') {
+      if (MODELS.find(m => m.id === modelInfo.active_model)) {
+        setSelectedModel(modelInfo.active_model)
+      }
+    }
+  }, [modelInfo?.active_model])
+
+  useEffect(() => {
+    fetch(`${apiBase}/api/roi/${TESTING_CAMERA_ID}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setRois(Array.isArray(data) ? data : []))
+      .catch(() => {})
+  }, [apiBase])
+
+  const showRoiMsg = (msg) => {
+    setRoiMsg(msg)
+    setTimeout(() => setRoiMsg(null), 3000)
+  }
+
+  const saveRois = async (roiList) => {
+    try {
+      const res = await fetch(`${apiBase}/api/roi/${TESTING_CAMERA_ID}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rois: roiList }),
+      })
+      if (!res.ok) throw new Error('Save failed')
+      const data = await res.json()
+      showRoiMsg(`Saved ${data.saved} ROIs`)
+    } catch (e) {
+      showRoiMsg(`Error: ${e.message}`)
+    }
+  }
 
   const handleAction = async (endpoint, label) => {
     setStatus(`${label}...`)
     const res = await apiAction(endpoint)
     setStatus(res?.message || 'Done')
-    setResultImage(null)
-    setResultData(null)
+    fetchModelInfo?.()
     setTimeout(() => setStatus(''), 4000)
+  }
+
+  const handleDemo = () => handleAction('/api/use-demo', 'Switching to demo')
+
+  const handleActivateLive = () => {
+    const label = MODELS.find(m => m.id === selectedModel)?.label || selectedModel
+    handleAction(`/api/use-model/${selectedModel}`, `Activating ${label} on live feeds`)
   }
 
   const handleUpload = async (file) => {
@@ -103,35 +146,66 @@ export default function ControlPanel({ apiAction, apiBase }) {
     }
 
     if (isImage) {
-      // Use analyze-lot for full parking lot analysis
-      setStatus('Analyzing parking lot image...')
-      const form = new FormData()
-      form.append('file', file)
+      uploadedFileRef.current = file
+      setRois([])
+      setUploadedImage(null)
 
+      const snapshotForm = new FormData()
+      snapshotForm.append('file', file)
+      fetch(`${apiBase}/api/roi/${TESTING_CAMERA_ID}/snapshot`, { method: 'POST', body: snapshotForm }).catch(() => {})
+
+      fetch(`${apiBase}/api/roi/${TESTING_CAMERA_ID}`)
+        .then(r => r.ok ? r.json() : [])
+        .then(data => setRois(Array.isArray(data) ? data : []))
+        .catch(() => {})
+
+      const reader = new FileReader()
+      reader.onload = (ev) => setUploadedImage(ev.target.result)
+      reader.readAsDataURL(file)
+
+      setStatus('Image ready — draw ROIs then click Test to analyze.')
+      setTimeout(() => setStatus(''), 6000)
+    }
+  }
+
+  const handleTest = async () => {
+    const hasImage = !!uploadedImage && !!uploadedFileRef.current
+    if (hasImage && rois.length === 0) {
+      setStatus('No ROIs defined — click "Draw ROIs" to mark parking spots first.')
+      setTimeout(() => setStatus(''), 5000)
+      return
+    }
+    if (hasImage && rois.length > 0) {
+      setStatus('Analyzing with ROIs...')
+      setResultImage(null)
+      setResultData(null)
+      await saveRois(rois)
+      const form = new FormData()
+      form.append('file', uploadedFileRef.current)
       try {
-        const res = await fetch(`${apiBase}/api/analyze-lot?rows=3&cols=6`, {
+        const res = await fetch(`${apiBase}/api/analyze-roi?camera_id=${TESTING_CAMERA_ID}`, {
           method: 'POST',
           body: form,
         })
         const data = await res.json()
-
         if (data.annotated_image) {
           setResultImage(data.annotated_image)
           setResultData(data)
           setStatus(
-            `Analyzed ${data.total} zones: ${data.available} available, ` +
+            `${data.total} ROIs: ${data.available} available, ` +
             `${data.occupied} occupied (${data.occupancy_percent}%)`
           )
-        } else if (data.detail) {
-          setStatus(`Error: ${data.detail}`)
         } else {
-          setStatus(data.status ? `${data.status} (${(data.confidence * 100).toFixed(0)}% conf)` : 'Done')
+          setStatus(data.detail ? `Error: ${data.detail}` : 'Done')
         }
-      } catch (e) {
-        setStatus('Analysis failed')
-      }
+      } catch { setStatus('Analysis failed') }
       setTimeout(() => setStatus(''), 15000)
+      return
     }
+    handleAction(
+      `/api/test-model/${selectedModel}`,
+      `Testing ${MODELS.find(m => m.id === selectedModel)?.label}`
+    )
   }
 
   const onDrop = (e) => {
@@ -143,39 +217,37 @@ export default function ControlPanel({ apiAction, apiBase }) {
 
   return (
     <div className="glass-card" style={style.section}>
-      <div className="section-title">Controls</div>
-
-      {/* Mode buttons */}
-      <div style={style.row}>
-        <button className="btn btn-primary btn-sm"
-                onClick={() => handleAction('/api/use-demo', 'Switching to demo')}>
+      {/* Mode + model */}
+      <div className="section-title">Live Feed Mode</div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+        <button
+          className={`btn ${isDemo ? 'btn-primary' : 'btn-ghost'} btn-sm`}
+          onClick={handleDemo}
+        >
           🎮 Demo
         </button>
-        <button className="btn btn-ghost btn-sm"
-                onClick={() => handleAction('/api/use-camera', 'Switching to camera')}>
-          📷 Camera
+        <button
+          className={`btn ${!isDemo ? 'btn-primary' : 'btn-ghost'} btn-sm`}
+          onClick={handleActivateLive}
+          title="Activate selected model on all live camera feeds"
+        >
+          📷 Live
         </button>
       </div>
 
-      {/* Model selection */}
-      <div className="section-title" style={{ marginTop: 4 }}>Model</div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
         <select
           value={selectedModel}
           onChange={e => setSelectedModel(e.target.value)}
-          style={style.select}
+          className="panel-select"
+          style={{ flex: 1 }}
         >
           {MODELS.map(({ id, label }) => (
             <option key={id} value={id}>{label}</option>
           ))}
         </select>
-        <button className="btn btn-ghost btn-sm"
-          onClick={() => handleAction(`/api/use-model/${selectedModel}`, `Loading ${MODELS.find(m => m.id === selectedModel)?.label}`)}>
-          🧠 Load
-        </button>
-        <button className="btn btn-ghost btn-sm"
-          onClick={() => handleAction(`/api/test-model/${selectedModel}`, `Testing ${MODELS.find(m => m.id === selectedModel)?.label}`)}>
-          Test
+        <button className="btn btn-ghost btn-sm" onClick={handleTest} title="Use selected model">
+          Use
         </button>
       </div>
 
@@ -194,10 +266,10 @@ export default function ControlPanel({ apiAction, apiBase }) {
         onDrop={onDrop}
         onClick={() => fileRef.current?.click()}
       >
-        📁 Drop any parking lot image here to analyze
+        📁 Drop a parking lot image or video here
         <br />
         <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>
-          Works with aerial views, Google Images, screenshots, etc.
+          Aerial views, Google Images, screenshots, etc.
         </span>
         <input
           ref={fileRef}
@@ -210,8 +282,105 @@ export default function ControlPanel({ apiAction, apiBase }) {
 
       {status && <div style={style.statusMsg}>{status}</div>}
 
+      {/* Raw uploaded image + ROI controls */}
+      {uploadedImage && !resultImage && (
+        <div style={{ marginTop: 12 }}>
+          <img src={uploadedImage} alt="Uploaded" style={style.resultImg} />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setRoiModalOpen(true)}>
+              ✏️ Draw ROIs
+            </button>
+            {rois.length > 0 && (
+              <span className="badge badge-info">
+                {rois.length} ROI{rois.length !== 1 ? 's' : ''} defined
+              </span>
+            )}
+          </div>
+          {roiMsg && (
+            <div style={{
+              ...style.statusMsg,
+              color: roiMsg.startsWith('Error') ? 'var(--color-occupied)' : 'var(--color-vacant)',
+              background: roiMsg.startsWith('Error') ? 'rgba(244,63,94,0.1)' : 'rgba(16,185,129,0.1)',
+            }}>
+              {roiMsg}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Annotated result image */}
       {resultImage && (
         <div style={{ marginTop: 12 }}>
           <img
             src={`data:image/jpeg;base64,${resultImage}`}
+            alt="Analyzed"
+            style={style.resultImg}
+          />
+          {resultData && (
+            <div style={style.resultStats}>
+              <span className="badge badge-vacant">🟢 {resultData.available} Available</span>
+              <span className="badge badge-occupied">🔴 {resultData.occupied} Occupied</span>
+              <span className="badge badge-info">📊 {resultData.occupancy_percent}%</span>
+            </div>
+          )}
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ marginTop: 8, width: '100%' }}
+            onClick={() => { setResultImage(null); setResultData(null) }}
+          >
+            ← Back to image
+          </button>
+        </div>
+      )}
+
+      {/* ROI Editor Modal — fullscreen */}
+      {roiModalOpen && uploadedImage && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 1000,
+          background: 'rgba(0,0,0,0.96)',
+          display: 'flex', flexDirection: 'column',
+        }}>
+          {/* Header bar */}
+          <div style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '10px 20px', borderBottom: '1px solid var(--border-color)',
+            background: 'var(--bg-card)', flexShrink: 0,
+          }}>
+            <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+              ROI Editor — click to add polygon points, double-click to close
+            </span>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={async () => { await saveRois(rois); setRoiModalOpen(false) }}
+              >
+                Save & Close
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setRoiModalOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+
+          {/* Image + canvas — fills all remaining space */}
+          <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
+            <RoiEditor backgroundImage={uploadedImage} rois={rois} onRoisChange={setRois} idPrefix="test" />
+          </div>
+
+          {roiMsg && (
+            <div style={{
+              padding: '8px 20px', fontSize: '0.8rem', flexShrink: 0,
+              color: roiMsg.startsWith('Error') ? 'var(--color-occupied)' : 'var(--color-vacant)',
+              background: 'var(--bg-card)',
+            }}>
+              {roiMsg}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

@@ -315,6 +315,43 @@ body::before {
 .gap-2 { gap: 0.5rem; }
 .gap-4 { gap: 1rem; }
 
+/* ── Panel Select (matches btn-ghost btn-sm) ───────────── */
+.panel-select {
+  flex: 1;
+  background: var(--bg-glass);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 6px 14px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.panel-select:hover {
+  color: var(--text-primary);
+  border-color: var(--border-glow);
+}
+
+.panel-select:focus {
+  outline: none;
+  border-color: var(--border-glow);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+.panel-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.panel-select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
 /* ── Fade in animation ─────────────────────────────────── */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -323,6 +360,13 @@ body::before {
 
 .fade-in {
   animation: fadeIn 0.4s ease-out both;
+}
+
+/* ── Indeterminate progress bar ────────────────────────── */
+@keyframes indeterminate {
+  0%   { transform: scaleX(0.1) translateX(-100%); }
+  50%  { transform: scaleX(0.5) translateX(30%); }
+  100% { transform: scaleX(0.1) translateX(400%); }
 }
 
 /* ── Number counter animation ──────────────────────────── */

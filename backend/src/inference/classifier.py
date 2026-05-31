@@ -32,8 +32,11 @@ class ParkingClassifier:
     IMAGENET_MEAN = [0.485, 0.456, 0.406]
     IMAGENET_STD  = [0.229, 0.224, 0.225]
 
+    _INFERENCE_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26"}
+
     def __init__(self, model_name=None, device=None, confidence_threshold=None):
-        self.model_name = model_name or config.ACTIVE_MODEL
+        candidate = model_name or config.ACTIVE_MODEL
+        self.model_name = candidate if candidate in self._INFERENCE_MODELS else None
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.threshold = confidence_threshold or config.CNN_CONFIDENCE_THRESHOLD
         self.model = None
@@ -47,6 +50,10 @@ class ParkingClassifier:
 
     def load(self):
         """Load the trained model weights."""
+        if self.model_name is None:
+            self.model = None
+            self._yolo_classify = None
+            return
         if self.model_name == "yolo26_classify":
             self._load_yolo_classify()
             return
@@ -54,7 +61,7 @@ class ParkingClassifier:
         try:
             self.model = load_model(self.model_name, device=self.device)
             logger.info(f"✅ Loaded model: {self.model_name} on {self.device}")
-        except FileNotFoundError as e:
+        except (FileNotFoundError, ValueError) as e:
             logger.warning(f"⚠️  {e}")
             self.model = None
         self._yolo_classify = None

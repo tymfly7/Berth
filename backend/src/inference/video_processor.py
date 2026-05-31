@@ -8,8 +8,10 @@ Implements the same interface as DemoProcessor so main.py can swap
 between them transparently.
 """
 
+import os
 import sys
 import base64
+import queue
 import threading
 import time
 import logging
@@ -17,7 +19,29 @@ from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 import cv2
+import numpy as np
 import config
+from src.roi.roi_store import RoiStore
+
+# FFMPEG capture options applied to all VideoCapture instances:
+#
+# multiple_requests;0  — disable persistent HTTP connections.  YouTube HLS
+#   segments are served from different CDN hosts; ffmpeg's reconnect logic hits
+#   a host-mismatch check on every segment, logs "Cannot reuse HTTP connection
+#   for different host", and adds a full TCP+TLS handshake per segment.
+#   Disabling persistent connections avoids that code path entirely.
+#
+# fflags;nobuffer  — return packets immediately without input-level buffering,
+#   reducing the lag between the live edge and the first decoded frame.
+#
+# live_start_index;-3  — tell ffmpeg's HLS parser to start 3 segments from the
+#   end of the live manifest (near the live edge) instead of the beginning of
+#   YouTube's DVR window, which would add 30–60 s of initial latency.
+#   Ignored by non-HLS sources (USB cameras, files, RTSP).
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "multiple_requests;0|fflags;nobuffer|live_start_index;-3",
+)
 
 logger = logging.getLogger("smartpark.video")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
@@ -46,6 +70,8 @@ class VideoProcessor:
         self._heatmap = {}
 
         self._detector = self._load_detector()
+        self._roi_cache: list = []
+        self._roi_cache_ts: float = 0.0
 
     # ── Setup ──────────────────────────────────────────────────────────────
 
@@ -53,12 +79,14 @@ class VideoProcessor:
         from src.inference.slot_detector import SlotDetector
         try:
             detector = SlotDetector(model_name=self.model_name, camera_id=self.camera_id)
-            if detector.classifier.is_loaded():
+            if detector.classifier.model_name is None:
+                logger.info("VideoProcessor ready (no model selected — activate one to enable inference)")
+            elif detector.classifier.is_loaded():
                 logger.info(f"VideoProcessor ready: {self.model_name}")
             else:
                 logger.warning(
                     f"Model weights not found for '{self.model_name}' — "
-                    "predictions will show as unknown until a model is trained"
+                    "train the model first"
                 )
             return detector
         except Exception as e:
@@ -96,7 +124,6 @@ class VideoProcessor:
         return self._source_type == "youtube"
 
     def _is_file(self):
-        # Explicit file type, or a bare string path under the legacy "auto" mode.
         return self._source_type == "file" or (
             self._source_type == "auto" and isinstance(self._source, str)
         )
@@ -105,8 +132,8 @@ class VideoProcessor:
         """
         Open a cv2.VideoCapture for the current source.
 
-        For youtube sources the watch URL is resolved to a live HLS stream URL
-        first (re-resolved when force_refresh is set, since those URLs expire).
+        For YouTube sources the watch URL is resolved to a live HLS stream URL
+        first. Sets a minimal buffer size for YouTube to reduce lag.
         Returns an opened VideoCapture, or None on failure.
         """
         if self._is_youtube():
@@ -125,85 +152,186 @@ class VideoProcessor:
         if not cap.isOpened():
             cap.release()
             return None
+
+        if self._is_youtube():
+            # Keep only 1 frame in the internal queue so we always get the
+            # freshest available frame rather than a buffered stale one.
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
         return cap
 
     def _loop(self):
+        if self._is_youtube():
+            self._youtube_loop()
+        else:
+            self._regular_loop()
+
+    # ── Regular (USB / RTSP / file) loop ──────────────────────────────────
+
+    def _regular_loop(self):
         cap = self._open_capture()
         if cap is None:
             logger.error(f"Cannot open video source: {self._source}")
-            if not self._is_youtube():
-                # Non-live sources don't auto-recover; give up as before.
-                self.running = False
-                return
+            self.running = False
+            return
 
-        fail_count = 0
         try:
             while self.running:
-                if cap is None:
-                    # (Re)connect — re-resolve youtube URLs which expire.
-                    cap = self._open_capture(force_refresh=True)
-                    if cap is None:
-                        logger.warning(
-                            f"Reconnect failed for {self._source}, retrying in 2s..."
-                        )
-                        time.sleep(2.0)
-                        continue
-                    logger.info(f"Reconnected to source: {self._source}")
-                    fail_count = 0
-
                 ret, raw_frame = cap.read()
                 if not ret:
                     if self._is_file():
-                        # Loop video file back to start
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        continue
-                    elif self._is_youtube():
-                        fail_count += 1
-                        if fail_count >= 5:
-                            logger.warning(
-                                "YouTube frame grabs failing — re-resolving stream URL"
-                            )
-                            cap.release()
-                            cap = None
-                            time.sleep(2.0)
-                        else:
-                            time.sleep(0.1)
                         continue
                     else:
                         logger.warning("Camera frame grab failed, retrying...")
                         time.sleep(0.1)
                         continue
 
-                fail_count = 0
-                frame = cv2.resize(raw_frame, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
-                result = self._detector.detect(frame, camera_id=self.camera_id)
-                annotated = self._detector.draw_overlay(frame.copy(), result)
-
-                cv2.putText(
-                    annotated,
-                    f"Smart Parking AI — {self.model_name}",
-                    (15, 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (200, 200, 200), 2,
-                )
-
-                metrics = self._result_to_metrics(result)
-                ts = datetime.now(timezone.utc).isoformat()
-
-                with self._lock:
-                    self._frame = annotated
-                    self._metrics = metrics
-                    self._history.append({
-                        "timestamp": ts,
-                        "available": metrics["available"],
-                        "occupied": metrics["occupied"],
-                        "occupancy_percent": metrics["occupancy_percent"],
-                    })
-                    self._update_heatmap(result["slots"])
-
+                self._process_frame(raw_frame)
                 time.sleep(1.0 / config.STREAM_FPS)
         finally:
-            if cap is not None:
-                cap.release()
+            cap.release()
+
+    # ── YouTube loop with background grab thread ───────────────────────────
+
+    def _youtube_loop(self):
+        """
+        YouTube HLS streams have 2–8 s segment boundaries; a blocking cap.read()
+        call stalls the inference loop for that entire duration. This loop
+        separates concerns:
+
+          - grab thread  : owns cap, calls cap.read() as fast as possible,
+                           always keeps the single freshest frame in frame_q.
+          - inference loop: pulls from frame_q (non-blocking with timeout),
+                           runs detection, updates shared state.
+
+        Because the grab thread drains the HLS buffer continuously, the
+        inference loop sees new frames immediately after they are decoded
+        rather than waiting for a full segment boundary.
+        """
+        frame_q: queue.Queue = queue.Queue(maxsize=2)
+        stop_grab = threading.Event()
+        cap_holder = [self._open_capture()]
+
+        if cap_holder[0] is None:
+            logger.warning(
+                f"YouTube initial connect failed for '{self._source}', "
+                "grab thread will retry..."
+            )
+
+        def _grab():
+            fails = 0
+            while not stop_grab.is_set():
+                cap = cap_holder[0]
+                if cap is None:
+                    new = self._open_capture(force_refresh=True)
+                    if new:
+                        cap_holder[0] = new
+                        fails = 0
+                        logger.info(f"YouTube grab thread connected: {self._source}")
+                    else:
+                        stop_grab.wait(2.0)
+                    continue
+
+                ret, frame = cap.read()
+                if ret:
+                    fails = 0
+                    # Discard any stale buffered frame; keep only the freshest.
+                    while not frame_q.empty():
+                        try:
+                            frame_q.get_nowait()
+                        except queue.Empty:
+                            break
+                    try:
+                        frame_q.put_nowait(frame)
+                    except queue.Full:
+                        pass
+                else:
+                    fails += 1
+                    if fails >= 5:
+                        logger.warning(
+                            f"YouTube grab failing — re-resolving stream for '{self._source}'"
+                        )
+                        try:
+                            cap.release()
+                        except Exception:
+                            pass
+                        cap_holder[0] = None
+                        fails = 0
+                    else:
+                        time.sleep(0.05)
+
+            cap = cap_holder[0]
+            if cap:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+
+        grab_t = threading.Thread(target=_grab, daemon=True, name="yt-grab")
+        grab_t.start()
+
+        try:
+            while self.running:
+                try:
+                    raw_frame = frame_q.get(timeout=5.0)
+                except queue.Empty:
+                    # No frame yet (still connecting or stream hiccup); keep waiting.
+                    continue
+
+                self._process_frame(raw_frame)
+                # No sleep here — frame_q.get() is the natural throttle.
+                # New frames only arrive as fast as the HLS stream delivers them.
+        finally:
+            stop_grab.set()
+            grab_t.join(timeout=5)
+
+    # ── Shared frame processing ────────────────────────────────────────────
+
+    def _process_frame(self, raw_frame):
+        frame = cv2.resize(raw_frame, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
+        result = self._detector.detect(frame, camera_id=self.camera_id)
+
+        now = time.time()
+        if now - self._roi_cache_ts > 1.0:
+            self._roi_cache = RoiStore.get_rois(self.camera_id)
+            self._roi_cache_ts = now
+
+        # BGR colors keyed by slot status
+        _STATUS_COLOR = {
+            "vacant":   (80, 200, 80),
+            "occupied": (60,  60, 220),
+            "unknown":  (180, 180, 180),
+        }
+
+        status_map = {s["id"]: s["status"] for s in result.get("slots", [])}
+
+        display = frame.copy()
+        if self._roi_cache:
+            h, w = display.shape[:2]
+            for roi in self._roi_cache:
+                pts = np.array(
+                    [[int(p[0] * w), int(p[1] * h)] for p in roi.get("polygon", [])],
+                    np.int32,
+                )
+                if len(pts) >= 3:
+                    status = status_map.get(roi.get("id"), "unknown")
+                    color = _STATUS_COLOR.get(status, _STATUS_COLOR["unknown"])
+                    cv2.polylines(display, [pts], True, color, 2)
+
+        metrics = self._result_to_metrics(result)
+        ts = datetime.now(timezone.utc).isoformat()
+
+        with self._lock:
+            self._frame = display
+            self._metrics = metrics
+            self._history.append({
+                "timestamp": ts,
+                "available": metrics["available"],
+                "occupied": metrics["occupied"],
+                "occupancy_percent": metrics["occupancy_percent"],
+            })
+            self._update_heatmap(result["slots"])
 
     # ── Helpers ────────────────────────────────────────────────────────────
 

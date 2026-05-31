@@ -265,7 +265,7 @@ class TrainManager:
             with _lock:
                 _state["message"] = "Starting YOLO26 detection training..."
 
-            model = YOLO("yolo26n.yaml")  # build from scratch, no pretrained weights
+            model = YOLO("yolo26n.pt")
 
             def on_batch_end(trainer):
                 _batch_count[0] += 1
@@ -438,3 +438,155 @@ class TrainManager:
         plt.savefig(plot_path, dpi=150, bbox_inches="tight")
         plt.close()
         logger.info(f"📊 Comparison plot saved to {plot_path}")
+
+    # ── Evaluate-only (no retraining) ─────────────────────────────────────────
+
+    def start_evaluation(self):
+        """Evaluate all trained models without retraining. Returns initial status dict."""
+        with _lock:
+            if _state.get("status") == "training":
+                return {"status": "error", "message": "A training/evaluation job is already running."}
+            _state["status"]     = "training"
+            _state["message"]    = "Starting evaluation…"
+            _state["model_name"] = "all"
+            _state["epoch"]      = 0
+            _state["results"]    = None
+            _state["comparison"] = None
+        thread = threading.Thread(target=self._evaluate_all, daemon=True)
+        thread.start()
+        return {"status": "training", "message": "Evaluation started"}
+
+    def _evaluate_all(self):
+        """Load saved weights for every trained model and evaluate — no retraining."""
+        import csv as csv_mod
+        try:
+            cnn_candidates = [
+                ("cnn_scratch",  config.CNN_SCRATCH_PATH),
+                ("resnet50",     config.RESNET50_PATH),
+                ("mobilenetv4",  config.MOBILENETV4_PATH),
+            ]
+            cnn_present = [(n, p) for n, p in cnn_candidates if p.exists()]
+            yolo_cl_present = config.YOLO26_CLASSIFY_PATH.exists()
+            yolo_dt_present = config.YOLO26_DETECT_PATH.exists()
+            total = len(cnn_present) + yolo_cl_present + yolo_dt_present
+
+            if total == 0:
+                with _lock:
+                    _state["status"]  = "error"
+                    _state["message"] = "No trained models found. Train at least one model first."
+                return
+
+            # Load dataset only if CNN models need it
+            data = device = None
+            if cnn_present:
+                with _lock:
+                    _state["message"] = "Loading dataset for evaluation…"
+                import torch
+                from src.models.model_factory import load_model
+                from src.data_prep.preprocessor import prepare_dataset
+                from src.eval.evaluator import evaluate_model
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                data = prepare_dataset()
+
+            results = []
+            done = 0
+
+            # ── CNN / transfer models ─────────────────────────────────────────
+            for name, _ in cnn_present:
+                done += 1
+                with _lock:
+                    _state["message"]    = f"Evaluating {name} ({done}/{total})…"
+                    _state["model_name"] = name
+
+                model    = load_model(name, device=device)
+                eval_res = evaluate_model(model, data["test_loader"], device=device)
+
+                # Read supplementary info from history JSON
+                history_path = config.OUTPUT_DIR / f"history_{name}.json"
+                train_time = best_val_acc = None
+                epochs = 0
+                if history_path.exists():
+                    with open(history_path) as fh:
+                        h = json.load(fh)
+                    val_acc_list = h.get("val_acc", [])
+                    train_time   = round(sum(h.get("epoch_times", [])), 1)
+                    best_val_acc = round(max(val_acc_list), 2) if val_acc_list else None
+                    epochs       = len(val_acc_list)
+
+                params = model.count_parameters()
+                results.append({
+                    "model":            name,
+                    "type":             "classification",
+                    "epochs":           epochs,
+                    "train_time":       train_time,
+                    "best_val_acc":     best_val_acc,
+                    "test_accuracy":    eval_res["accuracy"],
+                    "test_precision":   eval_res["precision"],
+                    "test_recall":      eval_res["recall"],
+                    "test_f1":          eval_res["f1_score"],
+                    "total_samples":    eval_res["total_samples"],
+                    "total_params":     params["total"],
+                    "trainable_params": params["trainable"],
+                })
+
+            # ── YOLO Classify ─────────────────────────────────────────────────
+            if yolo_cl_present:
+                done += 1
+                with _lock:
+                    _state["message"]    = f"Reading yolo26_classify metrics ({done}/{total})…"
+                    _state["model_name"] = "yolo26_classify"
+
+                entry = {"model": "yolo26_classify", "type": "classification"}
+                csv_path = config.OUTPUT_DIR / "yolo26_classify" / "run" / "results.csv"
+                if csv_path.exists():
+                    with open(csv_path) as fh:
+                        rows = list(csv_mod.DictReader(fh))
+                    if rows:
+                        last = {k.strip(): v.strip() for k, v in rows[-1].items()}
+                        entry.update({
+                            "epochs":        int(float(last.get("epoch", len(rows)))),
+                            "train_time":    round(float(last.get("time", 0)), 1),
+                            "test_accuracy": round(float(last.get("metrics/accuracy_top1", 0)) * 100, 2),
+                        })
+                results.append(entry)
+
+            # ── YOLO Detect ───────────────────────────────────────────────────
+            if yolo_dt_present:
+                done += 1
+                with _lock:
+                    _state["message"]    = f"Reading yolo26_detect metrics ({done}/{total})…"
+                    _state["model_name"] = "yolo26_detect"
+
+                entry = {"model": "yolo26", "type": "detection"}
+                csv_path = config.OUTPUT_DIR / "yolo26_detect" / "run" / "results.csv"
+                if csv_path.exists():
+                    with open(csv_path) as fh:
+                        rows = list(csv_mod.DictReader(fh))
+                    if rows:
+                        last = {k.strip(): v.strip() for k, v in rows[-1].items()}
+                        entry.update({
+                            "epochs":          int(float(last.get("epoch", len(rows)))),
+                            "train_time":      round(float(last.get("time", 0)), 1),
+                            "test_accuracy":   round(float(last.get("metrics/mAP50(B)", 0)) * 100, 2),
+                            "test_precision":  round(float(last.get("metrics/precision(B)", 0)) * 100, 2),
+                            "test_recall":     round(float(last.get("metrics/recall(B)", 0)) * 100, 2),
+                        })
+                results.append(entry)
+
+            # ── Persist ───────────────────────────────────────────────────────
+            comparison_path = config.OUTPUT_DIR / "model_comparison.json"
+            with open(comparison_path, "w") as fh:
+                json.dump(results, fh, indent=2)
+
+            with _lock:
+                _state["status"]     = "done"
+                _state["message"]    = f"Evaluation complete — {len(results)} model(s) evaluated."
+                _state["comparison"] = results
+
+            logger.info(f"✅ Evaluate-all complete: {[r['model'] for r in results]}")
+
+        except Exception as e:
+            logger.exception(f"❌ Evaluate-all failed: {e}")
+            with _lock:
+                _state["status"]  = "error"
+                _state["message"] = f"Evaluation failed: {str(e)}"

@@ -91,10 +91,13 @@ class ParkingMobileNetV4(nn.Module):
             global_pool='avg',
         )
 
-        # Probe feature dimension with a dummy forward pass
+        # Probe feature dimension — eval mode prevents BN failure when
+        # batch_size=1 hits a 1×1 spatial tensor inside the backbone.
+        self.backbone.eval()
         with torch.no_grad():
             dummy = torch.zeros(1, 3, 224, 224)
             num_features = self.backbone(dummy).shape[1]
+        self.backbone.train()  # restore; freeze logic below overrides if needed
 
         self._backbone_frozen = freeze_backbone
         if freeze_backbone:

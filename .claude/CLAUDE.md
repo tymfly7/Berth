@@ -1,5 +1,22 @@
 # Project Instructions
 
+## Workflow Requirements.
+Always log implementation work to the requested phase log file as a standard step at the END of every feature/bug-fix task, without needing to be reminded.
+
+## Logging Conventions
+When logging work, ALWAYS confirm the exact target log file (e.g., log_phaseN.md) before writing, and write only to the file the user named.
+
+
+## Frontend / JavaScript
+After any frontend change (removing imports, refactoring components), verify there are no orphaned references or missing dependencies (e.g., useNavigate, react-router-dom) by checking imports and running the dev build before declaring done.
+
+## ML / Training Conventions
+Do not start coding until you have confirmed the correct data source and run a quick verification.
+
+
+## Performance / Exploration section.
+Do not read large directories or run polling commands; respect directory restrictions and prefer targeted Glob/Grep instead of broad reads.
+
 ## Large directories — do NOT read file contents
 
 These directories contain huge numbers of files. Reading individual file contents will exhaust token limits and cause failures.
