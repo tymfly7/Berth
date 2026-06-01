@@ -1456,6 +1456,79 @@ async def ingest_alerts(request: Request):
     return {"inserted": inserted, "received": len(rows)}
 
 
+# ── Data Augmentation Preview ─────────────────────────────
+@app.post("/api/augment/preview", dependencies=[Depends(verify_api_key)])
+async def augment_preview(request: Request):
+    """Sample images from the dataset and return augmented versions as base64 JPEGs."""
+    import random as _rnd
+
+    body = await request.json()
+    label    = body.get("label", "both")
+    shadow_p = max(0.0, min(1.0, float(body.get("shadow_p", 0.5))))
+    night    = bool(body.get("night", False))
+    flip     = bool(body.get("flip", True))
+    rotation = max(0, min(45, int(body.get("rotation", 15))))
+    jitter   = max(0.0, min(1.0, float(body.get("jitter", 0.3))))
+    count    = max(1, min(8, int(body.get("count", 6))))
+
+    classes = ["occupied", "vacant"] if label == "both" else [label]
+    candidates = []
+    for cls in classes:
+        cls_dir = config.DATA_DIR / cls
+        if cls_dir.exists():
+            for p in cls_dir.iterdir():
+                if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp"):
+                    candidates.append((p, cls))
+
+    if not candidates:
+        raise HTTPException(400, "No dataset images found. Prepare the dataset first via the Controls panel.")
+
+    chosen = _rnd.sample(candidates, min(count, len(candidates)))
+    results = []
+
+    for img_path, cls in chosen:
+        try:
+            img = Image.open(img_path).convert("RGB").resize((224, 224), Image.BILINEAR)
+        except Exception:
+            continue
+        arr = np.array(img, dtype=np.float32)
+
+        if flip and _rnd.random() < 0.5:
+            arr = arr[:, ::-1, :].copy()
+
+        if rotation > 0:
+            angle = _rnd.uniform(-rotation, rotation)
+            arr = np.array(
+                Image.fromarray(arr.astype(np.uint8)).rotate(angle, expand=False),
+                dtype=np.float32,
+            )
+
+        if jitter > 0:
+            brightness = 1.0 + _rnd.uniform(-jitter, jitter)
+            arr = np.clip(arr * brightness, 0, 255)
+            contrast = 1.0 + _rnd.uniform(-jitter * 0.7, jitter * 0.7)
+            mean = arr.mean()
+            arr = np.clip((arr - mean) * contrast + mean, 0, 255)
+
+        if shadow_p > 0 and _rnd.random() < shadow_p:
+            _, w_s = arr.shape[:2]
+            bw = _rnd.randint(w_s // 5, 3 * w_s // 5)
+            x0 = _rnd.randint(0, w_s - bw)
+            arr[:, x0:x0 + bw] *= _rnd.uniform(0.35, 0.65)
+
+        if night:
+            arr *= _rnd.uniform(0.15, 0.35)
+            arr[:, :, 2] = np.clip(arr[:, :, 2] * 1.5, 0, 255)
+
+        arr = np.clip(arr, 0, 255).astype(np.uint8)
+        buf = io.BytesIO()
+        Image.fromarray(arr).save(buf, format="JPEG", quality=85)
+        import base64 as _b64
+        results.append({"label": cls, "image": _b64.b64encode(buf.getvalue()).decode()})
+
+    return {"images": results, "count": len(results)}
+
+
 # ── Entry point ───────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=True)
