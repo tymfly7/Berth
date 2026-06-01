@@ -203,3 +203,20 @@ users had to manually turn cameras back on every time the server restarted.
 `_restore_active()` auto-starts any cameras that were on before shutdown. A plain browser
 refresh (no backend restart) already worked; explicit deactivation by the user still
 correctly persists `active: false`.
+
+---
+
+## Camera Registry — Per-Camera ROI Editor
+**Date:** 2026-06-01
+
+### Change
+- `backend/main.py`: added `GET /api/roi/{camera_id}/snapshot` endpoint that serves the
+  saved snapshot JPEG for a camera's ROI config.
+- `frontend/src/components/CameraManager.jsx`: added `✎ ROIs` button in every camera row.
+  On click, loads the camera's saved ROIs + snapshot (falls back to a live WS frame if the
+  camera is active and no snapshot exists), then opens a fullscreen modal (position: fixed,
+  matching VideoFeed's ROI editor style) with RoiEditor, Auto-detect, Save, and Done buttons.
+
+### Result
+ROIs can be drawn and edited for any registered camera directly from the Camera Registry
+table without navigating away or requiring the camera to be in a specific state.
