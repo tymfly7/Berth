@@ -199,7 +199,7 @@ def propose_from_frames(
         from pathlib import Path
 
         # Project YOLO model first, then a small pretrained fallback
-        candidates = [str(cfg.YOLO26_PATH), "yolo11n.pt"]
+        candidates = [str(cfg.YOLO26_DETECT_PATH), "yolo11n.pt"]
         yolo_model = None
         for candidate in candidates:
             try:

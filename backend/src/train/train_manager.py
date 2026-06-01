@@ -342,7 +342,7 @@ class TrainManager:
                 with _lock:
                     _state["elapsed"] = round(time.time() - _detect_start, 1)
                     _state["message"] = (
-                        f"Epoch {trainer.epoch + 1}/{config.EPOCHS} — "
+                        f"Epoch {trainer.epoch + 1}/{config.YOLO_DETECT_EPOCHS} — "
                         f"batch {_batch_count[0]} — loss: {loss_val:.4f}"
                     )
 

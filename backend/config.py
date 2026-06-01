@@ -50,11 +50,8 @@ ACTIVE_MODEL = os.getenv("SMARTPARK_MODEL", "yolo26_classify")
 # Model paths
 # ---------------------------------------------------------------------------
 CNN_SCRATCH_PATH      = MODEL_DIR / "best_cnn_scratch.pth"
-RESNET18_PATH         = MODEL_DIR / "best_resnet18.pth"
 RESNET50_PATH         = MODEL_DIR / "best_resnet50.pth"
-MOBILENET_PATH        = MODEL_DIR / "best_mobilenetv2.pth"
 MOBILENETV4_PATH      = MODEL_DIR / "best_mobilenetv4.pth"
-YOLO26_PATH           = MODEL_DIR / "best_yolo26_detect.pt"
 YOLO26_CLASSIFY_PATH  = MODEL_DIR / "best_yolo26_classify.pt"
 YOLO26_DETECT_PATH    = MODEL_DIR / "best_yolo26_detect.pt"
 YOLO_DATASET_DIR         = DATA_DIR  / "yolo_detect_dataset"
