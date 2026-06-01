@@ -30,15 +30,19 @@ export default function AdminView() {
     total: 0, available: 0, occupied: 0,
     occupancy_percent: 0, avg_confidence: 0, slots: [],
   })
+  const [cameraMetrics, setCameraMetrics] = useState(null)
   const [history, setHistory] = useState([])
   const [heatmap, setHeatmap] = useState([])
   const [modelInfo, setModelInfo] = useState(null)
   const [cameras, setCameras] = useState([])
-  const [roiSlots, setRoiSlots] = useState([])
-  const [liveSlots, setLiveSlots] = useState([])  // slot statuses from active camera WS
+  const [allCameraSlots, setAllCameraSlots] = useState([])
+  const [liveSlotsMap, setLiveSlotsMap] = useState({})
+  const [lotMapIdx, setLotMapIdx] = useState(0)
   const wsRef = useRef(null)
   const reconnectTimer = useRef(null)
-  const camWsRef = useRef(null)
+  const camWsRefs = useRef({})
+
+  const displayMetrics = cameraMetrics || metrics
 
   const connectWs = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -92,14 +96,22 @@ export default function AdminView() {
   }
 
   const fetchRoiSlots = useCallback(async (camList) => {
-    try {
-      const active = camList?.find(c => c.active)
-      const cameraId = active?.roi_camera_id || active?.id || 'default'
-      const res = await fetch(`${API_BASE}/api/roi/${cameraId}`)
-      if (!res.ok) return
-      const rois = await res.json()
-      setRoiSlots(Array.isArray(rois) ? rois.filter(r => r.polygon?.length >= 3).map(roiToSlot) : [])
-    } catch { /* silent */ }
+    if (!camList?.length) return
+    const results = await Promise.all(
+      camList.map(async cam => {
+        try {
+          const cameraId = cam.roi_camera_id || cam.id
+          const res = await fetch(`${API_BASE}/api/roi/${cameraId}`)
+          if (!res.ok) return null
+          const rois = await res.json()
+          const slots = Array.isArray(rois)
+            ? rois.filter(r => r.polygon?.length >= 3).map(roiToSlot)
+            : []
+          return slots.length > 0 ? { cameraId: cam.id, name: cam.name, active: cam.active, slots } : null
+        } catch { return null }
+      })
+    )
+    setAllCameraSlots(results.filter(Boolean))
   }, [])
 
   const fetchCameras = useCallback(async () => {
@@ -133,22 +145,44 @@ export default function AdminView() {
     }
   }, [connectWs, fetchCameras])
 
-  // Subscribe to the active camera's WS to get per-slot statuses for LotMap coloring.
+  // Subscribe to all active cameras' WS for live slot statuses.
   useEffect(() => {
-    const active = cameras.find(c => c.active)
-    camWsRef.current?.close()
-    if (!active) { setLiveSlots([]); return }
-    const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${active.id}`)
-    camWsRef.current = ws
-    ws.onmessage = (e) => {
-      try {
-        const d = JSON.parse(e.data)
-        if (Array.isArray(d.metrics?.slots)) setLiveSlots(d.metrics.slots)
-      } catch { /* ignore */ }
+    const activeCams = cameras.filter(c => c.active)
+    const activeIds = new Set(activeCams.map(c => c.id))
+
+    Object.entries(camWsRefs.current).forEach(([id, ws]) => {
+      if (!activeIds.has(id)) { ws.close(); delete camWsRefs.current[id] }
+    })
+
+    if (!activeCams.length) { setLiveSlotsMap({}); setCameraMetrics(null); return }
+
+    activeCams.forEach((cam, i) => {
+      if (camWsRefs.current[cam.id]) return
+      const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.id}`)
+      camWsRefs.current[cam.id] = ws
+      ws.onmessage = (e) => {
+        try {
+          const d = JSON.parse(e.data)
+          if (d.metrics) {
+            if (i === 0) setCameraMetrics(d.metrics)
+            if (Array.isArray(d.metrics.slots))
+              setLiveSlotsMap(prev => ({ ...prev, [cam.id]: d.metrics.slots }))
+          }
+        } catch { /* ignore */ }
+      }
+      ws.onerror = () => { ws.close(); delete camWsRefs.current[cam.id] }
+    })
+
+    return () => {
+      Object.values(camWsRefs.current).forEach(ws => ws.close())
+      camWsRefs.current = {}
+      setCameraMetrics(null)
     }
-    ws.onerror = () => ws.close()
-    return () => ws.close()
   }, [cameras])
+
+  useEffect(() => {
+    setLotMapIdx(i => Math.min(i, Math.max(0, allCameraSlots.length - 1)))
+  }, [allCameraSlots.length])
 
   const apiAction = async (endpoint, method = 'POST', body = null) => {
     try {
@@ -180,23 +214,50 @@ export default function AdminView() {
             cameras={cameras}
           />
           <div className="metrics-row fade-in">
-            <MetricCards metrics={metrics} />
+            <MetricCards metrics={displayMetrics} />
           </div>
-          <LotMap
-            slots={(() => {
-              if (metrics.slots.length > 0) return metrics.slots
-              if (liveSlots.length > 0 && roiSlots.length > 0) {
-                const statusById = Object.fromEntries(liveSlots.map(s => [s.id, s.status]))
-                return roiSlots.map(s => ({ ...s, status: statusById[s.id] ?? s.status }))
-              }
-              return []
-            })()}
-            demo={metrics.slots.length === 0}
-          />
+          {allCameraSlots.length > 0 && (() => {
+            const safeIdx = Math.min(lotMapIdx, allCameraSlots.length - 1)
+            const cam = allCameraSlots[safeIdx]
+            const liveForCam = liveSlotsMap[cam.cameraId] || []
+            const allLive = [...displayMetrics.slots, ...liveForCam]
+            const statusById = Object.fromEntries(allLive.map(s => [s.id, s.status]))
+            const slots = cam.slots.map(s => ({ ...s, status: statusById[s.id] ?? null }))
+            const multi = allCameraSlots.length > 1
+            return (
+              <>
+                {multi && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      {allCameraSlots.map((c, i) => (
+                        <button key={c.cameraId} onClick={() => setLotMapIdx(i)} title={c.name}
+                          style={{ width: 8, height: 8, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
+                            background: i === safeIdx ? 'var(--accent-primary)' : 'var(--border-color)', transition: 'background 0.2s' }} />
+                      ))}
+                    </div>
+                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
+                      Use ‹ › arrows to switch between lots
+                    </span>
+                  </div>
+                )}
+                <div style={{ position: 'relative' }}>
+                  {multi && <>
+                    <button className="btn btn-ghost btn-sm"
+                      style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 2, fontSize: '1.1rem', padding: '4px 10px' }}
+                      onClick={() => setLotMapIdx(i => (i - 1 + allCameraSlots.length) % allCameraSlots.length)}>‹</button>
+                    <button className="btn btn-ghost btn-sm"
+                      style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 2, fontSize: '1.1rem', padding: '4px 10px' }}
+                      onClick={() => setLotMapIdx(i => (i + 1) % allCameraSlots.length)}>›</button>
+                  </>}
+                  <LotMap slots={slots} demo={allLive.length === 0} title={multi ? cam.name : null} />
+                </div>
+              </>
+            )
+          })()}
           <AnalyticsChart history={history} />
 
           <div className="analytics-row">
-            <ConfidenceGauge confidence={metrics.avg_confidence} />
+            <ConfidenceGauge confidence={displayMetrics.avg_confidence} />
             <HeatmapView
                 heatmap={heatmap}
                 cameraId={cameras.find(c => c.active)?.roi_camera_id || cameras.find(c => c.active)?.id || null}

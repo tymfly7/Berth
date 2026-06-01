@@ -4,8 +4,8 @@ import MultiCameraGrid from './MultiCameraGrid'
 
 // Frame dimensions must match config.FRAME_WIDTH / config.FRAME_HEIGHT on the backend.
 // The ROI canvas is sized to this ratio so normalized coords map 1-to-1 to VideoProcessor pixels.
-const FRAME_W = 900
-const FRAME_H = 500
+const FRAME_W = 1280
+const FRAME_H = 720
 
 
 const roiBtnStyle = {

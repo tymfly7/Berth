@@ -121,8 +121,8 @@ class ParkingClassifier:
     def _yolo_result_to_dict(self, result) -> dict:
         """Convert a single Ultralytics classify result to a prediction dict."""
         probs = result.probs.data.cpu().numpy()
-        # Class 0 = vacant, Class 1 = occupied (matches yolo_converter class order)
-        prob_occupied = float(probs[1]) if len(probs) > 1 else 0.5
+        # Class 0 = occupied, Class 1 = vacant (alphabetical folder order in YOLO classify dataset)
+        prob_occupied = float(probs[0]) if len(probs) > 0 else 0.5
         if prob_occupied > 0.5:
             return {"status": "occupied", "confidence": round(prob_occupied, 4), "probability": round(prob_occupied, 4)}
         return {"status": "vacant", "confidence": round(1.0 - prob_occupied, 4), "probability": round(prob_occupied, 4)}

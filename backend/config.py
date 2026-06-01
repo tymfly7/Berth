@@ -86,10 +86,10 @@ YOLO_CLASSIFY_IMG_SIZE = int(os.getenv("SMARTPARK_YOLO_CLASSIFY_IMGSZ", "64"))
 # ---------------------------------------------------------------------------
 # Inference / streaming
 # ---------------------------------------------------------------------------
-FRAME_WIDTH   = 900
-FRAME_HEIGHT  = 500
+FRAME_WIDTH   = 1280
+FRAME_HEIGHT  = 720
 STREAM_FPS    = 20
-JPEG_QUALITY  = 80
+JPEG_QUALITY  = 85
 
 # Live YouTube HLS URLs expire; cache resolved stream URLs for this long.
 YOUTUBE_STREAM_CACHE_TTL = int(os.getenv("SMARTPARK_YT_CACHE_TTL", "240"))  # seconds
