@@ -9,8 +9,7 @@ Features:
   - API key auth (optional via SMARTPARK_API_KEY)
   - Rate limiting on uploads
   - Training management endpoints
-  - Model switching (demo / cnn_scratch / resnet50 / mobilenetv4)
-  - Demo mode fallback when no model/camera available
+  - Model switching (cnn_scratch / resnet50 / mobilenetv4 / yolo26_classify / yolo26)
   - Multi-camera registry with persistent activation
 """
 
@@ -121,35 +120,15 @@ _active_mode = config.ACTIVE_MODEL
 _processor_lock = threading.Lock()
 
 def _get_processor():
-    global _processor, _active_mode
+    global _processor
     with _processor_lock:
         if _processor is None:
-            mode = _active_mode
-            supported = ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify")
-            if mode in supported:
-                try:
-                    _processor = VideoProcessor(model_name=mode)
-                    logger.info(f"{mode} VideoProcessor initialised")
-                except Exception as e:
-                    logger.warning(
-                        f"WARN: {mode} VideoProcessor failed ({e}) — falling back to demo. "
-                        "Train the model first or check the model file."
-                    )
-                    mode = "demo"
-                    _active_mode = "demo"
-            elif mode != "demo":
-                logger.warning(
-                    f"WARN: model '{mode}' is not a supported VideoProcessor model "
-                    f"{supported} — falling back to demo."
-                )
-                mode = "demo"
-                _active_mode = "demo"
-
-            if mode == "demo" or _processor is None:
-                from src.inference.demo_processor import DemoProcessor
-                _processor = DemoProcessor()
-                _active_mode = "demo"
-                logger.info("DemoProcessor initialised")
+            try:
+                _processor = VideoProcessor(model_name=_active_mode or None)
+                logger.info(f"VideoProcessor initialised (model={_active_mode or 'none'})")
+            except Exception as e:
+                logger.error(f"VideoProcessor failed to initialise: {e}")
+                raise
     return _processor
 
 def _reset_processor():
@@ -163,11 +142,12 @@ def _reset_processor():
         _processor = None
 
 def _resolve_model_name():
-    """Resolve active model name for prediction — if 'demo', find best trained model."""
-    if _active_mode in ("cnn_scratch", "resnet50", "mobilenetv4"):
+    """Resolve active model name for single-image prediction."""
+    supported = ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26")
+    if _active_mode in supported:
         return _active_mode
-    # In demo mode, try to find a trained model
     for name, path in [
+        ("yolo26_classify", config.YOLO26_CLASSIFY_PATH),
         ("cnn_scratch", config.CNN_SCRATCH_PATH),
         ("resnet50", config.RESNET50_PATH),
         ("mobilenetv4", config.MOBILENETV4_PATH),
@@ -621,6 +601,11 @@ def get_metrics():
 
 @app.get("/api/heatmap", dependencies=[Depends(verify_api_key)])
 def get_heatmap():
+    active = next((c for c in camera_registry.get_all() if c.get("active")), None)
+    if active:
+        proc = camera_registry.get_processor(active["id"])
+        if proc and hasattr(proc, "get_heatmap"):
+            return proc.get_heatmap()
     proc = _get_processor()
     return proc.get_heatmap() if hasattr(proc, "get_heatmap") else []
 
@@ -654,20 +639,11 @@ def use_camera():
     proc.set_video_source(0)
     return {"message": "Switched to live camera"}
 
-@app.post("/api/use-demo", dependencies=[Depends(verify_api_key)])
-def use_demo():
-    global _active_mode
-    _reset_processor()
-    _active_mode = "demo"
-    proc = _get_processor()
-    proc.start_processing()
-    return {"message": "Switched to demo mode"}
-
 # ── Model switching ──────────────────────────────────────
 @app.post("/api/use-model/{model_name}", dependencies=[Depends(verify_api_key)])
 def use_model(model_name: str):
     global _active_mode
-    valid = ["cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26", "demo"]
+    valid = ["cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26"]
     if model_name not in valid:
         raise HTTPException(400, f"Invalid model. Choose from: {valid}")
     _reset_processor()
@@ -1223,39 +1199,41 @@ async def video_ws(websocket: WebSocket):
     logger.info("WebSocket client connected")
     try:
         while True:
+            proc = _get_processor()
             frame_b64 = proc.get_latest_frame_base64()
             metrics = proc.get_metrics()
+            payload = {"metrics": metrics}
             if frame_b64:
-                await websocket.send_json({
-                    "frame": frame_b64,
-                    "metrics": metrics,
-                })
+                payload["frame"] = frame_b64
+            await websocket.send_json(payload)
             await asyncio.sleep(0.05)
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
-    finally:
-        proc.stop_processing()
 
 @app.websocket("/ws/cameras/{camera_id}")
 async def camera_ws(websocket: WebSocket, camera_id: str):
     await websocket.accept()
-    cam = camera_registry.get(camera_id)
-    if cam is None:
+    if camera_registry.get(camera_id) is None:
         await websocket.send_json({"error": "Camera not found"})
         return
-    proc = camera_registry.get_processor(camera_id)
-    if proc is None:
+    if camera_registry.get_processor(camera_id) is None:
         await websocket.send_json({"error": "Camera not found"})
         return
     logger.info(f"Camera WS connected: {camera_id}")
     try:
         while True:
+            proc = camera_registry.get_processor(camera_id)
+            if proc is None:
+                await asyncio.sleep(0.5)
+                continue
             frame_b64 = proc.get_latest_frame_base64()
             metrics = proc.get_metrics()
+            payload = {"metrics": metrics}
             if frame_b64:
-                await websocket.send_json({"frame": frame_b64, "metrics": metrics})
+                payload["frame"] = frame_b64
+            await websocket.send_json(payload)
             await asyncio.sleep(0.05)
     except WebSocketDisconnect:
         logger.info(f"Camera WS disconnected: {camera_id}")

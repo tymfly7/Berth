@@ -71,7 +71,15 @@ const CARDS = [
     icon: '📊',
     iconBg: 'rgba(245,158,11,0.15)',
     color: 'var(--color-warning)',
-    getValue: (m) => `${m.occupancy_percent}%`,
+    getValue: (m) => `${Math.round(m.occupancy_percent ?? 0)}%`,
+  },
+  {
+    key: 'fps',
+    label: 'Stream FPS',
+    icon: '⚡',
+    iconBg: 'rgba(16,185,129,0.15)',
+    color: 'var(--color-vacant)',
+    getValue: (m) => (m.fps > 0 ? m.fps : '–'),
   },
 ]
 

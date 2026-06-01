@@ -123,8 +123,8 @@ export default function Header({ connected, model }) {
         <span style={style.time}>
           {time.toLocaleTimeString()}
         </span>
-        <span className={`badge ${model === 'demo' ? 'badge-warning' : 'badge-info'}`}>
-          {model.toUpperCase()}
+        <span className={`badge ${!model || model === 'none' ? 'badge-warning' : 'badge-info'}`}>
+          {(model || 'none').toUpperCase()}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div className={`pulse-dot ${connected ? 'connected' : 'disconnected'}`}

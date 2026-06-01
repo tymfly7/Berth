@@ -42,38 +42,24 @@ for name in models:
     m = create_model(name, pretrained=False)
     print(f"    Created: {name} [OK]")
 
-# 3. Test demo processor
-print("\n[3] Testing demo processor...")
-from src.inference.demo_processor import DemoProcessor
-demo = DemoProcessor()
-demo.start_processing()
-import time
-time.sleep(0.5)
-metrics = demo.get_metrics()
-print(f"    Demo metrics: total={metrics['total']}, available={metrics['available']}, occupied={metrics['occupied']}")
-frame = demo.get_latest_frame_base64()
-print(f"    Frame generated: {len(frame) if frame else 0} bytes base64")
-demo.stop_processing()
-print("    [OK] Demo processor works!")
-
-# 4. Test sample dataset generation
-print("\n[4] Generating sample dataset...")
+# 3. Test sample dataset generation
+print("\n[3] Generating sample dataset...")
 import logging
 logging.basicConfig(level=logging.WARNING)
 from src.data_prep.downloader import generate_sample_dataset
 generate_sample_dataset(num_per_class=50)
 print("    [OK] Sample dataset generated (50 per class)!")
 
-# 5. Test data preprocessing
-print("\n[5] Testing data preprocessing...")
+# 4. Test data preprocessing
+print("\n[4] Testing data preprocessing...")
 from src.data_prep.preprocessor import prepare_dataset
 data = prepare_dataset(batch_size=8, num_workers=0)
 print(f"    Train: {data['train_size']}, Val: {data['val_size']}, Test: {data['test_size']}")
 print(f"    Class distribution: {data['class_distribution']}")
 print("    [OK] Data pipeline works!")
 
-# 6. Quick training test (2 epochs)
-print("\n[6] Quick training test (2 epochs on sample data)...")
+# 5. Quick training test (2 epochs)
+print("\n[5] Quick training test (2 epochs on sample data)...")
 tiny_model = ParkingCNN()
 from src.train.trainer import Trainer
 trainer = Trainer(tiny_model, model_name="cnn_scratch", epochs=2)
@@ -81,8 +67,8 @@ results = trainer.train(data["train_loader"], data["val_loader"])
 print(f"    Best val_acc: {results['best_val_acc']:.2f}%")
 print("    [OK] Training pipeline works!")
 
-# 7. Test evaluation
-print("\n[7] Testing evaluation...")
+# 6. Test evaluation
+print("\n[6] Testing evaluation...")
 from src.eval.evaluator import evaluate_model
 eval_results = evaluate_model(tiny_model, data["test_loader"], trainer.device)
 print(f"    Accuracy: {eval_results['accuracy']}%, F1: {eval_results['f1_score']}%")

@@ -24,13 +24,14 @@ function getColor(conf) {
 }
 
 export default function ConfidenceGauge({ confidence }) {
-  const pct = Math.round((confidence || 0) * 100)
-  const color = getColor(confidence || 0)
+  const hasData = (confidence || 0) > 0
+  const pct = hasData ? Math.round(confidence * 100) : 0
+  const color = hasData ? getColor(confidence) : 'rgba(255,255,255,0.18)'
 
   // SVG arc
   const radius = 40
   const circumference = Math.PI * radius
-  const offset = circumference - (pct / 100) * circumference
+  const offset = hasData ? circumference - (pct / 100) * circumference : circumference
 
   return (
     <div className="glass-card" style={style.container}>
@@ -60,8 +61,8 @@ export default function ConfidenceGauge({ confidence }) {
         </svg>
       </div>
 
-      <div style={{ ...style.value, color }}>{pct}%</div>
-      <div style={style.label}>Average prediction confidence</div>
+      <div style={{ ...style.value, color }}>{hasData ? `${pct}%` : '–'}</div>
+      <div style={style.label}>{hasData ? 'Average prediction confidence' : 'No inference data'}</div>
     </div>
   )
 }
