@@ -2,28 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 
 const API_BASE = `http://${window.location.hostname}:8000`
 
-const style = {
-  grid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(6, 1fr)',
-    gap: '6px',
-    padding: '4px',
-  },
-  cell: {
-    aspectRatio: '1',
-    borderRadius: 'var(--radius-sm)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '0.65rem',
-    fontWeight: 600,
-    color: 'white',
-    transition: 'all var(--transition-base)',
-    cursor: 'default',
-    position: 'relative',
-  },
-}
-
 function getColor(rate) {
   if (rate >= 80) return 'var(--color-occupied)'
   if (rate >= 50) return 'var(--color-warning)'
@@ -41,7 +19,7 @@ function formatTime(secs) {
   return `${Math.floor(m / 60)}h${m % 60 > 0 ? `${m % 60}m` : ''}`
 }
 
-function getLegend() {
+function Legend() {
   return (
     <div style={{
       display: 'flex', justifyContent: 'space-between',
@@ -54,17 +32,54 @@ function getLegend() {
   )
 }
 
-export default function HeatmapView({ heatmap, cameraId }) {
+function ArrowBtn({ side, onClick }) {
+  return (
+    <button onClick={onClick} style={{
+      position: 'absolute', [side]: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 2,
+      background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-color)',
+      color: 'var(--text-secondary)', borderRadius: 'var(--radius-sm)',
+      padding: '4px 10px', cursor: 'pointer', fontSize: '1.1rem',
+    }}>
+      {side === 'left' ? '‹' : '›'}
+    </button>
+  )
+}
+
+export default function HeatmapView({ cameras = [] }) {
+  const [camIdx, setCamIdx] = useState(0)
+  const [heatmap, setHeatmap] = useState([])
   const [rois, setRois] = useState([])
   const canvasRef = useRef(null)
 
+  const safeIdx = Math.min(camIdx, Math.max(0, cameras.length - 1))
+  const cam = cameras[safeIdx] ?? null
+  const multi = cameras.length > 1
+
   useEffect(() => {
-    if (!cameraId) return
+    setCamIdx(i => Math.min(i, Math.max(0, cameras.length - 1)))
+  }, [cameras.length])
+
+  useEffect(() => {
+    if (!cam) { setRois([]); return }
+    const cameraId = cam.roi_camera_id || cam.id
     fetch(`${API_BASE}/api/roi/${cameraId}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setRois(Array.isArray(data) ? data : []))
       .catch(() => {})
-  }, [cameraId])
+  }, [cam?.id])
+
+  useEffect(() => {
+    if (!cam) { setHeatmap([]); return }
+    const load = () => {
+      fetch(`${API_BASE}/api/heatmap/${cam.id}`)
+        .then(r => r.ok ? r.json() : [])
+        .then(data => setHeatmap(Array.isArray(data) ? data : []))
+        .catch(() => {})
+    }
+    load()
+    const t = setInterval(load, 10000)
+    return () => clearInterval(t)
+  }, [cam?.id])
 
   useEffect(() => {
     if (rois.length === 0) return
@@ -115,15 +130,23 @@ export default function HeatmapView({ heatmap, cameraId }) {
     })
   }, [rois, heatmap])
 
-  if (rois.length > 0 && heatmap && heatmap.length > 0) {
+  const prev = () => setCamIdx(i => (i - 1 + cameras.length) % cameras.length)
+  const next = () => setCamIdx(i => (i + 1) % cameras.length)
+  const title = `🔥 Usage Heatmap${cam && multi ? ` — ${cam.name}` : ''}`
+
+  if (rois.length > 0 && heatmap.length > 0) {
     return (
       <div className="glass-card" style={{ padding: '20px' }}>
-        <div className="section-title">🔥 Usage Heatmap</div>
-        <canvas
-          ref={canvasRef}
-          style={{ width: '100%', height: 200, display: 'block', borderRadius: 'var(--radius-sm)' }}
-        />
-        {getLegend()}
+        <div className="section-title">{title}</div>
+        <div style={{ position: 'relative' }}>
+          {multi && <ArrowBtn side="left" onClick={prev} />}
+          {multi && <ArrowBtn side="right" onClick={next} />}
+          <canvas
+            ref={canvasRef}
+            style={{ width: '100%', height: 200, display: 'block', borderRadius: 'var(--radius-sm)' }}
+          />
+        </div>
+        <Legend />
       </div>
     )
   }
@@ -131,9 +154,13 @@ export default function HeatmapView({ heatmap, cameraId }) {
   if (!heatmap || heatmap.length === 0) {
     return (
       <div className="glass-card" style={{ padding: '20px' }}>
-        <div className="section-title">🔥 Usage Heatmap</div>
-        <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '20px 0' }}>
-          Heatmap data will appear during live analysis
+        <div className="section-title">{title}</div>
+        <div style={{ position: 'relative' }}>
+          {multi && <ArrowBtn side="left" onClick={prev} />}
+          {multi && <ArrowBtn side="right" onClick={next} />}
+          <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '20px 0' }}>
+            Heatmap data will appear during live analysis
+          </div>
         </div>
       </div>
     )
@@ -141,27 +168,42 @@ export default function HeatmapView({ heatmap, cameraId }) {
 
   return (
     <div className="glass-card" style={{ padding: '20px' }}>
-      <div className="section-title">🔥 Usage Heatmap</div>
-      <div style={style.grid}>
-        {(() => {
-          const isTimeFormat = heatmap.some(s => s.occupied_seconds !== undefined)
-          const maxSecs = isTimeFormat ? Math.max(...heatmap.map(s => s.occupied_seconds ?? 0), 1) : 100
-          return heatmap.map((slot) => {
-            const val = isTimeFormat ? (slot.occupied_seconds ?? 0) : (slot.occupancy_rate ?? 0)
-            const rate = isTimeFormat ? (val / maxSecs) * 100 : val
-            return (
-              <div
-                key={slot.slot_id}
-                style={{ ...style.cell, background: getColor(rate), opacity: getOpacity(rate) }}
-                title={isTimeFormat ? `Slot #${slot.slot_id}: ${formatTime(val)}` : `Slot #${slot.slot_id}: ${val}% occupied`}
-              >
-                {slot.slot_id}
-              </div>
-            )
-          })
-        })()}
+      <div className="section-title">{title}</div>
+      <div style={{ position: 'relative' }}>
+        {multi && <ArrowBtn side="left" onClick={prev} />}
+        {multi && <ArrowBtn side="right" onClick={next} />}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(6, 1fr)',
+          gap: '6px',
+          padding: '4px',
+        }}>
+          {(() => {
+            const isTimeFormat = heatmap.some(s => s.occupied_seconds !== undefined)
+            const maxSecs = isTimeFormat ? Math.max(...heatmap.map(s => s.occupied_seconds ?? 0), 1) : 100
+            return heatmap.map((slot) => {
+              const val = isTimeFormat ? (slot.occupied_seconds ?? 0) : (slot.occupancy_rate ?? 0)
+              const rate = isTimeFormat ? (val / maxSecs) * 100 : val
+              return (
+                <div
+                  key={slot.slot_id}
+                  style={{
+                    aspectRatio: '1', borderRadius: 'var(--radius-sm)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.65rem', fontWeight: 600, color: 'white',
+                    transition: 'all var(--transition-base)', cursor: 'default',
+                    background: getColor(rate), opacity: getOpacity(rate),
+                  }}
+                  title={isTimeFormat ? `Slot #${slot.slot_id}: ${formatTime(val)}` : `Slot #${slot.slot_id}: ${val}% occupied`}
+                >
+                  {slot.slot_id}
+                </div>
+              )
+            })
+          })()}
+        </div>
       </div>
-      {getLegend()}
+      <Legend />
     </div>
   )
 }

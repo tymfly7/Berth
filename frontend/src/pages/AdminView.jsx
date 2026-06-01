@@ -32,7 +32,6 @@ export default function AdminView() {
   })
   const [cameraMetrics, setCameraMetrics] = useState(null)
   const [history, setHistory] = useState([])
-  const [heatmap, setHeatmap] = useState([])
   const [modelInfo, setModelInfo] = useState(null)
   const [cameras, setCameras] = useState([])
   const [allCameraSlots, setAllCameraSlots] = useState([])
@@ -81,13 +80,6 @@ export default function AdminView() {
     } catch { /* silent */ }
   }
 
-  const fetchHeatmap = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/heatmap`)
-      if (res.ok) setHeatmap(await res.json())
-    } catch { /* silent */ }
-  }
-
   const fetchModelInfo = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/model/info`)
@@ -128,12 +120,10 @@ export default function AdminView() {
   useEffect(() => {
     connectWs()
     fetchHistory()
-    fetchHeatmap()
     fetchModelInfo()
     fetchCameras()
     const interval = setInterval(() => {
       fetchHistory()
-      fetchHeatmap()
       fetchModelInfo()
       fetchCameras()
     }, 10000)
@@ -258,10 +248,7 @@ export default function AdminView() {
 
           <div className="analytics-row">
             <ConfidenceGauge confidence={displayMetrics.avg_confidence} />
-            <HeatmapView
-                heatmap={heatmap}
-                cameraId={cameras.find(c => c.active)?.roi_camera_id || cameras.find(c => c.active)?.id || null}
-              />
+            <HeatmapView cameras={cameras} />
           </div>
 
         </div>

@@ -1,31 +1,31 @@
 const cardStyle = {
-  padding: '12px 14px',
+  padding: '9px 11px',
   display: 'flex',
   flexDirection: 'column',
-  gap: '6px',
+  gap: '4px',
   position: 'relative',
   overflow: 'hidden',
 }
 
 const iconWrap = {
-  width: 30,
-  height: 30,
+  width: 24,
+  height: 24,
   borderRadius: 'var(--radius-sm)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontSize: '0.95rem',
+  fontSize: '0.8rem',
 }
 
 const bigNum = {
-  fontSize: '1.5rem',
+  fontSize: '1.25rem',
   fontWeight: 800,
   lineHeight: 1,
   letterSpacing: '-0.5px',
 }
 
 const label = {
-  fontSize: '0.68rem',
+  fontSize: '0.63rem',
   fontWeight: 500,
   color: 'var(--text-secondary)',
   textTransform: 'uppercase',

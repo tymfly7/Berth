@@ -609,6 +609,13 @@ def get_heatmap():
     proc = _get_processor()
     return proc.get_heatmap() if hasattr(proc, "get_heatmap") else []
 
+@app.get("/api/heatmap/{camera_id}", dependencies=[Depends(verify_api_key)])
+def get_heatmap_camera(camera_id: str):
+    proc = camera_registry.get_processor(camera_id)
+    if proc and hasattr(proc, "get_heatmap"):
+        return proc.get_heatmap()
+    return []
+
 @app.get("/api/history", dependencies=[Depends(verify_api_key)])
 def get_history():
     proc = _get_processor()
@@ -1035,6 +1042,13 @@ def prepare_dataset(source: str = None, max_per_class: int = 0,
 @app.get("/api/roi/{camera_id}", dependencies=[Depends(verify_api_key)])
 def get_rois(camera_id: str):
     return RoiStore.get_rois(camera_id)
+
+@app.get("/api/roi/{camera_id}/snapshot", dependencies=[Depends(verify_api_key)])
+def get_snapshot(camera_id: str):
+    snap_path = RoiStore.get_snapshot_path(camera_id)
+    if snap_path is None:
+        raise HTTPException(404, "No snapshot found for this camera")
+    return Response(content=snap_path.read_bytes(), media_type="image/jpeg")
 
 @app.post("/api/roi/{camera_id}/snapshot", dependencies=[Depends(verify_api_key)])
 async def save_snapshot(camera_id: str, file: UploadFile = File(...)):

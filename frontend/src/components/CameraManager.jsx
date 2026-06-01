@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
+import RoiEditor from './RoiEditor'
 
 const API_BASE = `http://${window.location.hostname}:8000`
 
@@ -137,6 +139,14 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
   const [error, setError] = useState(null)
   const [form, setForm] = useState({ name: '', source: '', type: 'usb', roi_camera_id: '' })
 
+  const [roiEditCam, setRoiEditCam] = useState(null)
+  const [editRois, setEditRois] = useState([])
+  const [editBg, setEditBg] = useState(null)
+  const [roiMsg, setRoiMsg] = useState(null)
+  const [proposing, setProposing] = useState(false)
+  const [editProposals, setEditProposals] = useState([])
+  const editWsRef = useRef(null)
+
   const fetchCameras = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/cameras`)
@@ -203,6 +213,96 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
 
   const setField = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }))
 
+  const showRoiMsg = (msg) => { setRoiMsg(msg); setTimeout(() => setRoiMsg(null), 4000) }
+
+  const openRoiEdit = async (cam) => {
+    const cameraId = cam.roi_camera_id || cam.id
+    let rois = []
+    try {
+      const res = await fetch(`${API_BASE}/api/roi/${cameraId}`)
+      if (res.ok) { const data = await res.json(); rois = Array.isArray(data) ? data : [] }
+    } catch { /* silent */ }
+
+    let bg = null
+    try {
+      const res = await fetch(`${API_BASE}/api/roi/${cameraId}/snapshot`)
+      if (res.ok) {
+        const blob = await res.blob()
+        bg = await new Promise(resolve => {
+          const reader = new FileReader()
+          reader.onload = e => resolve(e.target.result)
+          reader.readAsDataURL(blob)
+        })
+      }
+    } catch { /* no snapshot */ }
+
+    if (!bg && cam.active) {
+      bg = await new Promise(resolve => {
+        const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.id}`)
+        editWsRef.current = ws
+        const timeout = setTimeout(() => { ws.close(); resolve(null) }, 5000)
+        ws.onmessage = (e) => {
+          try {
+            const d = JSON.parse(e.data)
+            if (d.frame) { clearTimeout(timeout); ws.close(); resolve(`data:image/jpeg;base64,${d.frame}`) }
+          } catch { /* ignore */ }
+        }
+        ws.onerror = () => { clearTimeout(timeout); resolve(null) }
+      })
+    }
+
+    setEditRois(rois)
+    setEditBg(bg)
+    setEditProposals([])
+    setRoiEditCam(cam)
+  }
+
+  const closeRoiEdit = () => {
+    editWsRef.current?.close()
+    setRoiEditCam(null)
+    setEditBg(null)
+    setEditRois([])
+    setEditProposals([])
+    setRoiMsg(null)
+  }
+
+  const saveEditRois = async () => {
+    if (!roiEditCam) return
+    const cameraId = roiEditCam.roi_camera_id || roiEditCam.id
+    try {
+      const res = await fetch(`${API_BASE}/api/roi/${cameraId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rois: editRois }),
+      })
+      if (!res.ok) throw new Error('Save failed')
+      const data = await res.json()
+      showRoiMsg(`Saved ${data.saved} ROI${data.saved !== 1 ? 's' : ''}`)
+    } catch (e) { showRoiMsg(`Error: ${e.message}`) }
+  }
+
+  const handleAutoDetect = async () => {
+    if (!roiEditCam) return
+    const cameraId = roiEditCam.roi_camera_id || roiEditCam.id
+    setProposing(true)
+    try {
+      const res = await fetch(`${API_BASE}/api/roi/${cameraId}/propose`, { method: 'POST' })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        showRoiMsg(`Auto-detect failed: ${err.detail || res.statusText}`)
+        return
+      }
+      const data = await res.json()
+      if (data.proposals?.length > 0) {
+        setEditProposals(data.proposals)
+        showRoiMsg(`${data.proposals.length} candidate${data.proposals.length > 1 ? 's' : ''} detected`)
+      } else {
+        showRoiMsg('No candidates found — try a clearer frame')
+      }
+    } catch (err) { showRoiMsg(`Error: ${err.message}`) }
+    finally { setProposing(false) }
+  }
+
   const cFont = compact ? '0.75rem' : '0.82rem'
   const cPad  = compact ? '4px 8px' : '8px 10px'
 
@@ -219,6 +319,7 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
   }
 
   return (
+    <>
     <div style={compact ? {} : s.card}>
       {!compact && <div style={s.title}>Camera Registry</div>}
 
@@ -253,6 +354,9 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
                 <td style={compactTd}>
                   <button style={{ ...s.btn(), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px', marginRight: 4 }} onClick={() => handleToggle(cam)}>
                     {cam.active ? 'Off' : 'On'}
+                  </button>
+                  <button style={{ ...s.btn(), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px', marginRight: 4 }} onClick={() => openRoiEdit(cam)}>
+                    ✎ ROIs
                   </button>
                   <button style={{ ...s.btn('danger'), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px' }} onClick={() => handleDelete(cam.id)}>✕</button>
                 </td>
@@ -298,5 +402,53 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
 
       {error && <div style={{ ...s.error, fontSize: '0.73rem' }}>{error}</div>}
     </div>
+
+    {roiEditCam && createPortal(
+      <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.96)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-card)', flexShrink: 0, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            ROI Editor — {roiEditCam.name}
+          </span>
+          <button
+            style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid rgba(100,200,255,0.5)', background: 'rgba(100,200,255,0.08)', color: proposing ? 'rgba(100,200,255,0.4)' : '#64c8ff', fontSize: '0.7rem', fontWeight: 600, cursor: proposing ? 'default' : 'pointer', lineHeight: '1.4' }}
+            disabled={proposing}
+            onClick={handleAutoDetect}
+          >
+            {proposing ? 'Detecting…' : 'Auto-detect'}
+          </button>
+          <button
+            style={{ padding: '3px 10px', borderRadius: 4, border: 'none', background: 'var(--accent-primary, #3498db)', color: '#fff', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', lineHeight: '1.4' }}
+            onClick={saveEditRois}
+          >
+            Save
+          </button>
+          <button
+            style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.35)', background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer', lineHeight: '1.4' }}
+            onClick={closeRoiEdit}
+          >
+            Done
+          </button>
+          {roiMsg && (
+            <span style={{ fontSize: '0.75rem', marginLeft: 4, color: roiMsg.startsWith('Error') || roiMsg.startsWith('Auto-detect') || roiMsg.startsWith('No candidates') ? 'var(--color-occupied, #e74c3c)' : 'var(--color-vacant, #2ecc71)' }}>
+              {roiMsg}
+            </span>
+          )}
+        </div>
+        <div style={{ flex: 1, overflow: 'auto', padding: '12px 16px' }}>
+          <div style={{ aspectRatio: '1280 / 720', width: '100%' }}>
+            <RoiEditor
+              backgroundImage={editBg}
+              rois={editRois}
+              onRoisChange={setEditRois}
+              proposals={editProposals}
+              onProposalsChange={setEditProposals}
+              idPrefix="cam-reg"
+            />
+          </div>
+        </div>
+      </div>,
+      document.body
+    )}
+    </>
   )
 }
