@@ -565,7 +565,7 @@ async def analyze_misparked(
         # Load YOLO26 detector — surface a clear error if weights are missing
         try:
             from src.models.yolo_detector import ParkingYOLO26
-            detector = ParkingYOLO26(str(config.YOLO26_PATH))
+            detector = ParkingYOLO26(str(config.YOLO26_DETECT_PATH))
         except FileNotFoundError:
             raise HTTPException(
                 400,

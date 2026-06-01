@@ -169,6 +169,11 @@ class ParkingClassifier:
             results = self._yolo_classify.predict(pil_img, verbose=False)
             return self._yolo_result_to_dict(results[0])
 
+        if getattr(self, "_yolo_detect", None) is not None:
+            pil_img = self._to_pil(image)
+            results = self._yolo_detect.predict(pil_img, verbose=False, conf=0.3, classes=[1])
+            return self._yolo_detect_to_dict(results[0])
+
         # Convert input to PIL Image
         pil_img = self._to_pil(image)
 
@@ -217,7 +222,7 @@ class ParkingClassifier:
 
         if getattr(self, "_yolo_detect", None) is not None:
             pil_images = [self._to_pil(img) for img in images]
-            results = self._yolo_detect.predict(pil_images, verbose=False, conf=0.3)
+            results = self._yolo_detect.predict(pil_images, verbose=False, conf=0.3, classes=[1])
             return [self._yolo_detect_to_dict(r) for r in results]
 
         # Preprocess all images
