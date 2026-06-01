@@ -3,9 +3,6 @@ Video Processor — Real-Time Parking Detection from Camera or Video File
 ========================================================================
 Reads frames from a webcam or video file, classifies each parking slot
 using a trained CNN model, and streams annotated frames + metrics.
-
-Implements the same interface as DemoProcessor so main.py can swap
-between them transparently.
 """
 
 import os
@@ -40,7 +37,9 @@ from src.roi.roi_store import RoiStore
 #   Ignored by non-HLS sources (USB cameras, files, RTSP).
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-    "multiple_requests;0|fflags;nobuffer|live_start_index;-3",
+    "multiple_requests;0|fflags;nobuffer|live_start_index;-3"
+    "|probesize;500000|analyzeduration;500000"
+    "|reconnect;1|reconnect_streamed;1|reconnect_delay_max;5",
 )
 
 logger = logging.getLogger("smartpark.video")
@@ -68,6 +67,10 @@ class VideoProcessor:
         self._metrics = self._default_metrics()
         self._history = deque(maxlen=100)
         self._heatmap = {}
+        self._heatmap_last_ts = None
+        self._fps: float = 0.0
+        self._fps_frames: int = 0
+        self._fps_ts: float = time.time()
 
         self._detector = self._load_detector()
         self._roi_cache: list = []
@@ -248,7 +251,7 @@ class VideoProcessor:
                         pass
                 else:
                     fails += 1
-                    if fails >= 5:
+                    if fails >= 3:
                         logger.warning(
                             f"YouTube grab failing — re-resolving stream for '{self._source}'"
                         )
@@ -293,6 +296,12 @@ class VideoProcessor:
         result = self._detector.detect(frame, camera_id=self.camera_id)
 
         now = time.time()
+        self._fps_frames += 1
+        _fps_elapsed = now - self._fps_ts
+        if _fps_elapsed >= 1.0:
+            self._fps = round(self._fps_frames / _fps_elapsed, 1)
+            self._fps_frames = 0
+            self._fps_ts = now
         if now - self._roi_cache_ts > 1.0:
             self._roi_cache = RoiStore.get_rois(self.camera_id)
             self._roi_cache_ts = now
@@ -351,17 +360,23 @@ class VideoProcessor:
                 }
                 for s in result["slots"]
             ],
+            "fps": self._fps,
+            "source_type": self._source_type,
+            "mode": self.model_name,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     def _update_heatmap(self, slots):
+        now = time.time()
+        elapsed = (now - self._heatmap_last_ts) if self._heatmap_last_ts is not None else 0.0
+        self._heatmap_last_ts = now
         for slot in slots:
             sid = str(slot["id"])
             if sid not in self._heatmap:
-                self._heatmap[sid] = {"occupied_count": 0, "total_count": 0}
-            self._heatmap[sid]["total_count"] += 1
+                self._heatmap[sid] = {"occupied_seconds": 0.0, "total_seconds": 0.0}
+            self._heatmap[sid]["total_seconds"] += elapsed
             if slot["status"] == "occupied":
-                self._heatmap[sid]["occupied_count"] += 1
+                self._heatmap[sid]["occupied_seconds"] += elapsed
 
     # ── Public getters ─────────────────────────────────────────────────────
 
@@ -387,16 +402,14 @@ class VideoProcessor:
         with self._lock:
             result = []
             for sid, data in self._heatmap.items():
-                total = data["total_count"]
-                occ = data["occupied_count"]
                 try:
                     slot_id = int(sid)
                 except (ValueError, TypeError):
                     slot_id = sid
                 result.append({
                     "slot_id": slot_id,
-                    "occupancy_rate": round(occ / total * 100, 1) if total else 0,
-                    "total_observations": total,
+                    "occupied_seconds": round(data["occupied_seconds"], 1),
+                    "total_seconds": round(data["total_seconds"], 1),
                 })
             return result
 
@@ -404,5 +417,6 @@ class VideoProcessor:
         return {
             "total": 0, "available": 0, "occupied": 0,
             "occupancy_percent": 0.0, "avg_confidence": 0.0,
-            "slots": [], "timestamp": datetime.now(timezone.utc).isoformat(),
+            "slots": [], "fps": 0.0, "source_type": "auto", "mode": "unknown",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }

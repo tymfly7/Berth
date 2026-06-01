@@ -53,9 +53,13 @@ class ParkingClassifier:
         if self.model_name is None:
             self.model = None
             self._yolo_classify = None
+            self._yolo_detect = None
             return
         if self.model_name == "yolo26_classify":
             self._load_yolo_classify()
+            return
+        if self.model_name == "yolo26":
+            self._load_yolo_detect()
             return
         from src.models.model_factory import load_model
         try:
@@ -65,6 +69,7 @@ class ParkingClassifier:
             logger.warning(f"⚠️  {e}")
             self.model = None
         self._yolo_classify = None
+        self._yolo_detect = None
 
     def _load_yolo_classify(self):
         """Load a YOLO26 classify model (Ultralytics API)."""
@@ -82,6 +87,23 @@ class ParkingClassifier:
             logger.warning(f"⚠️  {e}")
             self.model = None
             self._yolo_classify = None
+
+    def _load_yolo_detect(self):
+        """Load a YOLO26 detect model (Ultralytics API)."""
+        try:
+            from ultralytics import YOLO
+            model_path = config.YOLO26_DETECT_PATH
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"YOLO26 detect weights not found at '{model_path}'. Train it first."
+                )
+            self._yolo_detect = YOLO(str(model_path))
+            self.model = True
+            logger.info(f"✅ Loaded YOLO26 detect model on {self.device}")
+        except FileNotFoundError as e:
+            logger.warning(f"⚠️  {e}")
+            self.model = None
+            self._yolo_detect = None
 
     def is_loaded(self):
         return self.model is not None
@@ -104,6 +126,14 @@ class ParkingClassifier:
         if prob_occupied > 0.5:
             return {"status": "occupied", "confidence": round(prob_occupied, 4), "probability": round(prob_occupied, 4)}
         return {"status": "vacant", "confidence": round(1.0 - prob_occupied, 4), "probability": round(prob_occupied, 4)}
+
+    def _yolo_detect_to_dict(self, result) -> dict:
+        """Convert a YOLO26 detect result on a crop to occupied/vacant."""
+        boxes = result.boxes
+        if boxes is not None and len(boxes) > 0:
+            conf = float(boxes.conf.max().cpu().numpy())
+            return {"status": "occupied", "confidence": round(conf, 4), "probability": round(conf, 4)}
+        return {"status": "vacant", "confidence": 0.9, "probability": 0.1}
 
     @torch.no_grad()
     def predict(self, image):
@@ -170,6 +200,11 @@ class ParkingClassifier:
             pil_images = [self._to_pil(img) for img in images]
             results = self._yolo_classify.predict(pil_images, verbose=False)
             return [self._yolo_result_to_dict(r) for r in results]
+
+        if getattr(self, "_yolo_detect", None) is not None:
+            pil_images = [self._to_pil(img) for img in images]
+            results = self._yolo_detect.predict(pil_images, verbose=False, conf=0.3)
+            return [self._yolo_detect_to_dict(r) for r in results]
 
         # Preprocess all images
         tensors = []

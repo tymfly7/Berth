@@ -167,7 +167,7 @@ export default function AdminView() {
 
   return (
     <div className="app-container">
-      <Header connected={connected} model={modelInfo?.active_model || 'demo'} />
+      <Header connected={connected} model={modelInfo?.active_model || 'none'} />
       <ServerStatus />
 
       <div className="dashboard-grid">
@@ -179,11 +179,13 @@ export default function AdminView() {
             apiBase={API_BASE}
             cameras={cameras}
           />
+          <div className="metrics-row fade-in">
+            <MetricCards metrics={metrics} />
+          </div>
           <LotMap
             slots={(() => {
               if (metrics.slots.length > 0) return metrics.slots
               if (liveSlots.length > 0 && roiSlots.length > 0) {
-                // Merge per-slot status from camera WS into roiSlots (which carry polygon/label)
                 const statusById = Object.fromEntries(liveSlots.map(s => [s.id, s.status]))
                 return roiSlots.map(s => ({ ...s, status: statusById[s.id] ?? s.status }))
               }
@@ -191,14 +193,14 @@ export default function AdminView() {
             })()}
             demo={metrics.slots.length === 0}
           />
-          <div className="metrics-row fade-in">
-            <MetricCards metrics={metrics} />
-          </div>
           <AnalyticsChart history={history} />
 
           <div className="analytics-row">
             <ConfidenceGauge confidence={metrics.avg_confidence} />
-            <HeatmapView heatmap={heatmap} />
+            <HeatmapView
+                heatmap={heatmap}
+                cameraId={cameras.find(c => c.active)?.roi_camera_id || cameras.find(c => c.active)?.id || null}
+              />
           </div>
 
         </div>

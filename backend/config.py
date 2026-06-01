@@ -39,9 +39,9 @@ API_KEY = os.getenv("SMARTPARK_API_KEY", "")           # empty = auth disabled
 UPLOAD_RATE_LIMIT = os.getenv("SMARTPARK_UPLOAD_RATE_LIMIT", "10/minute")
 
 # ---------------------------------------------------------------------------
-# Active model  ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26", "demo")
+# Active model  ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26")
 # ---------------------------------------------------------------------------
-ACTIVE_MODEL = os.getenv("SMARTPARK_MODEL", "demo")
+ACTIVE_MODEL = os.getenv("SMARTPARK_MODEL", "yolo26_classify")
 
 # ---------------------------------------------------------------------------
 # Model paths

@@ -63,7 +63,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   const [dragging, setDragging] = useState(false)
   const [resultImage, setResultImage] = useState(null)
   const [resultData, setResultData] = useState(null)
-  const [selectedModel, setSelectedModel] = useState('cnn_scratch')
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('selectedModel') || 'cnn_scratch')
   const [uploadedImage, setUploadedImage] = useState(null)
   const [rois, setRois] = useState([])
   const [roiModalOpen, setRoiModalOpen] = useState(false)
@@ -71,13 +71,14 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   const fileRef = useRef(null)
   const uploadedFileRef = useRef(null)
 
-  const isDemo = !modelInfo || modelInfo.active_model === 'demo'
+  const [mode, setMode] = useState('camera')
 
   // Keep the model dropdown in sync with the server's active model
   useEffect(() => {
-    if (modelInfo?.active_model && modelInfo.active_model !== 'demo') {
+    if (modelInfo?.active_model) {
       if (MODELS.find(m => m.id === modelInfo.active_model)) {
         setSelectedModel(modelInfo.active_model)
+        localStorage.setItem('selectedModel', modelInfo.active_model)
       }
     }
   }, [modelInfo?.active_model])
@@ -117,8 +118,6 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     setTimeout(() => setStatus(''), 4000)
   }
 
-  const handleDemo = () => handleAction('/api/use-demo', 'Switching to demo')
-
   const handleActivateLive = () => {
     const label = MODELS.find(m => m.id === selectedModel)?.label || selectedModel
     handleAction(`/api/use-model/${selectedModel}`, `Activating ${label} on live feeds`)
@@ -126,6 +125,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
 
   const handleUpload = async (file) => {
     if (!file) return
+    setMode('testing')
     setResultImage(null)
     setResultData(null)
 
@@ -218,120 +218,128 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   return (
     <div className="glass-card" style={style.section}>
       {/* Mode + model */}
-      <div className="section-title">Live Feed Mode</div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+      <div className="section-title">Mode</div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
         <button
-          className={`btn ${isDemo ? 'btn-primary' : 'btn-ghost'} btn-sm`}
-          onClick={handleDemo}
+          className={`btn ${mode === 'camera' ? 'btn-primary' : 'btn-ghost'} btn-sm`}
+          style={{ flex: 1 }}
+          onClick={() => setMode('camera')}
+          title="Switch to camera mode"
         >
-          🎮 Demo
+          📷 Camera
         </button>
         <button
-          className={`btn ${!isDemo ? 'btn-primary' : 'btn-ghost'} btn-sm`}
-          onClick={handleActivateLive}
-          title="Activate selected model on all live camera feeds"
+          className={`btn ${mode === 'testing' ? 'btn-primary' : 'btn-ghost'} btn-sm`}
+          style={{ flex: 1 }}
+          onClick={() => setMode('testing')}
         >
-          📷 Live
+          🧪 Testing
         </button>
       </div>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 16 }}>
         <select
           value={selectedModel}
-          onChange={e => setSelectedModel(e.target.value)}
+          onChange={e => { setSelectedModel(e.target.value); localStorage.setItem('selectedModel', e.target.value) }}
           className="panel-select"
           style={{ flex: 1 }}
         >
           {MODELS.map(({ id, label }) => (
-            <option key={id} value={id}>{label}</option>
+            <option key={id} value={id}>{selectedModel === id ? '✓ ' : ''}{label}</option>
           ))}
         </select>
-        <button className="btn btn-ghost btn-sm" onClick={handleTest} title="Use selected model">
-          Use
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={mode === 'camera' ? handleActivateLive : handleTest}
+          title={mode === 'camera' ? 'Activate on live feeds' : 'Run analysis on uploaded image'}
+        >
+          Activate
         </button>
-      </div>
-
-      <div style={style.divider} />
-
-      {/* Upload zone */}
-      <div className="section-title">Upload Parking Lot Image</div>
-      <div
-        style={{
-          ...style.uploadZone,
-          borderColor: dragging ? 'var(--accent-primary)' : 'var(--border-color)',
-          background: dragging ? 'rgba(99,102,241,0.05)' : 'transparent',
-        }}
-        onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        onClick={() => fileRef.current?.click()}
-      >
-        📁 Drop a parking lot image or video here
-        <br />
-        <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>
-          Aerial views, Google Images, screenshots, etc.
-        </span>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".jpg,.jpeg,.png,.bmp,.mp4,.avi,.mov,.mkv,.webm"
-          style={{ display: 'none' }}
-          onChange={(e) => { handleUpload(e.target.files[0]); e.target.value = '' }}
-        />
       </div>
 
       {status && <div style={style.statusMsg}>{status}</div>}
 
-      {/* Raw uploaded image + ROI controls */}
-      {uploadedImage && !resultImage && (
-        <div style={{ marginTop: 12 }}>
-          <img src={uploadedImage} alt="Uploaded" style={style.resultImg} />
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => setRoiModalOpen(true)}>
-              ✏️ Draw ROIs
-            </button>
-            {rois.length > 0 && (
-              <span className="badge badge-info">
-                {rois.length} ROI{rois.length !== 1 ? 's' : ''} defined
-              </span>
-            )}
-          </div>
-          {roiMsg && (
-            <div style={{
-              ...style.statusMsg,
-              color: roiMsg.startsWith('Error') ? 'var(--color-occupied)' : 'var(--color-vacant)',
-              background: roiMsg.startsWith('Error') ? 'rgba(244,63,94,0.1)' : 'rgba(16,185,129,0.1)',
-            }}>
-              {roiMsg}
-            </div>
-          )}
-        </div>
-      )}
+      <div>
+          <div style={style.divider} />
 
-      {/* Annotated result image */}
-      {resultImage && (
-        <div style={{ marginTop: 12 }}>
-          <img
-            src={`data:image/jpeg;base64,${resultImage}`}
-            alt="Analyzed"
-            style={style.resultImg}
-          />
-          {resultData && (
-            <div style={style.resultStats}>
-              <span className="badge badge-vacant">🟢 {resultData.available} Available</span>
-              <span className="badge badge-occupied">🔴 {resultData.occupied} Occupied</span>
-              <span className="badge badge-info">📊 {resultData.occupancy_percent}%</span>
+          {/* Upload zone */}
+          <div className="section-title">Upload Parking Lot Image</div>
+          <div
+            style={{
+              ...style.uploadZone,
+              borderColor: dragging ? 'var(--accent-primary)' : 'var(--border-color)',
+              background: dragging ? 'rgba(99,102,241,0.05)' : 'transparent',
+            }}
+            onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={onDrop}
+            onClick={() => fileRef.current?.click()}
+          >
+            📁 Drop a parking lot image or video here
+            <br />
+            <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>
+              Aerial views, Google Images, screenshots, etc.
+            </span>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".jpg,.jpeg,.png,.bmp,.mp4,.avi,.mov,.mkv,.webm"
+              style={{ display: 'none' }}
+              onChange={(e) => { handleUpload(e.target.files[0]); e.target.value = '' }}
+            />
+          </div>
+
+          {/* Raw uploaded image + ROI controls */}
+          {uploadedImage && !resultImage && (
+            <div style={{ marginTop: 12 }}>
+              <img src={uploadedImage} alt="Uploaded" style={style.resultImg} />
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                <button className="btn btn-ghost btn-sm" onClick={() => setRoiModalOpen(true)}>
+                  ✏️ Draw ROIs
+                </button>
+                {rois.length > 0 && (
+                  <span className="badge badge-info">
+                    {rois.length} ROI{rois.length !== 1 ? 's' : ''} defined
+                  </span>
+                )}
+              </div>
+              {roiMsg && (
+                <div style={{
+                  ...style.statusMsg,
+                  color: roiMsg.startsWith('Error') ? 'var(--color-occupied)' : 'var(--color-vacant)',
+                  background: roiMsg.startsWith('Error') ? 'rgba(244,63,94,0.1)' : 'rgba(16,185,129,0.1)',
+                }}>
+                  {roiMsg}
+                </div>
+              )}
             </div>
           )}
-          <button
-            className="btn btn-ghost btn-sm"
-            style={{ marginTop: 8, width: '100%' }}
-            onClick={() => { setResultImage(null); setResultData(null) }}
-          >
-            ← Back to image
-          </button>
+
+          {/* Annotated result image */}
+          {resultImage && (
+            <div style={{ marginTop: 12 }}>
+              <img
+                src={`data:image/jpeg;base64,${resultImage}`}
+                alt="Analyzed"
+                style={style.resultImg}
+              />
+              {resultData && (
+                <div style={style.resultStats}>
+                  <span className="badge badge-vacant">🟢 {resultData.available} Available</span>
+                  <span className="badge badge-occupied">🔴 {resultData.occupied} Occupied</span>
+                  <span className="badge badge-info">📊 {resultData.occupancy_percent}%</span>
+                </div>
+              )}
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ marginTop: 8, width: '100%' }}
+                onClick={() => { setResultImage(null); setResultData(null) }}
+              >
+                ← Back to image
+              </button>
+            </div>
+          )}
         </div>
-      )}
 
       {/* ROI Editor Modal — fullscreen */}
       {roiModalOpen && uploadedImage && (
