@@ -12,6 +12,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+from src.db import database as db
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -99,6 +100,7 @@ class TrainManager:
 
     def _train_model(self, model_name):
         """Train a single model (runs in background thread)."""
+        run_id = None
         try:
             start_time = time.time()
 
@@ -106,6 +108,11 @@ class TrainManager:
             with _lock:
                 _state["message"] = "Preparing dataset..."
             data = prepare_dataset()
+            dataset_size = len(data.get("train_loader", {}).dataset) if hasattr(data.get("train_loader"), "dataset") else 0
+            try:
+                run_id = db.start_training_run(model_name, dataset_size)
+            except Exception:
+                pass
 
             # Create model
             with _lock:
@@ -147,6 +154,13 @@ class TrainManager:
                 )
                 _state["results"] = results
 
+            if run_id:
+                try:
+                    db.finish_training_run(run_id, "success",
+                                           final_accuracy=results.get("best_val_acc"),
+                                           epochs=results.get("epochs"))
+                except Exception:
+                    pass
             logger.info(f"✅ Training complete: {model_name}")
 
         except Exception as e:
@@ -154,6 +168,11 @@ class TrainManager:
             with _lock:
                 _state["status"] = "error"
                 _state["message"] = f"Training failed: {str(e)}"
+            if run_id:
+                try:
+                    db.finish_training_run(run_id, "failed")
+                except Exception:
+                    pass
 
     def _train_yolo26_classify(self):
         """
@@ -161,6 +180,7 @@ class TrainManager:
         Uses Ultralytics Python API — no CLI required.
         Output: config.YOLO26_CLASSIFY_PATH
         """
+        run_id = None
         try:
             from ultralytics import YOLO
             from src.data_prep.yolo_converter import build_yolo_classify_dataset
@@ -177,6 +197,10 @@ class TrainManager:
             with _lock:
                 _state["message"] = "Starting YOLO26 classification training..."
 
+            try:
+                run_id = db.start_training_run("yolo26_classify")
+            except Exception:
+                pass
             model = YOLO("yolo26n-cls.yaml")  # build from scratch, no pretrained weights
 
             def on_batch_end(trainer):
@@ -236,6 +260,13 @@ class TrainManager:
                 _state["message"] = "YOLO26 classification training complete!"
                 _state["results"] = {"best_val_acc": _state["val_acc"]}
 
+            if run_id:
+                try:
+                    db.finish_training_run(run_id, "success",
+                                           final_accuracy=_state["val_acc"],
+                                           epochs=_state["epoch"])
+                except Exception:
+                    pass
             logger.info("✅ YOLO26 classify training complete")
 
         except Exception as e:
@@ -243,6 +274,11 @@ class TrainManager:
             with _lock:
                 _state["status"]  = "error"
                 _state["message"] = f"YOLO26 classify training failed: {e}"
+            if run_id:
+                try:
+                    db.finish_training_run(run_id, "failed")
+                except Exception:
+                    pass
 
     def _train_yolo26_detect(self):
         """
@@ -250,6 +286,7 @@ class TrainManager:
         Converts annotations.json → YOLO format on first run, then calls Ultralytics train.
         Output: config.YOLO26_DETECT_PATH
         """
+        run_id = None
         try:
             from ultralytics import YOLO
             from src.data_prep.yolo_converter import build_yolo_detect_dataset
@@ -259,13 +296,17 @@ class TrainManager:
 
             with _lock:
                 _state["message"] = "Converting gopro annotations to YOLO format..."
-                _state["total_epochs"] = config.EPOCHS
+                _state["total_epochs"] = config.YOLO_DETECT_EPOCHS
 
             yaml_path = build_yolo_detect_dataset()
 
             with _lock:
                 _state["message"] = "Starting YOLO26 detection training..."
 
+            try:
+                run_id = db.start_training_run("yolo26_detect")
+            except Exception:
+                pass
             model = YOLO("yolo26n.pt")
 
             def on_batch_end(trainer):
@@ -292,7 +333,7 @@ class TrainManager:
                     _state["val_acc"] = round(map50 * 100, 2)
                     _state["elapsed"] = round(time.time() - _detect_start, 1)
                     _state["message"] = (
-                        f"Epoch {epoch}/{config.EPOCHS} — "
+                        f"Epoch {epoch}/{config.YOLO_DETECT_EPOCHS} — "
                         f"mAP50: {_state['val_acc']:.2f}%"
                     )
 
@@ -302,7 +343,7 @@ class TrainManager:
             results = model.train(
                 data=str(yaml_path),
                 task="detect",
-                epochs=config.EPOCHS,
+                epochs=config.YOLO_DETECT_EPOCHS,
                 batch=config.BATCH_SIZE,
                 imgsz=640,
                 cache="ram",                           # cache decoded images in RAM
@@ -326,6 +367,13 @@ class TrainManager:
                 _state["message"] = "YOLO26 detection training complete!"
                 _state["results"] = {"best_val_acc": _state["val_acc"]}
 
+            if run_id:
+                try:
+                    db.finish_training_run(run_id, "success",
+                                           final_accuracy=_state["val_acc"],
+                                           epochs=_state["epoch"])
+                except Exception:
+                    pass
             logger.info("✅ YOLO26 detect training complete")
 
         except Exception as e:
@@ -333,6 +381,11 @@ class TrainManager:
             with _lock:
                 _state["status"]  = "error"
                 _state["message"] = f"YOLO26 detect training failed: {e}"
+            if run_id:
+                try:
+                    db.finish_training_run(run_id, "failed")
+                except Exception:
+                    pass
 
     def _compare_all(self):
         """Train all models and compare results."""

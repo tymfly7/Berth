@@ -52,7 +52,7 @@ if __name__ == "__main__":
     counts = organize_pklot(
         source_root=config.PKLOT_ROOT,
         target_root=str(config.DATA_DIR),
-        max_per_class=1000,
+        max_per_class=config.SUBSET_SIZE // 2,
     )
     print(f"  Occupied: {counts['occupied']}, Vacant: {counts['vacant']}")
     print(f"  Done in {time.time() - step_start:.1f}s")

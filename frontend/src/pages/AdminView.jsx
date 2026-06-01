@@ -20,7 +20,7 @@ function roiToSlot(roi) {
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
   const x = Math.min(...xs), y = Math.min(...ys)
   const w = Math.max(...xs) - x, h = Math.max(...ys) - y
-  return { id: roi.id, label: roi.label, status: null, bbox: [x, y, w, h], polygon: pts }
+  return { id: roi.id, label: roi.label, status: null, bbox: [x, y, w, h], polygon: pts, spotType: roi.spotType || 'normal', owner: roi.owner || '' }
 }
 
 export default function AdminView() {

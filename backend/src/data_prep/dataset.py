@@ -12,12 +12,35 @@ Labels:
 """
 
 import os
+import random as _random
 from pathlib import Path
 from PIL import Image
 
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
+
+
+class _RandomShadow:
+    """Simulate a partial shadow stripe across a parking space crop.
+
+    Teaches the model that a dark band in an otherwise empty space
+    is not a vehicle — the primary cause of vacant→occupied drift
+    as sun angle changes throughout the day.
+    """
+    def __init__(self, p=0.5):
+        self.p = p
+
+    def __call__(self, img):
+        if _random.random() > self.p:
+            return img
+        arr = np.array(img, dtype=np.float32)
+        h, w = arr.shape[:2]
+        bw = _random.randint(w // 5, 3 * w // 5)
+        x0 = _random.randint(0, w - bw)
+        arr[:, x0:x0 + bw] *= _random.uniform(0.35, 0.65)
+        return Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
 
 
 class ParkingDataset(Dataset):
@@ -107,6 +130,7 @@ class ParkingDataset(Dataset):
                     saturation=0.2,
                     hue=0.05
                 ),
+                _RandomShadow(p=0.5),
                 transforms.RandomAffine(
                     degrees=0,
                     translate=(0.05, 0.05),

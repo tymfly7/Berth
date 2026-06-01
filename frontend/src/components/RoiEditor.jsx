@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
 const COLORS = ["#2ecc71", "#e74c3c", "#3498db", "#f39c12", "#9b59b6"]
+const SPOT_TYPE_COLORS = { normal: null, reserved: '#e6a817', handicap: '#1a7fc1' }
+const HIT_PX = 10
 
 function hexToRgba(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16)
@@ -29,6 +31,12 @@ function getCentroid(pts) {
   ]
 }
 
+function ptDistPx(ax, ay, bx, by, W, H) {
+  const dx = (ax - bx) * W
+  const dy = (ay - by) * H
+  return Math.sqrt(dx * dx + dy * dy)
+}
+
 export default function RoiEditor({
   backgroundImage = null,
   rois,
@@ -41,6 +49,8 @@ export default function RoiEditor({
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
   const bgImgRef = useRef(null)
+  const dragRef = useRef(null)
+  const didDragRef = useRef(false)
   const [mode, setMode] = useState('polygon')
   const [selectedId, setSelectedId] = useState(null)
   const [selectedProposalId, setSelectedProposalId] = useState(null)
@@ -48,6 +58,7 @@ export default function RoiEditor({
   const [livePoint, setLivePoint] = useState(null)
   const [rectStart, setRectStart] = useState(null)
   const [liveRect, setLiveRect] = useState(null)
+  const [editPolygon, setEditPolygon] = useState(null)
   const [past, setPast] = useState([])
   const [future, setFuture] = useState([])
 
@@ -77,9 +88,13 @@ export default function RoiEditor({
     rois.forEach((roi, idx) => {
       const isSelected = roi.id === selectedId
       const isDrawing = inProgress.length > 0
-      const color = isDrawing && !isSelected ? '#2ecc71' : (roi.color || COLORS[idx % COLORS.length])
+      const spotType = roi.spotType || 'normal'
+      const typeColor = SPOT_TYPE_COLORS[spotType]
+      const baseColor = typeColor || (roi.color || COLORS[idx % COLORS.length])
+      const color = isDrawing && !isSelected ? '#2ecc71' : baseColor
       const fillColor = isDrawing && !isSelected ? 'rgba(46,204,113,0.25)' : hexToRgba(color, 0.3)
-      const pts = roi.polygon.map(([x, y]) => [x * W, y * H])
+      const poly = (isSelected && editPolygon) ? editPolygon : roi.polygon
+      const pts = poly.map(([x, y]) => [x * W, y * H])
 
       ctx.beginPath()
       pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
@@ -94,10 +109,22 @@ export default function RoiEditor({
       ctx.shadowColor = 'rgba(0,0,0,0.8)'
       ctx.shadowBlur = 3
       ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 12px sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText(roi.label, cx, cy)
+
+      if (spotType === 'normal') {
+        ctx.font = 'bold 12px sans-serif'
+        ctx.fillText(roi.label, cx, cy)
+      } else {
+        // label on top line, type badge on bottom line
+        ctx.font = 'bold 11px sans-serif'
+        ctx.fillText(roi.label, cx, cy - 8)
+        ctx.font = spotType === 'handicap' ? 'bold 13px sans-serif' : 'bold 10px sans-serif'
+        const badge = spotType === 'handicap'
+          ? '♿'
+          : (roi.owner ? roi.owner : 'RESERVED')
+        ctx.fillText(badge, cx, cy + 7)
+      }
       ctx.shadowBlur = 0
     })
 
@@ -127,6 +154,40 @@ export default function RoiEditor({
       ctx.fillText(`? ${prop.label}`, cx, cy)
       ctx.shadowBlur = 0
     })
+
+    // Edit mode handles on selected ROI
+    if (mode === 'edit' && selectedId) {
+      const roi = rois.find(r => r.id === selectedId)
+      if (roi) {
+        const poly = editPolygon || roi.polygon
+        const pts = poly.map(([x, y]) => [x * W, y * H])
+
+        // vertex handles
+        pts.forEach(([x, y]) => {
+          ctx.beginPath()
+          ctx.arc(x, y, 6, 0, Math.PI * 2)
+          ctx.fillStyle = '#ffffff'
+          ctx.fill()
+          ctx.strokeStyle = '#3498db'
+          ctx.lineWidth = 2
+          ctx.stroke()
+        })
+
+        // edge midpoint handles
+        pts.forEach(([x, y], i) => {
+          const [nx, ny] = pts[(i + 1) % pts.length]
+          const mx = (x + nx) / 2
+          const my = (y + ny) / 2
+          ctx.beginPath()
+          ctx.rect(mx - 4, my - 4, 8, 8)
+          ctx.fillStyle = 'rgba(255,255,255,0.85)'
+          ctx.fill()
+          ctx.strokeStyle = '#3498db'
+          ctx.lineWidth = 1.5
+          ctx.stroke()
+        })
+      }
+    }
 
     // In-progress polygon drawing
     if (inProgress.length > 0) {
@@ -162,7 +223,7 @@ export default function RoiEditor({
       ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
       ctx.setLineDash([])
     }
-  }, [rois, proposals, selectedId, selectedProposalId, inProgress, livePoint, liveRect])
+  }, [rois, proposals, selectedId, selectedProposalId, inProgress, livePoint, liveRect, mode, editPolygon])
 
   const syncSize = useCallback(() => {
     const container = containerRef.current
@@ -218,17 +279,21 @@ export default function RoiEditor({
       if (e.key === 'Escape') {
         setInProgress([])
         setLivePoint(null)
+        if (dragRef.current) { dragRef.current = null; setEditPolygon(null) }
       } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
         e.preventDefault()
         undo()
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
         e.preventDefault()
         redo()
+      } else if (e.key === 'Delete' && mode === 'edit' && selectedId) {
+        commitChange(rois.filter(r => r.id !== selectedId))
+        setSelectedId(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo])
+  }, [undo, redo, mode, selectedId, rois, commitChange])
 
   useEffect(() => { redraw() }, [redraw])
 
@@ -238,10 +303,11 @@ export default function RoiEditor({
       label: `Slot ${rois.length + 1}`,
       polygon,
       color: COLORS[rois.length % COLORS.length],
+      spotType: 'normal',
+      owner: '',
     }])
   }, [rois, commitChange, idPrefix])
 
-  // Accept a single proposal: convert it to a confirmed ROI
   const acceptProposal = useCallback((propId) => {
     if (!onProposalsChange) return
     const prop = proposals.find(p => p.id === propId)
@@ -252,7 +318,6 @@ export default function RoiEditor({
     setSelectedProposalId(null)
   }, [proposals, rois, commitChange, onProposalsChange])
 
-  // Accept all proposals at once
   const acceptAllProposals = useCallback(() => {
     if (!onProposalsChange || proposals.length === 0) return
     const newRois = proposals.map((prop, i) => {
@@ -276,11 +341,71 @@ export default function RoiEditor({
     setSelectedProposalId(null)
   }, [onProposalsChange])
 
+  const duplicateSelected = useCallback(() => {
+    if (!selectedId) return
+    const roi = rois.find(r => r.id === selectedId)
+    if (!roi) return
+    const OFFSET = 0.02
+    commitChange([...rois, {
+      ...roi,
+      id: `${idPrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      label: `${roi.label} copy`,
+      polygon: roi.polygon.map(([x, y]) => [Math.min(1, x + OFFSET), Math.min(1, y + OFFSET)]),
+      color: COLORS[rois.length % COLORS.length],
+    }])
+  }, [selectedId, rois, commitChange, idPrefix])
+
+  const scaleSelected = useCallback((factor) => {
+    if (!selectedId) return
+    const roi = rois.find(r => r.id === selectedId)
+    if (!roi) return
+    const [cx, cy] = getCentroid(roi.polygon)
+    commitChange(rois.map(r =>
+      r.id === selectedId
+        ? {
+            ...r, polygon: r.polygon.map(([x, y]) => [
+              Math.max(0, Math.min(1, cx + (x - cx) * factor)),
+              Math.max(0, Math.min(1, cy + (y - cy) * factor)),
+            ])
+          }
+        : r
+    ))
+  }, [selectedId, rois, commitChange])
+
+  const setSpotType = useCallback((type) => {
+    if (!selectedId) return
+    commitChange(rois.map(r => r.id === selectedId ? { ...r, spotType: type } : r))
+  }, [selectedId, rois, commitChange])
+
+  const setOwner = useCallback(() => {
+    if (!selectedId) return
+    const roi = rois.find(r => r.id === selectedId)
+    if (!roi) return
+    const name = window.prompt('Enter owner / reservation name (blank to clear):', roi.owner || '')
+    if (name === null) return
+    commitChange(rois.map(r => r.id === selectedId ? { ...r, owner: name.trim() } : r))
+  }, [selectedId, rois, commitChange])
+
   const handleClick = useCallback((e) => {
+    if (didDragRef.current) {
+      didDragRef.current = false
+      return
+    }
     const pt = getPoint(e)
+
+    if (mode === 'edit') {
+      if (proposals.length > 0) {
+        const hitProp = [...proposals].reverse().find(p => pointInPolygon(pt[0], pt[1], p.polygon))
+        if (hitProp) { setSelectedProposalId(hitProp.id); setSelectedId(null); return }
+      }
+      const hit = [...rois].reverse().find(r => pointInPolygon(pt[0], pt[1], r.polygon))
+      setSelectedId(hit ? hit.id : null)
+      setSelectedProposalId(null)
+      return
+    }
+
     if (mode === 'polygon') {
       if (inProgress.length === 0) {
-        // Check proposals first (they're on top visually)
         if (proposals.length > 0) {
           const hitProp = [...proposals].reverse().find(p => pointInPolygon(pt[0], pt[1], p.polygon))
           if (hitProp) {
@@ -328,6 +453,24 @@ export default function RoiEditor({
 
   const handleMouseMove = useCallback((e) => {
     const pt = getPoint(e)
+
+    if (mode === 'edit' && dragRef.current) {
+      const { type, vertexIdx, origPolygon, startPt } = dragRef.current
+      if (type === 'vertex') {
+        const cx = Math.max(0, Math.min(1, pt[0]))
+        const cy = Math.max(0, Math.min(1, pt[1]))
+        setEditPolygon(origPolygon.map((v, i) => i === vertexIdx ? [cx, cy] : v))
+      } else if (type === 'polygon') {
+        const dx = pt[0] - startPt[0]
+        const dy = pt[1] - startPt[1]
+        setEditPolygon(origPolygon.map(([x, y]) => [
+          Math.max(0, Math.min(1, x + dx)),
+          Math.max(0, Math.min(1, y + dy)),
+        ]))
+      }
+      return
+    }
+
     if (mode === 'polygon') {
       setLivePoint(pt)
     } else if (mode === 'rect' && rectStart) {
@@ -336,12 +479,66 @@ export default function RoiEditor({
   }, [mode, rectStart, getPoint])
 
   const handleMouseDown = useCallback((e) => {
+    if (mode === 'edit') {
+      const pt = getPoint(e)
+      const roi = selectedId ? rois.find(r => r.id === selectedId) : null
+      if (roi) {
+        const canvas = canvasRef.current
+        const W = canvas ? canvas.width : 1
+        const H = canvas ? canvas.height : 1
+        const poly = roi.polygon
+
+        // vertex handle hit
+        for (let i = 0; i < poly.length; i++) {
+          if (ptDistPx(pt[0], pt[1], poly[i][0], poly[i][1], W, H) < HIT_PX) {
+            dragRef.current = { type: 'vertex', roiId: selectedId, vertexIdx: i, origPolygon: poly }
+            setEditPolygon([...poly])
+            didDragRef.current = true
+            return
+          }
+        }
+
+        // edge midpoint handle hit → insert vertex and drag it
+        for (let i = 0; i < poly.length; i++) {
+          const j = (i + 1) % poly.length
+          const mx = (poly[i][0] + poly[j][0]) / 2
+          const my = (poly[i][1] + poly[j][1]) / 2
+          if (ptDistPx(pt[0], pt[1], mx, my, W, H) < HIT_PX) {
+            const newPoly = [...poly.slice(0, j), [mx, my], ...poly.slice(j)]
+            dragRef.current = { type: 'vertex', roiId: selectedId, vertexIdx: j, origPolygon: newPoly }
+            setEditPolygon(newPoly)
+            didDragRef.current = true
+            return
+          }
+        }
+
+        // polygon body → move whole polygon
+        if (pointInPolygon(pt[0], pt[1], poly)) {
+          dragRef.current = { type: 'polygon', roiId: selectedId, origPolygon: poly, startPt: pt }
+          setEditPolygon([...poly])
+          didDragRef.current = true
+          return
+        }
+      }
+      return
+    }
+
     if (mode !== 'rect') return
     setRectStart(getPoint(e))
     setLiveRect(null)
-  }, [mode, getPoint])
+  }, [mode, selectedId, rois, getPoint])
 
   const handleMouseUp = useCallback((e) => {
+    if (mode === 'edit' && dragRef.current) {
+      if (editPolygon) {
+        const { roiId } = dragRef.current
+        commitChange(rois.map(r => r.id === roiId ? { ...r, polygon: editPolygon } : r))
+      }
+      setEditPolygon(null)
+      dragRef.current = null
+      return
+    }
+
     if (mode !== 'rect' || !rectStart) return
     const pt = getPoint(e)
     const dx = Math.abs(pt[0] - rectStart[0])
@@ -365,7 +562,7 @@ export default function RoiEditor({
     }
     setRectStart(null)
     setLiveRect(null)
-  }, [mode, rectStart, rois, proposals, makeRoi, getPoint])
+  }, [mode, rectStart, rois, proposals, makeRoi, getPoint, editPolygon, commitChange])
 
   const changeMode = (m) => {
     setMode(m)
@@ -373,6 +570,8 @@ export default function RoiEditor({
     setRectStart(null)
     setLiveRect(null)
     setLivePoint(null)
+    setEditPolygon(null)
+    dragRef.current = null
   }
 
   const btnStyle = (active) => ({
@@ -408,6 +607,34 @@ export default function RoiEditor({
         <button style={btnStyle(mode === 'rect')} onClick={() => changeMode('rect')}>
           Rectangle
         </button>
+        <button style={btnStyle(mode === 'edit')} onClick={() => changeMode('edit')}
+          title="Select and drag vertices, edges, or whole polygons">
+          Edit
+        </button>
+        <button
+          style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
+          disabled={!selectedId}
+          onClick={duplicateSelected}
+          title="Duplicate selected ROI with a small offset"
+        >
+          Duplicate
+        </button>
+        <button
+          style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
+          disabled={!selectedId}
+          onClick={() => scaleSelected(1.1)}
+          title="Scale selected ROI up 10%"
+        >
+          Scale +
+        </button>
+        <button
+          style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
+          disabled={!selectedId}
+          onClick={() => scaleSelected(0.9)}
+          title="Scale selected ROI down 10%"
+        >
+          Scale −
+        </button>
         <button
           style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
           disabled={!selectedId}
@@ -425,6 +652,59 @@ export default function RoiEditor({
           Clear All
         </button>
       </div>
+
+      {/* ── Spot type toolbar (visible when a ROI is selected) ── */}
+      {selectedId && (() => {
+        const selRoi = rois.find(r => r.id === selectedId)
+        if (!selRoi) return null
+        const t = selRoi.spotType || 'normal'
+        const typeBtnStyle = (active, accent) => ({
+          padding: '4px 10px',
+          borderRadius: 4,
+          border: `1px solid ${active ? accent : 'rgba(255,255,255,0.18)'}`,
+          background: active ? `${accent}22` : 'rgba(255,255,255,0.04)',
+          color: active ? accent : 'var(--text-muted,#aaa)',
+          cursor: 'pointer',
+          fontSize: '0.76rem',
+          fontWeight: active ? 700 : 400,
+        })
+        return (
+          <div style={{
+            display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
+            marginBottom: overlay ? 0 : 6,
+            padding: '5px 8px',
+            background: overlay ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.04)',
+            borderRadius: overlay ? 0 : 4,
+            border: overlay ? 'none' : '1px solid rgba(255,255,255,0.1)',
+            backdropFilter: overlay ? 'blur(4px)' : undefined,
+          }}>
+            <input
+              value={selRoi.label}
+              onChange={e => commitChange(rois.map(r => r.id === selectedId ? { ...r, label: e.target.value } : r))}
+              style={{
+                padding: '3px 7px', borderRadius: 4, fontSize: '0.76rem',
+                border: '1px solid rgba(255,255,255,0.22)',
+                background: 'rgba(255,255,255,0.07)', color: '#fff',
+                width: 80, outline: 'none',
+              }}
+              title="Rename this spot (e.g. A1, B3)"
+            />
+            <span style={{ fontSize: '0.73rem', color: 'var(--text-muted,#aaa)', margin: '0 2px' }}>type:</span>
+            <button style={typeBtnStyle(t === 'normal', '#2ecc71')} onClick={() => setSpotType('normal')}>Normal</button>
+            <button style={typeBtnStyle(t === 'reserved', '#e6a817')} onClick={() => setSpotType('reserved')}>Reserved</button>
+            <button style={typeBtnStyle(t === 'handicap', '#1a7fc1')} onClick={() => setSpotType('handicap')}>♿ Handicap</button>
+            {t === 'reserved' && (
+              <button
+                style={{ ...typeBtnStyle(false, '#e6a817'), borderColor: 'rgba(230,168,23,0.4)', color: '#e6a817' }}
+                onClick={setOwner}
+                title="Set owner / reservation name shown on the spot"
+              >
+                {selRoi.owner ? `Owner: ${selRoi.owner}` : 'Set Owner…'}
+              </button>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── Proposals toolbar ── */}
       {hasProposals && (
@@ -483,6 +763,13 @@ export default function RoiEditor({
         </div>
       )}
 
+      {/* ── Edit mode hint ── */}
+      {mode === 'edit' && (
+        <div style={{ fontSize: '0.72rem', color: 'rgba(100,200,255,0.8)', marginBottom: 8, paddingLeft: 2 }}>
+          Edit mode — click to select, drag a vertex (circle) or edge midpoint (square) to reshape, drag inside to move. Delete key removes selected.
+        </div>
+      )}
+
       {/* ── Canvas ── */}
       <div ref={containerRef} style={overlay
         ? { flex: 1, position: 'relative' }
@@ -494,7 +781,7 @@ export default function RoiEditor({
             display: 'block',
             width: '100%',
             height: overlay ? '100%' : undefined,
-            cursor: 'crosshair',
+            cursor: mode === 'edit' ? 'default' : 'crosshair',
           }}
           onClick={handleClick}
           onDoubleClick={handleDblClick}

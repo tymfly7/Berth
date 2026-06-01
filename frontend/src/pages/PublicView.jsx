@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import MetricCards from '../components/MetricCards'
 import LotMap from '../components/LotMap'
+import AnalyticsChart from '../components/AnalyticsChart'
 
 const API_BASE = `http://${window.location.hostname}:8000`
 const CANVAS_W = 1000, CANVAS_H = 600
@@ -11,7 +12,7 @@ function roiToSlot(roi) {
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
   const x = Math.min(...xs), y = Math.min(...ys)
   const w = Math.max(...xs) - x, h = Math.max(...ys) - y
-  return { id: roi.id, label: roi.label, status: null, bbox: [x, y, w, h], polygon: pts }
+  return { id: roi.id, label: roi.label, status: null, bbox: [x, y, w, h], polygon: pts, spotType: roi.spotType || 'normal', owner: roi.owner || '' }
 }
 
 export default function PublicView() {
@@ -20,6 +21,7 @@ export default function PublicView() {
     occupancy_percent: 0, avg_confidence: 0, slots: [],
   })
   const [time, setTime] = useState(new Date())
+  const [history, setHistory] = useState([])
   const [allCameraSlots, setAllCameraSlots] = useState([])
   const [lotMapIdx, setLotMapIdx] = useState(0)
   const [liveSlotsMap, setLiveSlotsMap] = useState({})
@@ -33,7 +35,15 @@ export default function PublicView() {
       } catch { /* silent */ }
     }
 
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/history`)
+        if (res.ok) setHistory(await res.json())
+      } catch { /* silent */ }
+    }
+
     fetchMetrics()
+    fetchHistory()
     const pollInterval = setInterval(fetchMetrics, 8000)
     const clockInterval = setInterval(() => setTime(new Date()), 1000)
 
@@ -216,6 +226,11 @@ export default function PublicView() {
         marginBottom: 32,
       }}>
         <MetricCards metrics={metrics} />
+      </div>
+
+      {/* Trends chart */}
+      <div style={{ width: '100%', maxWidth: 800, marginBottom: 32 }}>
+        <AnalyticsChart history={history} />
       </div>
 
       {/* Admin link — bottom-right corner */}
