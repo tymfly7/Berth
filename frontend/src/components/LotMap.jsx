@@ -1,21 +1,32 @@
 const STATUS_COLOR = {
-  vacant:    { fill: 'rgba(16,185,129,0.25)',  stroke: '#10b981' },
-  occupied:  { fill: 'rgba(244,63,94,0.30)',   stroke: '#f43f5e' },
-  misparked: { fill: 'rgba(245,158,11,0.30)',  stroke: '#f59e0b' },
+  vacant:    { fill: 'rgba(16,185,129,0.35)',  stroke: '#10b981' },
+  occupied:  { fill: 'rgba(244,63,94,0.45)',   stroke: '#f43f5e' },
+  misparked: { fill: 'rgba(245,158,11,0.40)',  stroke: '#f59e0b' },
 }
 const DEFAULT_COLOR = { fill: 'rgba(139,149,165,0.15)', stroke: '#4a5568' }
 
-export default function LotMap({ slots, demo = false }) {
+export default function LotMap({ slots, demo = false, title = null }) {
   if (!slots || slots.length === 0) return null
 
-  let maxX = 0, maxY = 0
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const s of slots) {
-    const [x, y, w, h] = s.bbox
-    if (x + w > maxX) maxX = x + w
-    if (y + h > maxY) maxY = y + h
+    if (s.polygon) {
+      for (const [px, py] of s.polygon) {
+        if (px < minX) minX = px
+        if (py < minY) minY = py
+        if (px > maxX) maxX = px
+        if (py > maxY) maxY = py
+      }
+    } else {
+      const [x, y, w, h] = s.bbox
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x + w > maxX) maxX = x + w
+      if (y + h > maxY) maxY = y + h
+    }
   }
-  const pad = 16
-  const vb = `${-pad} ${-pad} ${maxX + pad * 2} ${maxY + pad * 2}`
+  const pad = 12
+  const vb = `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`
 
   return (
     <div style={{
@@ -34,7 +45,7 @@ export default function LotMap({ slots, demo = false }) {
           letterSpacing: '1.5px',
           fontWeight: 600,
         }}>
-          Lot Map — {slots.length} slots
+          {title ? `${title} — ` : 'Lot Map — '}{slots.length} slots
         </div>
         {demo && (
           <span style={{
@@ -61,28 +72,20 @@ export default function LotMap({ slots, demo = false }) {
       >
         {slots.map(s => {
           const [x, y, w, h] = s.bbox
-          const c = demo ? DEFAULT_COLOR : (STATUS_COLOR[s.status] || DEFAULT_COLOR)
+          const c = STATUS_COLOR[s.status] || DEFAULT_COLOR
           const fontSize = Math.max(9, Math.min(w, h) * 0.18)
           const cx = x + w / 2, cy = y + h / 2
           return (
             <g key={s.id}>
-              {s.polygon ? (
+              {s.polygon && (
                 <polygon
                   points={s.polygon.map(([px, py]) => `${px},${py}`).join(' ')}
                   fill={c.fill}
                   stroke={c.stroke}
                   strokeWidth={1.5}
                 />
-              ) : (
-                <rect
-                  x={x} y={y} width={w} height={h}
-                  rx={4} ry={4}
-                  fill={c.fill}
-                  stroke={c.stroke}
-                  strokeWidth={1.5}
-                />
               )}
-              {!demo && (
+              {s.status && (
                 <text
                   x={cx} y={cy}
                   textAnchor="middle"

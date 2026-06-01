@@ -226,9 +226,10 @@ class TrainManager:
 
             # Copy best weights to model dir
             best_src = config.OUTPUT_DIR / "yolo26_classify" / "run" / "weights" / "best.pt"
-            if best_src.exists():
-                import shutil
-                shutil.copy2(best_src, config.YOLO26_CLASSIFY_PATH)
+            if not best_src.exists():
+                raise FileNotFoundError(f"Training finished but best.pt not found at {best_src}")
+            import shutil
+            shutil.copy2(best_src, config.YOLO26_CLASSIFY_PATH)
 
             with _lock:
                 _state["status"]  = "done"
@@ -315,9 +316,10 @@ class TrainManager:
 
             # Copy best weights to model dir
             best_src = config.OUTPUT_DIR / "yolo26_detect" / "run" / "weights" / "best.pt"
-            if best_src.exists():
-                import shutil
-                shutil.copy2(best_src, config.YOLO26_DETECT_PATH)
+            if not best_src.exists():
+                raise FileNotFoundError(f"Training finished but best.pt not found at {best_src}")
+            import shutil
+            shutil.copy2(best_src, config.YOLO26_DETECT_PATH)
 
             with _lock:
                 _state["status"]  = "done"
@@ -533,10 +535,15 @@ class TrainManager:
             if yolo_cl_present:
                 done += 1
                 with _lock:
-                    _state["message"]    = f"Reading yolo26_classify metrics ({done}/{total})…"
+                    _state["message"]    = f"Evaluating yolo26_classify ({done}/{total})…"
                     _state["model_name"] = "yolo26_classify"
 
+                from ultralytics import YOLO
+                from src.data_prep.yolo_converter import build_yolo_classify_dataset
+
                 entry = {"model": "yolo26_classify", "type": "classification"}
+
+                # Supplementary training info from CSV (epochs, train_time only)
                 csv_path = config.OUTPUT_DIR / "yolo26_classify" / "run" / "results.csv"
                 if csv_path.exists():
                     with open(csv_path) as fh:
@@ -544,20 +551,55 @@ class TrainManager:
                     if rows:
                         last = {k.strip(): v.strip() for k, v in rows[-1].items()}
                         entry.update({
-                            "epochs":        int(float(last.get("epoch", len(rows)))),
-                            "train_time":    round(float(last.get("time", 0)), 1),
-                            "test_accuracy": round(float(last.get("metrics/accuracy_top1", 0)) * 100, 2),
+                            "epochs":     int(float(last.get("epoch", len(rows)))),
+                            "train_time": round(float(last.get("time", 0)), 1),
                         })
+
+                # Actual evaluation — run inference on the val split
+                classify_data_dir = build_yolo_classify_dataset()
+                yolo_cl = YOLO(str(config.YOLO26_CLASSIFY_PATH))
+                val_res = yolo_cl.val(
+                    data=str(classify_data_dir),
+                    split="val",
+                    imgsz=config.YOLO_CLASSIFY_IMG_SIZE,
+                    verbose=False,
+                )
+                entry["test_accuracy"] = round(float(val_res.top1) * 100, 2)
+
+                # Derive precision/recall/F1 from the confusion matrix.
+                # Ultralytics classify: cm.matrix shape (nc, nc), cm[actual][predicted].
+                # Class 0 = occupied (alphabetical), treated as positive.
+                try:
+                    cm = val_res.confusion_matrix.matrix  # (2, 2)
+                    tp = float(cm[0][0])
+                    fp = float(cm[1][0])
+                    fn = float(cm[0][1])
+                    prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                    rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                    f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+                    entry.update({
+                        "test_precision": round(prec * 100, 2),
+                        "test_recall":    round(rec * 100, 2),
+                        "test_f1":        round(f1 * 100, 2),
+                    })
+                except Exception:
+                    pass
+
                 results.append(entry)
 
             # ── YOLO Detect ───────────────────────────────────────────────────
             if yolo_dt_present:
                 done += 1
                 with _lock:
-                    _state["message"]    = f"Reading yolo26_detect metrics ({done}/{total})…"
+                    _state["message"]    = f"Evaluating yolo26_detect ({done}/{total})…"
                     _state["model_name"] = "yolo26_detect"
 
+                from ultralytics import YOLO
+                from src.data_prep.yolo_converter import build_yolo_detect_dataset
+
                 entry = {"model": "yolo26", "type": "detection"}
+
+                # Supplementary training info from CSV (epochs, train_time only)
                 csv_path = config.OUTPUT_DIR / "yolo26_detect" / "run" / "results.csv"
                 if csv_path.exists():
                     with open(csv_path) as fh:
@@ -565,12 +607,23 @@ class TrainManager:
                     if rows:
                         last = {k.strip(): v.strip() for k, v in rows[-1].items()}
                         entry.update({
-                            "epochs":          int(float(last.get("epoch", len(rows)))),
-                            "train_time":      round(float(last.get("time", 0)), 1),
-                            "test_accuracy":   round(float(last.get("metrics/mAP50(B)", 0)) * 100, 2),
-                            "test_precision":  round(float(last.get("metrics/precision(B)", 0)) * 100, 2),
-                            "test_recall":     round(float(last.get("metrics/recall(B)", 0)) * 100, 2),
+                            "epochs":     int(float(last.get("epoch", len(rows)))),
+                            "train_time": round(float(last.get("time", 0)), 1),
                         })
+
+                # Actual evaluation — run inference on the test split
+                yaml_path = build_yolo_detect_dataset()
+                yolo_dt = YOLO(str(config.YOLO26_DETECT_PATH))
+                val_res = yolo_dt.val(
+                    data=str(yaml_path),
+                    split="test",
+                    verbose=False,
+                )
+                entry.update({
+                    "test_accuracy":  round(float(val_res.box.map50) * 100, 2),
+                    "test_precision": round(float(val_res.box.mp) * 100, 2),
+                    "test_recall":    round(float(val_res.box.mr) * 100, 2),
+                })
                 results.append(entry)
 
             # ── Persist ───────────────────────────────────────────────────────

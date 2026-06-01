@@ -1,6 +1,6 @@
 task: detect
 mode: train
-model: yolo26n.yaml
+model: yolo26n.pt
 data: D:\Documents\School Project\backend\data\yolo_detect_dataset\dataset.yaml
 epochs: 5
 time: null

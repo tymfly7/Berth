@@ -132,6 +132,17 @@ class CameraRegistry:
             logger.info(f"Camera '{id}' deactivated")
             return True
 
+    def shutdown(self):
+        """Stop all processors on server exit without touching cameras.json active flags."""
+        with self._lock:
+            for id in list(self._processors.keys()):
+                proc = self._processors.pop(id, None)
+                if proc:
+                    try:
+                        proc.stop_processing()
+                    except Exception:
+                        pass
+
     def get_all(self) -> list:
         with self._lock:
             return [dict(c) for c in self._cameras.values()]

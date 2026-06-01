@@ -61,8 +61,7 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    for cam in camera_registry.get_all():
-        camera_registry.deactivate(cam["id"])
+    camera_registry.shutdown()
 
 # ── FastAPI app ───────────────────────────────────────────
 app = FastAPI(
@@ -352,7 +351,7 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
 
 @app.post("/api/analyze-roi", dependencies=[Depends(verify_api_key)])
 @limiter.limit(config.UPLOAD_RATE_LIMIT)
-async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id: str = "default"):
+async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id: str = "default", model_name: str = None):
     """
     Analyze a parking lot image using saved ROI polygons for the given camera.
     Each ROI polygon is classified as occupied/vacant using the active model.
@@ -373,7 +372,8 @@ async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id:
         if not rois:
             raise HTTPException(400, "No ROIs saved for this camera. Draw and save ROIs first.")
 
-        model_name = _resolve_model_name()
+        supported = ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26")
+        model_name = model_name if model_name in supported else _resolve_model_name()
         if model_name is None:
             raise HTTPException(400, "No trained model available. Train a model first.")
         try:
@@ -1062,6 +1062,19 @@ def delete_roi(camera_id: str, roi_id: str):
     if not RoiStore.delete_roi(camera_id, roi_id):
         raise HTTPException(404, f"ROI '{roi_id}' not found")
     return {"deleted": roi_id}
+
+
+@app.delete("/api/roi/{camera_id}", dependencies=[Depends(verify_api_key)])
+def delete_roi_config(camera_id: str):
+    """Delete all ROIs and snapshot for a camera/lot config."""
+    roi_path = RoiStore._roi_path(camera_id)
+    snap_path = RoiStore._snapshot_path(camera_id)
+    if not roi_path.exists():
+        raise HTTPException(404, f"No ROI config found for '{camera_id}'")
+    roi_path.unlink()
+    if snap_path.exists():
+        snap_path.unlink()
+    return {"deleted": camera_id}
 
 
 @app.post("/api/roi/{camera_id}/propose", dependencies=[Depends(verify_api_key)])

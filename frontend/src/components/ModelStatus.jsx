@@ -309,7 +309,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
             </tbody>
           </table>
           <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
-            CNN/ResNet/MobileNet: held-out test set · YOLO: final validation epoch
+            All models: held-out test set (CNN/ResNet/MobileNet: PKLot · YOLO: gopro val/test split)
           </div>
         </div>
       )}
