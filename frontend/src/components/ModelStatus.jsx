@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiFetch } from '../api'
 
 const style = {
   container: { padding: '20px' },
@@ -92,7 +93,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   // ── Evaluate All ────────────────────────────────────────────────────────────
   const pollEvalStatus = async () => {
     try {
-      const res  = await fetch(`${apiBase}/api/train/status`)
+      const res  = await apiFetch(`${apiBase}/api/train/status`)
       const data = await res.json()
       setEvalStatus(data)
       if (data.status === 'training') {
@@ -112,7 +113,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   const handleEvaluateAll = async () => {
     setEvalStatus({ status: 'training', message: 'Starting evaluation…' })
     try {
-      await fetch(`${apiBase}/api/evaluate/all`, { method: 'POST' })
+      await apiFetch(`${apiBase}/api/evaluate/all`, { method: 'POST' })
       pollEvalStatus()
     } catch (e) {
       setEvalStatus({ status: 'error', message: String(e) })

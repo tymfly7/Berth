@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { apiFetch } from '../api'
 import RoiEditor from './RoiEditor'
 
 const MODELS = [
@@ -119,7 +120,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   // Reload ROIs when selected lot changes
   useEffect(() => {
     if (!selectedLotId) { setRois([]); return }
-    fetch(`${apiBase}/api/roi/${selectedLotId}`)
+    apiFetch(`${apiBase}/api/roi/${selectedLotId}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setRois(Array.isArray(data) ? data : []))
       .catch(() => {})
@@ -133,7 +134,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   const saveRois = async (roiList) => {
     if (!selectedLotId) return
     try {
-      const res = await fetch(`${apiBase}/api/roi/${selectedLotId}`, {
+      const res = await apiFetch(`${apiBase}/api/roi/${selectedLotId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rois: roiList }),
@@ -165,7 +166,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     const lot = lots.find(l => l.id === lotId)
     if (!lot) return
     try {
-      await fetch(`${apiBase}/api/roi/${lotId}`, { method: 'DELETE' })
+      await apiFetch(`${apiBase}/api/roi/${lotId}`, { method: 'DELETE' })
     } catch { /* file may not exist yet — still remove from list */ }
     const updated = lots.filter(l => l.id !== lotId)
     setLots(updated)
@@ -213,7 +214,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       const form = new FormData()
       form.append('file', file)
       try {
-        const res = await fetch(`${apiBase}/api/upload-video`, { method: 'POST', body: form })
+        const res = await apiFetch(`${apiBase}/api/upload-video`, { method: 'POST', body: form })
         const data = await res.json()
         setStatus(data.message || 'Uploaded')
       } catch { setStatus('Upload failed') }
@@ -228,9 +229,9 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       if (selectedLotId) {
         const snapshotForm = new FormData()
         snapshotForm.append('file', file)
-        fetch(`${apiBase}/api/roi/${selectedLotId}/snapshot`, { method: 'POST', body: snapshotForm }).catch(() => {})
+        apiFetch(`${apiBase}/api/roi/${selectedLotId}/snapshot`, { method: 'POST', body: snapshotForm }).catch(() => {})
 
-        fetch(`${apiBase}/api/roi/${selectedLotId}`)
+        apiFetch(`${apiBase}/api/roi/${selectedLotId}`)
           .then(r => r.ok ? r.json() : [])
           .then(data => setRois(Array.isArray(data) ? data : []))
           .catch(() => {})
@@ -265,7 +266,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       const form = new FormData()
       form.append('file', uploadedFileRef.current)
       try {
-        const res = await fetch(`${apiBase}/api/analyze-roi?camera_id=${selectedLotId}&model_name=${testModel}`, {
+        const res = await apiFetch(`${apiBase}/api/analyze-roi?camera_id=${selectedLotId}&model_name=${testModel}`, {
           method: 'POST',
           body: form,
         })

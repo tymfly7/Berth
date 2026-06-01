@@ -611,5 +611,31 @@ docker run -p 8000:8000 -e SMARTPARK_API_KEY=your-secret smartpark-ai
 
 ## License
 
-This project is for educational and portfolio purposes.
-PKLot dataset: [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/)
+This project is licensed under the **MIT License** and is for educational and portfolio purposes.
+
+---
+
+## Acknowledgements
+
+This project builds upon and was inspired by:
+
+- **[PKLot Dataset](https://www.cnrpark.it/dataset/)** — Parking lot occupancy dataset used for training CNN/ResNet/MobileNet classifiers ([Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/))
+- **[AI-Parking-Lot-Detection](https://github.com/Nandini60/AI-Parking-Lot-Detection/tree/main/parking_ai)** — Reference implementation and architectural inspiration
+- **Ultralytics YOLO26** — State-of-the-art object detection and classification models
+
+---
+
+## Citations
+
+If you use datasets in this project, please cite the respective sources:
+
+```bibtex
+@misc{marek2021imagebased,
+      title={Image-Based Parking Space Occupancy Classification: Dataset and Baseline}, 
+      author={Martin Marek},
+      year={2021},
+      eprint={2107.12207},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV}
+}
+```

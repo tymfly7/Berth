@@ -216,3 +216,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ── Project-specific ──────────────────────────────────────
+
+# User-uploaded videos — runtime, not deployable
+backend/uploads/
+
+# YOLO training cache files — auto-regenerated
+**/*.cache
+
+# Claude Code session data — local tooling only
+.claude/
+
+# Frontend env files — may contain VITE_API_KEY
+frontend/.env
+frontend/.env.*
+
+# IDE settings that leaked into backend dir
+backend/.vscode/

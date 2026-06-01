@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiFetch } from '../api'
 
 const API_BASE = `http://${window.location.hostname}:8000`
 
@@ -62,7 +63,7 @@ export default function HeatmapView({ cameras = [] }) {
   useEffect(() => {
     if (!cam) { setRois([]); return }
     const cameraId = cam.roi_camera_id || cam.id
-    fetch(`${API_BASE}/api/roi/${cameraId}`)
+    apiFetch(`${API_BASE}/api/roi/${cameraId}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setRois(Array.isArray(data) ? data : []))
       .catch(() => {})
@@ -71,7 +72,7 @@ export default function HeatmapView({ cameras = [] }) {
   useEffect(() => {
     if (!cam) { setHeatmap([]); return }
     const load = () => {
-      fetch(`${API_BASE}/api/heatmap/${cam.id}`)
+      apiFetch(`${API_BASE}/api/heatmap/${cam.id}`)
         .then(r => r.ok ? r.json() : [])
         .then(data => setHeatmap(Array.isArray(data) ? data : []))
         .catch(() => {})

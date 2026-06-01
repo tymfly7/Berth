@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
 const WS_BASE = `ws://${window.location.hostname}:8000`
+const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
 
 const s = {
   cell: {
@@ -76,7 +77,8 @@ export default function CameraFeedCell({ cameraId, name, onMetricsUpdate }) {
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
-    const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cameraId}`)
+    const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
+    const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cameraId}${wsToken}`)
     wsRef.current = ws
 
     ws.onopen = () => setConnected(true)

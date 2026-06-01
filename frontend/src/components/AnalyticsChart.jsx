@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
+import { apiFetch } from '../api'
 
 const API_BASE = `http://${window.location.hostname}:8000`
 
@@ -121,7 +122,7 @@ export default function AnalyticsChart({ history }) {
   const fetchTrend = useCallback(async (range) => {
     setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/trends?range=${range}`)
+      const res = await apiFetch(`${API_BASE}/api/trends?range=${range}`)
       if (res.ok) setTrendData(await res.json())
     } catch { /* silent */ }
     setLoading(false)
