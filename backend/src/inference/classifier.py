@@ -175,6 +175,9 @@ class ParkingClassifier:
             status = "vacant"
             confidence = 1.0 - prob
 
+        if confidence < self.threshold:
+            return {"status": "unknown", "confidence": round(confidence, 4), "probability": round(prob, 4)}
+
         return {
             "status": status,
             "confidence": round(confidence, 4),
@@ -217,17 +220,14 @@ class ParkingClassifier:
 
         results = []
         for prob in outputs.cpu().numpy():
-            if prob > 0.5:
-                results.append({
-                    "status": "occupied",
-                    "confidence": round(float(prob), 4),
-                    "probability": round(float(prob), 4),
-                })
+            prob_f = float(prob)
+            if prob_f > 0.5:
+                status, confidence = "occupied", prob_f
             else:
-                results.append({
-                    "status": "vacant",
-                    "confidence": round(float(1.0 - prob), 4),
-                    "probability": round(float(prob), 4),
-                })
+                status, confidence = "vacant", 1.0 - prob_f
+            if confidence < self.threshold:
+                results.append({"status": "unknown", "confidence": round(confidence, 4), "probability": round(prob_f, 4)})
+            else:
+                results.append({"status": status, "confidence": round(confidence, 4), "probability": round(prob_f, 4)})
 
         return results

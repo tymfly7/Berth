@@ -67,7 +67,8 @@ TRAIN_SPLIT = 0.70
 VAL_SPLIT   = 0.15
 TEST_SPLIT  = 0.15
 
-EPOCHS              = int(os.getenv("SMARTPARK_EPOCHS", "5"))
+EPOCHS              = int(os.getenv("SMARTPARK_EPOCHS", "30"))
+YOLO_DETECT_EPOCHS  = int(os.getenv("SMARTPARK_YOLO_DETECT_EPOCHS", "100"))
 BATCH_SIZE           = int(os.getenv("SMARTPARK_BATCH_SIZE", "32"))
 LEARNING_RATE        = float(os.getenv("SMARTPARK_LR", "1e-3"))
 WEIGHT_DECAY         = 1e-4          # L2 regularization
@@ -77,7 +78,7 @@ LR_SCHEDULER_FACTOR  = 0.1
 NUM_WORKERS          = int(os.getenv("SMARTPARK_WORKERS", "2"))
 
 # Subset size for CNN models (0 = full dataset)
-SUBSET_SIZE = int(os.getenv("SMARTPARK_SUBSET", "2000"))
+SUBSET_SIZE = int(os.getenv("SMARTPARK_SUBSET", "12000"))
 
 # Smaller input size for YOLO classify — spots are pre-cropped so 64 px is
 # enough and is ~10x faster than 224 px.

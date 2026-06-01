@@ -25,7 +25,7 @@ class ParkingYOLO26:
     #       separate training workflow and a dataset converted to YOLO format.
     """
 
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str, conf: float = 0.1, iou: float = 0.7):
         try:
             from ultralytics import YOLO
         except ImportError:
@@ -38,6 +38,8 @@ class ParkingYOLO26:
                 "Train it first via the Training panel."
             )
         self.model = YOLO(model_path)
+        self._conf = conf
+        self._iou = iou
 
     def predict_frame(self, frame_bgr: np.ndarray) -> list:
         """
@@ -52,7 +54,7 @@ class ParkingYOLO26:
                 'confidence': float detection score
                 'class_id':   int class index
         """
-        results = self.model(frame_bgr, verbose=False)
+        results = self.model(frame_bgr, verbose=False, conf=self._conf, iou=self._iou, classes=[1])
         detections = []
         for r in results:
             for box in r.boxes:

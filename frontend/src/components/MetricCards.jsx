@@ -99,7 +99,6 @@ export default function MetricCards({ metrics }) {
           <div className="count-animate" style={{ ...bigNum, color: card.color }}>
             {card.getValue(metrics)}
           </div>
-          {/* Mini progress bar for occupancy */}
           {card.key === 'occupancy' && (
             <div className="progress-bar" style={{ marginTop: 4 }}>
               <div
@@ -113,6 +112,17 @@ export default function MetricCards({ metrics }) {
           )}
         </div>
       ))}
+      {metrics.anomaly_enabled && (
+        <div className="glass-card fade-in" style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={label}>Misparked</span>
+            <div style={{ ...iconWrap, background: 'rgba(251,146,60,0.15)' }}>⚠️</div>
+          </div>
+          <div className="count-animate" style={{ ...bigNum, color: '#f97316' }}>
+            {metrics.misparked_count ?? 0}
+          </div>
+        </div>
+      )}
     </>
   )
 }

@@ -3,6 +3,7 @@ import ControlPanel from './ControlPanel'
 import TrainingPanel from './TrainingPanel'
 import ModelStatus from './ModelStatus'
 import CameraManager from './CameraManager'
+import AnomalyPanel from './AnomalyPanel'
 
 const toggleBtnStyle = {
   width: '100%',
@@ -71,6 +72,12 @@ export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchMode
               fetchModelInfo={fetchModelInfo}
             />
             <ModelStatus modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} apiBase={apiBase} />
+          </SubSection>
+
+          <div style={dividerStyle} />
+
+          <SubSection title="Anomalies" defaultOpen={false}>
+            <AnomalyPanel apiBase={apiBase} />
           </SubSection>
         </>
       )}

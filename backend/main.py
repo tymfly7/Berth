@@ -43,6 +43,7 @@ from slowapi.errors import RateLimitExceeded
 from src.inference.video_processor import VideoProcessor
 from src.roi.roi_store import RoiStore
 from src.cameras.camera_registry import camera_registry
+from src.db import database as db
 import config
 
 
@@ -60,6 +61,7 @@ limiter = Limiter(key_func=get_remote_address)
 # ── Lifespan ──────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    db.init_db()
     yield
     camera_registry.shutdown()
 
@@ -117,6 +119,7 @@ def _finish_op(op_id: str) -> None:
 _processor = None
 _active_mode = config.ACTIVE_MODEL
 _processor_lock = threading.Lock()
+_anomaly_enabled = False
 
 def _get_processor():
     global _processor
@@ -618,8 +621,36 @@ def get_heatmap_camera(camera_id: str):
 
 @app.get("/api/history", dependencies=[Depends(verify_api_key)])
 def get_history():
+    # Prefer active camera processors; fall back to the default processor
+    active_procs = [
+        camera_registry.get_processor(c["id"])
+        for c in camera_registry.get_all()
+        if c.get("active")
+    ]
+    active_procs = [p for p in active_procs if p and hasattr(p, "get_history")]
+    if active_procs:
+        # Merge and sort all camera histories by timestamp
+        merged = sorted(
+            (entry for p in active_procs for entry in p.get_history()),
+            key=lambda e: e.get("timestamp", "")
+        )
+        return merged[-100:]
     proc = _get_processor()
     return proc.get_history() if hasattr(proc, "get_history") else []
+
+@app.get("/api/trends", dependencies=[Depends(verify_api_key)])
+def get_trends(range: str = "day", camera_id: str = None):
+    if range not in ("day", "week", "month"):
+        raise HTTPException(400, "range must be day, week, or month")
+    return db.query_trends(range, camera_id)
+
+@app.get("/api/alerts", dependencies=[Depends(verify_api_key)])
+def get_alerts(limit: int = 50):
+    return db.get_alerts(limit)
+
+@app.get("/api/training-runs", dependencies=[Depends(verify_api_key)])
+def get_training_runs(limit: int = 20):
+    return db.get_training_runs(limit)
 
 # ── Video / Camera ───────────────────────────────────────
 @app.post("/api/upload-video", dependencies=[Depends(verify_api_key)])
@@ -645,6 +676,33 @@ def use_camera():
     proc = _get_processor()
     proc.set_video_source(0)
     return {"message": "Switched to live camera"}
+
+# ── Anomaly detection settings ────────────────────────────
+@app.get("/api/settings/anomaly")
+def get_anomaly():
+    return {"enabled": _anomaly_enabled}
+
+@app.post("/api/settings/anomaly")
+async def set_anomaly(request: Request):
+    global _anomaly_enabled
+    body = await request.json()
+    enabled = bool(body.get("enabled", False))
+    try:
+        _get_processor().set_anomaly_detection(enabled)
+    except FileNotFoundError:
+        raise HTTPException(400, "YOLO26 detect model not found. Train it first via the Training panel.")
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    _anomaly_enabled = enabled
+    for cam in camera_registry.get_all():
+        if cam.get("active"):
+            p = camera_registry.get_processor(cam["id"])
+            if p:
+                try:
+                    p.set_anomaly_detection(enabled)
+                except Exception:
+                    pass
+    return {"enabled": _anomaly_enabled}
 
 # ── Model switching ──────────────────────────────────────
 @app.post("/api/use-model/{model_name}", dependencies=[Depends(verify_api_key)])
@@ -1206,6 +1264,13 @@ def activate_camera(camera_id: str):
     ok = camera_registry.activate(camera_id, model_name=_resolve_model_name())
     if not ok:
         raise HTTPException(500, "Failed to activate camera")
+    if _anomaly_enabled:
+        p = camera_registry.get_processor(camera_id)
+        if p:
+            try:
+                p.set_anomaly_detection(True)
+            except Exception:
+                pass
     return {"activated": camera_id}
 
 @app.post("/api/cameras/{camera_id}/deactivate")

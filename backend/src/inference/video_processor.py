@@ -19,6 +19,7 @@ import cv2
 import numpy as np
 import config
 from src.roi.roi_store import RoiStore
+from src.db import database as db
 
 # FFMPEG capture options applied to all VideoCapture instances:
 #
@@ -66,6 +67,7 @@ class VideoProcessor:
         self._frame = None
         self._metrics = self._default_metrics()
         self._history = deque(maxlen=100)
+        self._last_db_write: float = 0.0
         self._heatmap = {}
         self._heatmap_last_ts = None
         self._fps: float = 0.0
@@ -75,6 +77,8 @@ class VideoProcessor:
         self._detector = self._load_detector()
         self._roi_cache: list = []
         self._roi_cache_ts: float = 0.0
+        self._anomaly_enabled = False
+        self._yolo_detector = None
 
     # ── Setup ──────────────────────────────────────────────────────────────
 
@@ -110,6 +114,17 @@ class VideoProcessor:
         self.running = False
         if self._thread:
             self._thread.join(timeout=3)
+
+    def set_anomaly_detection(self, enabled: bool) -> None:
+        """Enable/disable wrong-parking anomaly detection. Raises if YOLO26 detect model missing."""
+        if enabled and self._yolo_detector is None:
+            self._load_yolo_detector()
+        self._anomaly_enabled = enabled
+
+    def _load_yolo_detector(self) -> None:
+        from src.models.yolo_detector import ParkingYOLO26
+        self._yolo_detector = ParkingYOLO26(str(config.YOLO26_DETECT_PATH))
+        logger.info("Anomaly detection: YOLO26 detector loaded")
 
     def set_video_source(self, source, source_type="auto"):
         was_running = self.running
@@ -328,7 +343,27 @@ class VideoProcessor:
                     color = _STATUS_COLOR.get(status, _STATUS_COLOR["unknown"])
                     cv2.polylines(display, [pts], True, color, 2)
 
+        misparked_count = 0
+        if self._anomaly_enabled and self._yolo_detector is not None and self._roi_cache:
+            h, w = frame.shape[:2]
+            try:
+                from src.inference.parking_geometry import classify_vehicle_parking
+                cars = self._yolo_detector.predict_frame(frame)
+                for car in cars:
+                    clf = classify_vehicle_parking(car["bbox"], self._roi_cache, w, h)
+                    if clf["status"] == "misparked":
+                        misparked_count += 1
+                        x1, y1, x2, y2 = (int(v) for v in car["bbox"])
+                        cv2.rectangle(display, (x1, y1), (x2, y2), (0, 165, 255), 2)
+                        reason = "STRADDLE" if clf["reason"] == "straddling" else "OUTSIDE"
+                        cv2.putText(display, reason, (x1 + 2, max(y1 - 4, 14)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 1)
+            except Exception as e:
+                logger.warning(f"Anomaly detection error: {e}")
+
         metrics = self._result_to_metrics(result)
+        metrics["misparked_count"] = misparked_count
+        metrics["anomaly_enabled"] = self._anomaly_enabled
         ts = datetime.now(timezone.utc).isoformat()
 
         with self._lock:
@@ -341,6 +376,19 @@ class VideoProcessor:
                 "occupancy_percent": metrics["occupancy_percent"],
             })
             self._update_heatmap(result["slots"])
+            now_t = time.time()
+            if now_t - self._last_db_write >= 60:
+                self._last_db_write = now_t
+                try:
+                    db.record_occupancy(
+                        self.camera_id,
+                        metrics["available"],
+                        metrics["occupied"],
+                        metrics["occupancy_percent"],
+                    )
+                    db.maybe_record_alert(self.camera_id, metrics["occupancy_percent"])
+                except Exception as _db_err:
+                    logger.warning(f"DB write failed: {_db_err}")
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -419,4 +467,6 @@ class VideoProcessor:
             "occupancy_percent": 0.0, "avg_confidence": 0.0,
             "slots": [], "fps": 0.0, "source_type": "auto", "mode": "unknown",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "misparked_count": 0,
+            "anomaly_enabled": False,
         }
