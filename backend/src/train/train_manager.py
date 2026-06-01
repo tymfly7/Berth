@@ -161,6 +161,20 @@ class TrainManager:
                                            epochs=results.get("epochs"))
                 except Exception:
                     pass
+
+            # Export to edge format (.pte / .onnx) — non-fatal
+            try:
+                from src.export.model_exporter import export_pytorch_model
+                weights_map = {
+                    "cnn_scratch":  config.CNN_SCRATCH_PATH,
+                    "resnet50":     config.RESNET50_PATH,
+                    "mobilenetv4s":  config.MOBILENETV4_PATH,
+                }
+                if model_name in weights_map:
+                    export_pytorch_model(model_name, weights_map[model_name])
+            except Exception as _exp_err:
+                logger.warning(f"Edge export skipped: {_exp_err}")
+
             logger.info(f"✅ Training complete: {model_name}")
 
         except Exception as e:
@@ -267,6 +281,14 @@ class TrainManager:
                                            epochs=_state["epoch"])
                 except Exception:
                     pass
+
+            # Export to edge format (.pte / .onnx) — non-fatal
+            try:
+                from src.export.model_exporter import export_yolo_model
+                export_yolo_model("yolo26_classify", config.YOLO26_CLASSIFY_PATH)
+            except Exception as _exp_err:
+                logger.warning(f"Edge export skipped: {_exp_err}")
+
             logger.info("✅ YOLO26 classify training complete")
 
         except Exception as e:
@@ -374,6 +396,14 @@ class TrainManager:
                                            epochs=_state["epoch"])
                 except Exception:
                     pass
+
+            # Export to edge format (.pte / .onnx) — non-fatal
+            try:
+                from src.export.model_exporter import export_yolo_model
+                export_yolo_model("yolo26_detect", config.YOLO26_DETECT_PATH)
+            except Exception as _exp_err:
+                logger.warning(f"Edge export skipped: {_exp_err}")
+
             logger.info("✅ YOLO26 detect training complete")
 
         except Exception as e:
@@ -518,7 +548,7 @@ class TrainManager:
             cnn_candidates = [
                 ("cnn_scratch",  config.CNN_SCRATCH_PATH),
                 ("resnet50",     config.RESNET50_PATH),
-                ("mobilenetv4",  config.MOBILENETV4_PATH),
+                ("mobilenetv4s",  config.MOBILENETV4_PATH),
             ]
             cnn_present = [(n, p) for n, p in cnn_candidates if p.exists()]
             yolo_cl_present = config.YOLO26_CLASSIFY_PATH.exists()

@@ -13,6 +13,7 @@ Features:
   - Multi-camera registry with persistent activation
 """
 
+import hmac
 import os
 import re
 import sys
@@ -26,6 +27,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse
 import cv2
 import numpy as np
 import uvicorn
@@ -62,6 +64,13 @@ limiter = Limiter(key_func=get_remote_address)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
+    if not config.API_KEY:
+        logger.warning(
+            "SMARTPARK_API_KEY is not set — all protected endpoints are publicly accessible. "
+            "Set this env var before any network-facing deployment."
+        )
+    from src.sync.sync_worker import SyncWorker
+    SyncWorker().start()
     yield
     camera_registry.shutdown()
 
@@ -74,9 +83,17 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+_allowed_origins = [o for o in [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+    os.getenv("SMARTPARK_ALLOWED_ORIGIN", ""),
+] if o]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,8 +106,40 @@ async def verify_api_key(request: Request):
     if not API_KEY:
         return
     key = request.headers.get("X-API-Key", "")
-    if key != API_KEY:
+    if not hmac.compare_digest(key.encode(), API_KEY.encode()):
         raise HTTPException(401, "Invalid or missing API key")
+
+# ── Camera source validation (SSRF guard) ────────────────
+_YOUTUBE_HOSTS = {"www.youtube.com", "youtube.com", "youtu.be", "m.youtube.com"}
+
+def _validate_camera_source(source: str, type_: str) -> None:
+    if type_ == "usb":
+        try:
+            idx = int(source)
+            if idx < 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise HTTPException(400, "USB source must be a non-negative integer device index")
+    elif type_ == "rtsp":
+        p = urlparse(source)
+        if p.scheme not in ("rtsp", "rtsps"):
+            raise HTTPException(400, "RTSP source must use rtsp:// or rtsps:// scheme")
+        if not p.hostname:
+            raise HTTPException(400, "RTSP source must include a hostname")
+    elif type_ == "youtube":
+        p = urlparse(source)
+        if p.hostname not in _YOUTUBE_HOSTS:
+            raise HTTPException(400, "YouTube source must be a youtube.com or youtu.be URL")
+    elif type_ == "file":
+        try:
+            resolved = Path(source).resolve()
+            upload_resolved = config.UPLOAD_DIR.resolve()
+            if not str(resolved).startswith(str(upload_resolved)):
+                raise HTTPException(400, "File source must be within the uploads directory")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(400, "Invalid file path")
 
 # ── Active-operation tracking ─────────────────────────────
 _active_operations: dict = {}
@@ -98,11 +147,17 @@ _ops_lock = threading.Lock()
 
 def _register_op(op_type: str, label: str) -> str:
     op_id = uuid.uuid4().hex[:8]
+    now = datetime.now(timezone.utc)
     with _ops_lock:
+        # Evict stale entries (crashed ops that never called _finish_op).
+        stale = [k for k, v in _active_operations.items()
+                 if (now - datetime.fromisoformat(v["started_at"])).total_seconds() > 3600]
+        for k in stale:
+            del _active_operations[k]
         _active_operations[op_id] = {
             "id": op_id, "type": op_type, "label": label,
             "progress": 0.0,
-            "started_at": datetime.now(timezone.utc).isoformat(),
+            "started_at": now.isoformat(),
         }
     return op_id
 
@@ -120,6 +175,25 @@ _processor = None
 _active_mode = config.ACTIVE_MODEL
 _processor_lock = threading.Lock()
 _anomaly_enabled = False
+
+# ── Classifier cache — one loaded instance per model name ─
+_clf_cache: dict = {}
+_clf_lock = threading.Lock()
+
+def _get_classifier(model_name: str):
+    with _clf_lock:
+        if model_name not in _clf_cache:
+            from src.inference.classifier import get_classifier
+            clf = get_classifier(model_name=model_name)
+            clf.load()
+            if not clf.is_loaded():
+                raise Exception(f"Model '{model_name}' failed to load")
+            _clf_cache[model_name] = clf
+        return _clf_cache[model_name]
+
+def _clear_clf_cache():
+    with _clf_lock:
+        _clf_cache.clear()
 
 def _get_processor():
     global _processor
@@ -142,17 +216,18 @@ def _reset_processor():
             except Exception:
                 pass
         _processor = None
+    _clear_clf_cache()
 
 def _resolve_model_name():
     """Resolve active model name for single-image prediction."""
-    supported = ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26")
+    supported = ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26")
     if _active_mode in supported:
         return _active_mode
     for name, path in [
         ("yolo26_classify", config.YOLO26_CLASSIFY_PATH),
         ("cnn_scratch", config.CNN_SCRATCH_PATH),
         ("resnet50", config.RESNET50_PATH),
-        ("mobilenetv4", config.MOBILENETV4_PATH),
+        ("mobilenetv4s", config.MOBILENETV4_PATH),
     ]:
         if path.exists():
             return name
@@ -201,6 +276,8 @@ async def predict(request: Request, file: UploadFile = File(...)):
         raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
 
     content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Image exceeds 20 MB limit")
     pil_image = Image.open(io.BytesIO(content)).convert("RGB")
 
     # Single spot classification using the trained model
@@ -208,11 +285,7 @@ async def predict(request: Request, file: UploadFile = File(...)):
     if model_name is None:
         raise HTTPException(400, "No trained model available. Train a model first.")
     try:
-        from src.inference.classifier import ParkingClassifier
-        clf = ParkingClassifier(model_name=model_name)
-        clf.load()
-        if not clf.is_loaded():
-            raise Exception("Model not loaded")
+        clf = _get_classifier(model_name)
         result = clf.predict(pil_image)
         result["model"] = model_name
         result["type"] = "single_spot"
@@ -262,11 +335,7 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
         if model_name is None:
             raise HTTPException(400, "No trained model available. Train a model first.")
         try:
-            from src.inference.classifier import ParkingClassifier
-            clf = ParkingClassifier(model_name=model_name)
-            clf.load()
-            if not clf.is_loaded():
-                raise Exception(f"Model '{model_name}' not loaded.")
+            clf = _get_classifier(model_name)
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -375,16 +444,12 @@ async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id:
         if not rois:
             raise HTTPException(400, "No ROIs saved for this camera. Draw and save ROIs first.")
 
-        supported = ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26")
+        supported = ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26")
         model_name = model_name if model_name in supported else _resolve_model_name()
         if model_name is None:
             raise HTTPException(400, "No trained model available. Train a model first.")
         try:
-            from src.inference.classifier import ParkingClassifier
-            clf = ParkingClassifier(model_name=model_name)
-            clf.load()
-            if not clf.is_loaded():
-                raise Exception(f"Model '{model_name}' not loaded.")
+            clf = _get_classifier(model_name)
         except Exception as e:
             raise HTTPException(400, str(e))
 
@@ -504,13 +569,11 @@ async def analyze_misparked(
         except FileNotFoundError:
             raise HTTPException(
                 400,
-                f"YOLO26 model weights not found at '{config.YOLO26_PATH}'. "
-                "Train a YOLO26 detector first via the Ultralytics CLI "
-                "(yolo train data=parking.yaml model=yolo26n.pt) and save "
-                "the best.pt as models/best_yolo26.pt.",
+                "YOLO26 detector weights not found. "
+                "Train a YOLO26 detector first via the Training panel.",
             )
         except RuntimeError as exc:
-            raise HTTPException(400, str(exc))
+            raise HTTPException(400, "YOLO26 detector failed to load")
 
         h, w = frame.shape[:2]
         detections = detector.predict_frame(frame)
@@ -661,13 +724,23 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         allowed = (".mp4", ".avi", ".mov", ".mkv", ".webm")
         if not file.filename.lower().endswith(allowed):
             raise HTTPException(400, "Unsupported video format")
-        dest = config.UPLOAD_DIR / file.filename
-        content = await file.read()
-        with open(dest, "wb") as f:
-            f.write(content)
+        safe_name = Path(file.filename).name  # strip any directory components
+        dest = config.UPLOAD_DIR / safe_name
+        max_bytes = 500 * 1024 * 1024  # 500 MB
+        written = 0
+        try:
+            with open(dest, "wb") as f_out:
+                while chunk := await file.read(1 << 20):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise HTTPException(413, "Video exceeds 500 MB limit")
+                    f_out.write(chunk)
+        except HTTPException:
+            dest.unlink(missing_ok=True)
+            raise
         proc = _get_processor()
         proc.set_video_source(str(dest))
-        return {"message": "Video uploaded", "path": str(dest)}
+        return {"message": "Video uploaded", "path": safe_name}
     finally:
         _finish_op(op_id)
 
@@ -678,11 +751,11 @@ def use_camera():
     return {"message": "Switched to live camera"}
 
 # ── Anomaly detection settings ────────────────────────────
-@app.get("/api/settings/anomaly")
+@app.get("/api/settings/anomaly", dependencies=[Depends(verify_api_key)])
 def get_anomaly():
     return {"enabled": _anomaly_enabled}
 
-@app.post("/api/settings/anomaly")
+@app.post("/api/settings/anomaly", dependencies=[Depends(verify_api_key)])
 async def set_anomaly(request: Request):
     global _anomaly_enabled
     body = await request.json()
@@ -708,7 +781,7 @@ async def set_anomaly(request: Request):
 @app.post("/api/use-model/{model_name}", dependencies=[Depends(verify_api_key)])
 def use_model(model_name: str):
     global _active_mode
-    valid = ["cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26"]
+    valid = ["cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26"]
     if model_name not in valid:
         raise HTTPException(400, f"Invalid model. Choose from: {valid}")
     _reset_processor()
@@ -727,7 +800,7 @@ def use_model(model_name: str):
 def test_model(model_name: str):
     if model_name in ("yolo26", "yolo26_detect"):
         raise HTTPException(400, "YOLO26 detect uses a detection interface — per-patch accuracy testing is not supported.")
-    testable = ["cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify"]
+    testable = ["cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify"]
     if model_name not in testable:
         raise HTTPException(400, f"Unknown model '{model_name}'. Testable: {testable}")
     try:
@@ -748,6 +821,8 @@ def test_model(model_name: str):
 
 @app.post("/api/evaluate/all", dependencies=[Depends(verify_api_key)])
 def evaluate_all():
+    if config.DEPLOYMENT_PROFILE == "edge":
+        raise HTTPException(403, "Evaluation is not available on edge nodes. Use the hub server.")
     from src.train.train_manager import TrainManager
     result = TrainManager().start_evaluation()
     if result.get("status") == "error":
@@ -804,14 +879,14 @@ def _build_comparison_excel(comparison: list) -> bytes:
     MODEL_LABELS = {
         "cnn_scratch":     "CNN Scratch",
         "resnet50":        "ResNet-50",
-        "mobilenetv4":     "MobileNetV4",
+        "mobilenetv4s":     "MobileNetV4",
         "yolo26_classify": "YOLO26 Classify",
         "yolo26":          "YOLO26 Detect",
     }
     ROW_BG = {
         "cnn_scratch":     CNN_BG,
         "resnet50":        CNN_BG,
-        "mobilenetv4":     CNN_BG,
+        "mobilenetv4s":     CNN_BG,
         "yolo26_classify": YCLS_BG,
         "yolo26":          YDET_BG,
     }
@@ -919,7 +994,7 @@ def _load_model_training_details() -> dict:
     import csv
     details = {}
 
-    for model_name in ("cnn_scratch", "resnet50", "mobilenetv4"):
+    for model_name in ("cnn_scratch", "resnet50", "mobilenetv4s"):
         history_path = config.OUTPUT_DIR / f"history_{model_name}.json"
         if not history_path.exists():
             continue
@@ -989,7 +1064,7 @@ def model_info():
         "available_models": {
             "cnn_scratch":     config.CNN_SCRATCH_PATH.exists(),
             "resnet50":        config.RESNET50_PATH.exists(),
-            "mobilenetv4":     config.MOBILENETV4_PATH.exists(),
+            "mobilenetv4s":     config.MOBILENETV4_PATH.exists(),
             "yolo26_classify": config.YOLO26_CLASSIFY_PATH.exists(),
             "yolo26":          config.YOLO26_DETECT_PATH.exists(),
         },
@@ -1003,9 +1078,12 @@ def model_info():
 
 # ── Training ─────────────────────────────────────────────
 @app.post("/api/train/start", dependencies=[Depends(verify_api_key)])
+@limiter.limit("3/hour")
 def start_training(request: Request, model_name: str = "cnn_scratch",
                    compare_all: bool = False):
-    valid_models = ["cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26_detect"]
+    if config.DEPLOYMENT_PROFILE == "edge":
+        raise HTTPException(403, "Training is not available on edge nodes. Use the hub server.")
+    valid_models = ["cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26_detect"]
     if model_name not in valid_models:
         raise HTTPException(400, f"Unknown model '{model_name}'. Choose from: {valid_models}")
     from src.train.train_manager import TrainManager
@@ -1053,6 +1131,8 @@ async def upload_dataset_images(
     files: List[UploadFile] = File(...),
     label: str = Form(...),
 ):
+    if config.DEPLOYMENT_PROFILE == "edge":
+        raise HTTPException(403, "Dataset upload is not available on edge nodes. Use the hub server.")
     op_id = _register_op("dataset_upload", "Saving training images…")
     try:
         if label not in ("occupied", "vacant"):
@@ -1064,17 +1144,22 @@ async def upload_dataset_images(
         dest_dir = config.DATA_DIR / label
         dest_dir.mkdir(parents=True, exist_ok=True)
 
+        max_image_bytes = 20 * 1024 * 1024  # 20 MB per image
         saved = 0
         skipped = 0
         for file in files:
-            ext = Path(file.filename).suffix.lower()
+            safe_name = Path(file.filename).name  # strip any directory components
+            ext = Path(safe_name).suffix.lower()
             if ext not in allowed:
                 skipped += 1
                 continue
             content = await file.read()
-            dest = dest_dir / file.filename
+            if len(content) > max_image_bytes:
+                skipped += 1
+                continue
+            dest = dest_dir / safe_name
             if dest.exists():
-                stem = Path(file.filename).stem
+                stem = Path(safe_name).stem
                 suffix_str = uuid.uuid4().hex[:6]
                 dest = dest_dir / f"{stem}_{suffix_str}{ext}"
             with open(dest, "wb") as f:
@@ -1220,11 +1305,11 @@ async def propose_rois(
 
 # ── Camera registry endpoints ────────────────────────────
 
-@app.get("/api/cameras")
+@app.get("/api/cameras", dependencies=[Depends(verify_api_key)])
 def list_cameras():
     return camera_registry.get_all()
 
-@app.post("/api/cameras", status_code=201)
+@app.post("/api/cameras", status_code=201, dependencies=[Depends(verify_api_key)])
 async def add_camera(request: Request):
     body = await request.json()
     name = body.get("name", "").strip()
@@ -1239,6 +1324,8 @@ async def add_camera(request: Request):
     if type_ not in ("usb", "rtsp", "file", "youtube"):
         raise HTTPException(400, "type must be usb, rtsp, file, or youtube")
 
+    _validate_camera_source(source, type_)
+
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "cam"
     cam_id = f"{slug}-{uuid.uuid4().hex[:6]}"
 
@@ -1251,13 +1338,13 @@ async def add_camera(request: Request):
         raise HTTPException(409, str(e))
     return cam
 
-@app.delete("/api/cameras/{camera_id}")
+@app.delete("/api/cameras/{camera_id}", dependencies=[Depends(verify_api_key)])
 def remove_camera(camera_id: str):
     if not camera_registry.remove_camera(camera_id):
         raise HTTPException(404, f"Camera '{camera_id}' not found")
     return {"deleted": camera_id}
 
-@app.post("/api/cameras/{camera_id}/activate")
+@app.post("/api/cameras/{camera_id}/activate", dependencies=[Depends(verify_api_key)])
 def activate_camera(camera_id: str):
     if camera_registry.get(camera_id) is None:
         raise HTTPException(404, f"Camera '{camera_id}' not found")
@@ -1273,7 +1360,7 @@ def activate_camera(camera_id: str):
                 pass
     return {"activated": camera_id}
 
-@app.post("/api/cameras/{camera_id}/deactivate")
+@app.post("/api/cameras/{camera_id}/deactivate", dependencies=[Depends(verify_api_key)])
 def deactivate_camera(camera_id: str):
     if camera_registry.get(camera_id) is None:
         raise HTTPException(404, f"Camera '{camera_id}' not found")
@@ -1283,8 +1370,21 @@ def deactivate_camera(camera_id: str):
 # ═══════════════════════════════════════════════════════════════
 # WebSocket — streams frames + metrics at ~20 FPS
 # ═══════════════════════════════════════════════════════════════
+
+def _ws_token_valid(token: str) -> bool:
+    """Return True if the token is acceptable for WebSocket auth.
+    When API_KEY is unset the check is skipped (open deployment).
+    Set VITE_API_KEY in the frontend .env to pass the token automatically.
+    """
+    if not API_KEY:
+        return True
+    return hmac.compare_digest(token.encode(), API_KEY.encode())
+
 @app.websocket("/ws/video")
-async def video_ws(websocket: WebSocket):
+async def video_ws(websocket: WebSocket, token: str = ""):
+    if not _ws_token_valid(token):
+        await websocket.close(code=4001)
+        return
     await websocket.accept()
     proc = _get_processor()
     proc.start_processing()
@@ -1305,7 +1405,10 @@ async def video_ws(websocket: WebSocket):
         logger.error(f"WebSocket error: {e}")
 
 @app.websocket("/ws/cameras/{camera_id}")
-async def camera_ws(websocket: WebSocket, camera_id: str):
+async def camera_ws(websocket: WebSocket, camera_id: str, token: str = ""):
+    if not _ws_token_valid(token):
+        await websocket.close(code=4001)
+        return
     await websocket.accept()
     if camera_registry.get(camera_id) is None:
         await websocket.send_json({"error": "Camera not found"})
@@ -1331,6 +1434,27 @@ async def camera_ws(websocket: WebSocket, camera_id: str):
         logger.info(f"Camera WS disconnected: {camera_id}")
     except Exception as e:
         logger.error(f"Camera WS error ({camera_id}): {e}")
+
+# ── Edge → Hub ingest (hub side) ─────────────────────────
+@app.post("/api/ingest/occupancy", dependencies=[Depends(verify_api_key)])
+async def ingest_occupancy(request: Request):
+    """Receive batched occupancy rows from an edge node and upsert into hub DB."""
+    rows = await request.json()
+    if not isinstance(rows, list):
+        raise HTTPException(400, "Expected a JSON array of occupancy rows")
+    inserted = db.upsert_occupancy_batch(rows)
+    return {"inserted": inserted, "received": len(rows)}
+
+
+@app.post("/api/ingest/alerts", dependencies=[Depends(verify_api_key)])
+async def ingest_alerts(request: Request):
+    """Receive batched alert rows from an edge node and upsert into hub DB."""
+    rows = await request.json()
+    if not isinstance(rows, list):
+        raise HTTPException(400, "Expected a JSON array of alert rows")
+    inserted = db.upsert_alerts_batch(rows)
+    return {"inserted": inserted, "received": len(rows)}
+
 
 # ── Entry point ───────────────────────────────────────────
 if __name__ == "__main__":

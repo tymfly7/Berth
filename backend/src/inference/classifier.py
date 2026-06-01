@@ -18,6 +18,17 @@ import config
 logger = logging.getLogger("smartpark.classifier")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+_EDGE_CNN_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4s"}
+
+
+def get_classifier(model_name=None, **kwargs):
+    """Return ExecuTorchClassifier on edge profile for CNN models, ParkingClassifier otherwise."""
+    effective = model_name or config.ACTIVE_MODEL
+    if config.DEPLOYMENT_PROFILE == "edge" and effective in _EDGE_CNN_MODELS:
+        from src.inference.executorch_classifier import ExecuTorchClassifier
+        return ExecuTorchClassifier(model_name=model_name, **kwargs)
+    return ParkingClassifier(model_name=model_name, **kwargs)
+
 
 class ParkingClassifier:
     """
@@ -32,7 +43,7 @@ class ParkingClassifier:
     IMAGENET_MEAN = [0.485, 0.456, 0.406]
     IMAGENET_STD  = [0.229, 0.224, 0.225]
 
-    _INFERENCE_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26"}
+    _INFERENCE_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26"}
 
     def __init__(self, model_name=None, device=None, confidence_threshold=None):
         candidate = model_name or config.ACTIVE_MODEL

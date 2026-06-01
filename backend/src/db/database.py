@@ -33,7 +33,8 @@ def init_db() -> None:
             camera_id         TEXT    NOT NULL DEFAULT 'default',
             available         INTEGER NOT NULL,
             occupied          INTEGER NOT NULL,
-            occupancy_percent REAL    NOT NULL
+            occupancy_percent REAL    NOT NULL,
+            synced            INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_occ_ts     ON occupancy_history(timestamp);
         CREATE INDEX IF NOT EXISTS idx_occ_cam_ts ON occupancy_history(camera_id, timestamp);
@@ -44,7 +45,8 @@ def init_db() -> None:
             camera_id         TEXT NOT NULL DEFAULT 'default',
             level             TEXT NOT NULL,
             occupancy_percent REAL NOT NULL,
-            message           TEXT
+            message           TEXT,
+            synced            INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_alert_ts ON alert_events(timestamp);
 
@@ -59,6 +61,11 @@ def init_db() -> None:
             status           TEXT NOT NULL DEFAULT 'running'
         );
     """)
+    # Migrate existing DBs that predate the synced column.
+    for table in ("occupancy_history", "alert_events"):
+        cols = [r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()]
+        if "synced" not in cols:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN synced INTEGER NOT NULL DEFAULT 0")
     c.commit()
     logger.info(f"SQLite DB ready at {DB_PATH}")
 
@@ -76,24 +83,24 @@ def record_occupancy(camera_id: str, available: int, occupied: int,
     _conn().commit()
 
 
+_TREND_CONFIG = {
+    "day":   (timedelta(hours=24), "datetime(strftime('%s', timestamp) - (strftime('%s', timestamp) % 300), 'unixepoch')"),
+    "week":  (timedelta(days=7),   "strftime('%Y-%m-%d %H:00:00', timestamp)"),
+    "month": (timedelta(days=30),  "strftime('%Y-%m-%d', timestamp)"),
+}
+
+
 def query_trends(range_: str, camera_id: str = None):
     """
     Returns aggregated occupancy data for the given range.
       range_: 'day' (hourly, last 24h) | 'week' | 'month' (daily, last 7/30 days)
     Each row: { timestamp, available, occupied, occupancy_percent }
     """
-    now = datetime.now(timezone.utc)
+    if range_ not in _TREND_CONFIG:
+        raise ValueError(f"Invalid range '{range_}': must be day, week, or month")
 
-    if range_ == "day":
-        since = (now - timedelta(hours=24)).isoformat()
-        # 5-minute buckets via Unix epoch arithmetic
-        group_expr = "datetime(strftime('%s', timestamp) - (strftime('%s', timestamp) % 300), 'unixepoch')"
-    elif range_ == "week":
-        since = (now - timedelta(days=7)).isoformat()
-        group_expr = "strftime('%Y-%m-%d %H:00:00', timestamp)"
-    else:  # month
-        since = (now - timedelta(days=30)).isoformat()
-        group_expr = "strftime('%Y-%m-%d', timestamp)"
+    delta, group_expr = _TREND_CONFIG[range_]
+    since = (datetime.now(timezone.utc) - delta).isoformat()
 
     cam_filter = "AND camera_id = ?" if camera_id else ""
     params = [since] + ([camera_id] if camera_id else [])
@@ -196,3 +203,77 @@ def get_training_runs(limit: int = 20):
         (limit,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Edge sync helpers ──────────────────────────────────────────────────────────
+
+def get_unsynced_occupancy(limit: int = 200) -> list:
+    rows = _conn().execute(
+        "SELECT id, timestamp, camera_id, available, occupied, occupancy_percent "
+        "FROM occupancy_history WHERE synced=0 ORDER BY id LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_synced_occupancy(ids: list[int]) -> None:
+    if not ids:
+        return
+    placeholders = ",".join("?" * len(ids))
+    _conn().execute(
+        f"UPDATE occupancy_history SET synced=1 WHERE id IN ({placeholders})", ids
+    )
+    _conn().commit()
+
+
+def get_unsynced_alerts(limit: int = 200) -> list:
+    rows = _conn().execute(
+        "SELECT id, timestamp, camera_id, level, occupancy_percent, message "
+        "FROM alert_events WHERE synced=0 ORDER BY id LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_synced_alerts(ids: list[int]) -> None:
+    if not ids:
+        return
+    placeholders = ",".join("?" * len(ids))
+    _conn().execute(
+        f"UPDATE alert_events SET synced=1 WHERE id IN ({placeholders})", ids
+    )
+    _conn().commit()
+
+
+def upsert_occupancy_batch(rows: list[dict]) -> int:
+    """Insert occupancy rows from an edge node; skip duplicates on (camera_id, timestamp)."""
+    inserted = 0
+    c = _conn()
+    for r in rows:
+        cur = c.execute(
+            "INSERT OR IGNORE INTO occupancy_history "
+            "(timestamp, camera_id, available, occupied, occupancy_percent, synced) "
+            "VALUES (?, ?, ?, ?, ?, 1)",
+            (r["timestamp"], r["camera_id"], r["available"],
+             r["occupied"], r["occupancy_percent"]),
+        )
+        inserted += cur.rowcount
+    c.commit()
+    return inserted
+
+
+def upsert_alerts_batch(rows: list[dict]) -> int:
+    """Insert alert rows from an edge node; skip duplicates on (camera_id, timestamp, level)."""
+    inserted = 0
+    c = _conn()
+    for r in rows:
+        cur = c.execute(
+            "INSERT OR IGNORE INTO alert_events "
+            "(timestamp, camera_id, level, occupancy_percent, message, synced) "
+            "VALUES (?, ?, ?, ?, ?, 1)",
+            (r["timestamp"], r["camera_id"], r["level"],
+             r["occupancy_percent"], r.get("message", "")),
+        )
+        inserted += cur.rowcount
+    c.commit()
+    return inserted

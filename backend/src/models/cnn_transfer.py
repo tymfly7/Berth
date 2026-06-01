@@ -66,7 +66,7 @@ class ParkingMobileNetV4(nn.Module):
     MobileNetV4 (timm) with frozen backbone and custom binary classification head.
 
     Architecture:
-        mobilenetv4_conv_small backbone (pre-trained, frozen, global_pool='avg')
+        mobilenetv4_conv_small.e2400_r224_in1k backbone (pre-trained, frozen, global_pool='avg')
         → Linear(num_features→256) → ReLU → Dropout(0.3)
         → Linear(256→1)            [raw logits, no Sigmoid]
 
@@ -85,7 +85,7 @@ class ParkingMobileNetV4(nn.Module):
             )
 
         self.backbone = timm.create_model(
-            'mobilenetv4_conv_small',
+            'mobilenetv4_conv_small.e2400_r224_in1k',
             pretrained=pretrained,
             num_classes=0,
             global_pool='avg',
