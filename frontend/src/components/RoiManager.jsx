@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { apiFetch } from '../api'
 import RoiEditor from './RoiEditor'
 
 
@@ -16,7 +17,7 @@ export default function RoiManager() {
   useEffect(() => { if (bgImage) setModalOpen(true) }, [bgImage])
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/roi/${CAMERA_ID}`)
+    apiFetch(`${API_BASE}/api/roi/${CAMERA_ID}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setRois(Array.isArray(data) ? data : []))
       .catch(() => {})
@@ -32,7 +33,7 @@ export default function RoiManager() {
     if (!file) return
     const formData = new FormData()
     formData.append('file', file)
-    fetch(`${API_BASE}/api/roi/${CAMERA_ID}/snapshot`, { method: 'POST', body: formData })
+    apiFetch(`${API_BASE}/api/roi/${CAMERA_ID}/snapshot`, { method: 'POST', body: formData })
       .then(r => { if (!r.ok) throw new Error('Upload failed'); return r.json() })
       .then(() => {
         const reader = new FileReader()
@@ -43,7 +44,7 @@ export default function RoiManager() {
   }
 
   const handleSave = () => {
-    fetch(`${API_BASE}/api/roi/${CAMERA_ID}`, {
+    apiFetch(`${API_BASE}/api/roi/${CAMERA_ID}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rois }),
@@ -54,7 +55,7 @@ export default function RoiManager() {
   }
 
   const handleDeleteRoi = (roiId) => {
-    fetch(`${API_BASE}/api/roi/${CAMERA_ID}/${roiId}`, { method: 'DELETE' })
+    apiFetch(`${API_BASE}/api/roi/${CAMERA_ID}/${roiId}`, { method: 'DELETE' })
       .then(r => { if (!r.ok) throw new Error('Delete failed'); return r.json() })
       .then(() => setRois(prev => prev.filter(r => r.id !== roiId)))
       .catch(err => showMsg(`Error: ${err.message}`))
@@ -62,7 +63,7 @@ export default function RoiManager() {
 
   const handleClearAll = async () => {
     for (const roi of [...rois]) {
-      await fetch(`${API_BASE}/api/roi/${CAMERA_ID}/${roi.id}`, { method: 'DELETE' })
+      await apiFetch(`${API_BASE}/api/roi/${CAMERA_ID}/${roi.id}`, { method: 'DELETE' })
     }
     setRois([])
   }
@@ -74,7 +75,7 @@ export default function RoiManager() {
     }
     setProposing(true)
     try {
-      const res = await fetch(`${API_BASE}/api/roi/${CAMERA_ID}/propose`, { method: 'POST' })
+      const res = await apiFetch(`${API_BASE}/api/roi/${CAMERA_ID}/propose`, { method: 'POST' })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         showMsg(`Auto-detect failed: ${err.detail || res.statusText}`)

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { apiFetch } from '../api'
 import RoiEditor from './RoiEditor'
 import MultiCameraGrid from './MultiCameraGrid'
 
@@ -49,7 +50,7 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
   // Reload ROIs whenever active camera changes
   useEffect(() => {
     if (!cameraId || !apiBase) { setRois([]); return }
-    fetch(`${apiBase}/api/roi/${cameraId}`)
+    apiFetch(`${apiBase}/api/roi/${cameraId}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setRois(Array.isArray(data) ? data : []))
       .catch(() => {})
@@ -63,7 +64,9 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
   const captureEditFrame = useCallback(() => {
     if (!cameraId || !apiBase) return
     editWsRef.current?.close()
-    const wsUrl = apiBase.replace(/^http/, 'ws') + `/ws/cameras/${cameraId}`
+    const apiKey = import.meta.env.VITE_API_KEY ?? ''
+    const wsToken = apiKey ? `?token=${apiKey}` : ''
+    const wsUrl = apiBase.replace(/^http/, 'ws') + `/ws/cameras/${cameraId}${wsToken}`
     const ws = new WebSocket(wsUrl)
     editWsRef.current = ws
     ws.onmessage = (e) => {
@@ -96,12 +99,12 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
   // auto-detect snapshot so proposals are generated against the correct camera view.
   useEffect(() => {
     if (!editBg || !cameraId || !apiBase) return
-    fetch(editBg)
+    apiFetch(editBg)
       .then(r => r.blob())
       .then(blob => {
         const fd = new FormData()
         fd.append('file', blob, 'snapshot.jpg')
-        return fetch(`${apiBase}/api/roi/${cameraId}/snapshot`, { method: 'POST', body: fd })
+        return apiFetch(`${apiBase}/api/roi/${cameraId}/snapshot`, { method: 'POST', body: fd })
       })
       .catch(() => { /* non-fatal */ })
   }, [editBg, cameraId, apiBase])
@@ -109,7 +112,7 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
   const handleSave = async () => {
     if (!cameraId) return
     try {
-      const res = await fetch(`${apiBase}/api/roi/${cameraId}`, {
+      const res = await apiFetch(`${apiBase}/api/roi/${cameraId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rois }),
@@ -128,7 +131,7 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
   const handleDeleteRoi = async (roiId) => {
     if (!cameraId) return
     try {
-      const res = await fetch(`${apiBase}/api/roi/${cameraId}/${roiId}`, { method: 'DELETE' })
+      const res = await apiFetch(`${apiBase}/api/roi/${cameraId}/${roiId}`, { method: 'DELETE' })
       if (res.ok) {
         setRois(prev => prev.filter(r => r.id !== roiId))
       } else {
@@ -143,7 +146,7 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
     if (!cameraId) return
     setProposing(true)
     try {
-      const res = await fetch(`${apiBase}/api/roi/${cameraId}/propose`, { method: 'POST' })
+      const res = await apiFetch(`${apiBase}/api/roi/${cameraId}/propose`, { method: 'POST' })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         showMsg(`Auto-detect failed: ${err.detail || res.statusText}`)

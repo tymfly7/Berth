@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { apiFetch } from '../api'
 
 export default function AnomalyPanel({ apiBase }) {
   const [enabled, setEnabled] = useState(false)
@@ -6,7 +7,7 @@ export default function AnomalyPanel({ apiBase }) {
   const [msg, setMsg]         = useState(null)
 
   useEffect(() => {
-    fetch(`${apiBase}/api/settings/anomaly`)
+    apiFetch(`${apiBase}/api/settings/anomaly`)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setEnabled(d.enabled) })
       .catch(() => {})
@@ -16,7 +17,7 @@ export default function AnomalyPanel({ apiBase }) {
     setLoading(true)
     setMsg(null)
     try {
-      const res = await fetch(`${apiBase}/api/settings/anomaly`, {
+      const res = await apiFetch(`${apiBase}/api/settings/anomaly`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: !enabled }),

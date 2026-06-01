@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiFetch } from '../api'
 import { createPortal } from 'react-dom'
 import RoiEditor from './RoiEditor'
 
@@ -149,7 +150,7 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
 
   const fetchCameras = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/cameras`)
+      const res = await apiFetch(`${API_BASE}/api/cameras`)
       if (res.ok) {
         const data = await res.json()
         setCameras(data)
@@ -167,7 +168,7 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
       return
     }
     try {
-      const res = await fetch(`${API_BASE}/api/cameras`, {
+      const res = await apiFetch(`${API_BASE}/api/cameras`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -193,7 +194,7 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this camera?')) return
     try {
-      await fetch(`${API_BASE}/api/cameras/${id}`, { method: 'DELETE' })
+      await apiFetch(`${API_BASE}/api/cameras/${id}`, { method: 'DELETE' })
       await fetchCameras()
     } catch { /* silent */ }
   }
@@ -201,7 +202,7 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
   const handleToggle = async (cam) => {
     const endpoint = cam.active ? 'deactivate' : 'activate'
     try {
-      const res = await fetch(`${API_BASE}/api/cameras/${cam.id}/${endpoint}`, { method: 'POST' })
+      const res = await apiFetch(`${API_BASE}/api/cameras/${cam.id}/${endpoint}`, { method: 'POST' })
       if (!res.ok) {
         const d = await res.json()
         setError(d.detail || `Failed to ${endpoint}.`)
@@ -219,13 +220,13 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
     const cameraId = cam.roi_camera_id || cam.id
     let rois = []
     try {
-      const res = await fetch(`${API_BASE}/api/roi/${cameraId}`)
+      const res = await apiFetch(`${API_BASE}/api/roi/${cameraId}`)
       if (res.ok) { const data = await res.json(); rois = Array.isArray(data) ? data : [] }
     } catch { /* silent */ }
 
     let bg = null
     try {
-      const res = await fetch(`${API_BASE}/api/roi/${cameraId}/snapshot`)
+      const res = await apiFetch(`${API_BASE}/api/roi/${cameraId}/snapshot`)
       if (res.ok) {
         const blob = await res.blob()
         bg = await new Promise(resolve => {
@@ -270,7 +271,7 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
     if (!roiEditCam) return
     const cameraId = roiEditCam.roi_camera_id || roiEditCam.id
     try {
-      const res = await fetch(`${API_BASE}/api/roi/${cameraId}`, {
+      const res = await apiFetch(`${API_BASE}/api/roi/${cameraId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rois: editRois }),
@@ -286,7 +287,7 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
     const cameraId = roiEditCam.roi_camera_id || roiEditCam.id
     setProposing(true)
     try {
-      const res = await fetch(`${API_BASE}/api/roi/${cameraId}/propose`, { method: 'POST' })
+      const res = await apiFetch(`${API_BASE}/api/roi/${cameraId}/propose`, { method: 'POST' })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
         showRoiMsg(`Auto-detect failed: ${err.detail || res.statusText}`)

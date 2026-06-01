@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { apiFetch } from '../api'
 
 const API_BASE = `http://${window.location.hostname}:8000`
 
@@ -8,7 +9,7 @@ export default function ServerStatus() {
   useEffect(() => {
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/status`)
+        const res = await apiFetch(`${API_BASE}/api/status`)
         if (res.ok) setStatus(await res.json())
       } catch { /* silent */ }
     }

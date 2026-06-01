@@ -18,7 +18,7 @@ const inputStyle = {
 }
 
 export default function PinGate({ children }) {
-  const [authed, setAuthed] = useState(localStorage.getItem('admin_authed') === 'true')
+  const [authed, setAuthed] = useState(sessionStorage.getItem('admin_authed') === 'true')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState(false)
@@ -27,7 +27,7 @@ export default function PinGate({ children }) {
 
   const submit = () => {
     if (username === CORRECT_USERNAME && password === CORRECT_PASSWORD) {
-      localStorage.setItem('admin_authed', 'true')
+      sessionStorage.setItem('admin_authed', 'true')
       setAuthed(true)
     } else {
       setError(true)

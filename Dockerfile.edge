@@ -1,0 +1,36 @@
+# Edge node image — Raspberry Pi 5 (ARM64 / linux/arm64)
+#
+# Build on x86 host with Docker Buildx:
+#   docker buildx build --platform linux/arm64 -t smartpark-edge:latest -f Dockerfile.edge .
+#
+# Or build natively on the RPi5:
+#   docker build -t smartpark-edge:latest -f Dockerfile.edge .
+
+FROM python:3.11-slim
+
+# System dependencies for OpenCV (headless) and USB camera access
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgl1-mesa-glx \
+        libglib2.0-0 \
+        libsm6 \
+        libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies before copying source (layer cache efficiency)
+COPY backend/requirements.edge.txt requirements.edge.txt
+RUN pip install --no-cache-dir -r requirements.edge.txt
+
+# Copy backend source (no frontend — edge serves JSON only)
+COPY backend/ /app/
+
+# Edge profile is the default; override via env vars at runtime
+ENV SMARTPARK_DEPLOYMENT=edge \
+    SMARTPARK_MODEL=mobilenetv4 \
+    SMARTPARK_HOST=0.0.0.0 \
+    SMARTPARK_PORT=8000
+
+EXPOSE 8000
+
+CMD ["python", "main.py"]

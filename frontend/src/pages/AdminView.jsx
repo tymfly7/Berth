@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { apiFetch } from '../api'
 import '../App.css'
 import Header from '../components/Header'
 import VideoFeed from '../components/VideoFeed'
@@ -10,7 +11,8 @@ import ServerStatus from '../components/ServerStatus'
 import SettingsPanel from '../components/SettingsPanel'
 import LotMap from '../components/LotMap'
 
-const WS_URL = `ws://${window.location.hostname}:8000/ws/video`
+const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
+const WS_URL = `ws://${window.location.hostname}:8000/ws/video${_API_KEY ? `?token=${_API_KEY}` : ''}`
 const API_BASE = `http://${window.location.hostname}:8000`
 
 const CANVAS_W = 1000, CANVAS_H = 600
@@ -30,7 +32,7 @@ export default function AdminView() {
     total: 0, available: 0, occupied: 0,
     occupancy_percent: 0, avg_confidence: 0, slots: [],
   })
-  const [cameraMetrics, setCameraMetrics] = useState(null)
+  const [allCameraMetrics, setAllCameraMetrics] = useState({})
   const [history, setHistory] = useState([])
   const [modelInfo, setModelInfo] = useState(null)
   const [cameras, setCameras] = useState([])
@@ -41,7 +43,23 @@ export default function AdminView() {
   const reconnectTimer = useRef(null)
   const camWsRefs = useRef({})
 
-  const displayMetrics = cameraMetrics || metrics
+  const displayMetrics = (() => {
+    const entries = Object.values(allCameraMetrics)
+    if (!entries.length) return metrics
+    const total     = entries.reduce((s, m) => s + (m.total     || 0), 0)
+    const available = entries.reduce((s, m) => s + (m.available || 0), 0)
+    const occupied  = entries.reduce((s, m) => s + (m.occupied  || 0), 0)
+    return {
+      ...entries[0],
+      total,
+      available,
+      occupied,
+      occupancy_percent: total > 0 ? Math.round(occupied / total * 1000) / 10 : 0,
+      avg_confidence:    entries.reduce((s, m) => s + (m.avg_confidence || 0), 0) / entries.length,
+      fps:               Math.round(entries.reduce((s, m) => s + (m.fps || 0), 0) / entries.length * 10) / 10,
+      slots:             entries.flatMap(m => m.slots || []),
+    }
+  })()
 
   const connectWs = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -75,14 +93,14 @@ export default function AdminView() {
 
   const fetchHistory = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/history`)
+      const res = await apiFetch(`${API_BASE}/api/history`)
       if (res.ok) setHistory(await res.json())
     } catch { /* silent */ }
   }
 
   const fetchModelInfo = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/model/info`)
+      const res = await apiFetch(`${API_BASE}/api/model/info`)
       if (res.ok) setModelInfo(await res.json())
     } catch { /* silent */ }
   }
@@ -93,7 +111,7 @@ export default function AdminView() {
       camList.map(async cam => {
         try {
           const cameraId = cam.roi_camera_id || cam.id
-          const res = await fetch(`${API_BASE}/api/roi/${cameraId}`)
+          const res = await apiFetch(`${API_BASE}/api/roi/${cameraId}`)
           if (!res.ok) return null
           const rois = await res.json()
           const slots = Array.isArray(rois)
@@ -108,7 +126,7 @@ export default function AdminView() {
 
   const fetchCameras = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/cameras`)
+      const res = await apiFetch(`${API_BASE}/api/cameras`)
       if (res.ok) {
         const cams = await res.json()
         setCameras(cams)
@@ -144,17 +162,18 @@ export default function AdminView() {
       if (!activeIds.has(id)) { ws.close(); delete camWsRefs.current[id] }
     })
 
-    if (!activeCams.length) { setLiveSlotsMap({}); setCameraMetrics(null); return }
+    if (!activeCams.length) { setLiveSlotsMap({}); setAllCameraMetrics({}); return }
 
     activeCams.forEach((cam, i) => {
       if (camWsRefs.current[cam.id]) return
-      const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.id}`)
+      const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
+      const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.id}${wsToken}`)
       camWsRefs.current[cam.id] = ws
       ws.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data)
           if (d.metrics) {
-            if (i === 0) setCameraMetrics(d.metrics)
+            setAllCameraMetrics(prev => ({ ...prev, [cam.id]: d.metrics }))
             if (Array.isArray(d.metrics.slots))
               setLiveSlotsMap(prev => ({ ...prev, [cam.id]: d.metrics.slots }))
           }
@@ -166,7 +185,7 @@ export default function AdminView() {
     return () => {
       Object.values(camWsRefs.current).forEach(ws => ws.close())
       camWsRefs.current = {}
-      setCameraMetrics(null)
+      setAllCameraMetrics({})
     }
   }, [cameras])
 
@@ -181,7 +200,7 @@ export default function AdminView() {
         options.headers = { 'Content-Type': 'application/json' }
         options.body = JSON.stringify(body)
       }
-      const res = await fetch(`${API_BASE}${endpoint}`, options)
+      const res = await apiFetch(`${API_BASE}${endpoint}`, options)
       return await res.json()
     } catch (e) {
       console.error(`API error: ${endpoint}`, e)

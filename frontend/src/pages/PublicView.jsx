@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiFetch } from '../api'
 import { Link } from 'react-router-dom'
 import MetricCards from '../components/MetricCards'
 import LotMap from '../components/LotMap'
@@ -30,14 +31,14 @@ export default function PublicView() {
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/public/metrics`)
+        const res = await apiFetch(`${API_BASE}/api/public/metrics`)
         if (res.ok) setMetrics(await res.json())
       } catch { /* silent */ }
     }
 
     const fetchHistory = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/history`)
+        const res = await apiFetch(`${API_BASE}/api/history`)
         if (res.ok) setHistory(await res.json())
       } catch { /* silent */ }
     }
@@ -56,14 +57,14 @@ export default function PublicView() {
   useEffect(() => {
     const fetchCameraSlots = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/cameras`)
+        const res = await apiFetch(`${API_BASE}/api/cameras`)
         if (!res.ok) return
         const cams = await res.json()
         const results = await Promise.all(
           cams.map(async cam => {
             try {
               const cameraId = cam.roi_camera_id || cam.id
-              const r = await fetch(`${API_BASE}/api/roi/${cameraId}`)
+              const r = await apiFetch(`${API_BASE}/api/roi/${cameraId}`)
               if (!r.ok) return null
               const rois = await r.json()
               const slots = Array.isArray(rois)

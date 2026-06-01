@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { apiFetch } from '../api'
 
 const MODELS = [
   { id: 'cnn_scratch',     label: 'CNN Scratch'     },
@@ -123,7 +124,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
 
   const pollStatus = async () => {
     try {
-      const res = await fetch(`${apiBase}/api/train/status`)
+      const res = await apiFetch(`${apiBase}/api/train/status`)
       if (res.ok) {
         const data = await res.json()
         setTraining(data)
@@ -159,7 +160,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
     const fd = new FormData()
     fd.append('label', label)
     files.forEach(f => fd.append('files', f))
-    const res = await fetch(`${apiBase}/api/dataset/upload`, { method: 'POST', body: fd })
+    const res = await apiFetch(`${apiBase}/api/dataset/upload`, { method: 'POST', body: fd })
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }))
       throw new Error(err.detail || 'Upload failed')
