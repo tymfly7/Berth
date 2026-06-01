@@ -81,7 +81,7 @@ if __name__ == "__main__":
     )
 
     device = torch.device("cpu")
-    model_names = ["cnn_scratch", "resnet50", "mobilenetv4"]
+    model_names = ["cnn_scratch", "resnet50", "mobilenetv4s"]
     all_results = []
     total_train_start = time.time()
 

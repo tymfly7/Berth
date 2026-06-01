@@ -7,6 +7,9 @@ Override any setting via environment variables where noted.
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -39,7 +42,7 @@ API_KEY = os.getenv("SMARTPARK_API_KEY", "")           # empty = auth disabled
 UPLOAD_RATE_LIMIT = os.getenv("SMARTPARK_UPLOAD_RATE_LIMIT", "10/minute")
 
 # ---------------------------------------------------------------------------
-# Active model  ("cnn_scratch", "resnet50", "mobilenetv4", "yolo26_classify", "yolo26")
+# Active model  ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26")
 # ---------------------------------------------------------------------------
 ACTIVE_MODEL = os.getenv("SMARTPARK_MODEL", "yolo26_classify")
 
@@ -85,11 +88,22 @@ SUBSET_SIZE = int(os.getenv("SMARTPARK_SUBSET", "12000"))
 YOLO_CLASSIFY_IMG_SIZE = int(os.getenv("SMARTPARK_YOLO_CLASSIFY_IMGSZ", "64"))
 
 # ---------------------------------------------------------------------------
+# Edge deployment
+# ---------------------------------------------------------------------------
+# "server" = full stack (default)  |  "edge" = inference-only (e.g. RPi5)
+DEPLOYMENT_PROFILE = os.getenv("SMARTPARK_DEPLOYMENT", "server")
+
+# Hub URL for edge→hub occupancy sync (edge profile only).
+# Example: "http://192.168.1.10:8000"
+EDGE_HUB_URL = os.getenv("SMARTPARK_EDGE_HUB_URL", "")
+
+# ---------------------------------------------------------------------------
 # Inference / streaming
 # ---------------------------------------------------------------------------
-FRAME_WIDTH   = 1280
-FRAME_HEIGHT  = 720
-STREAM_FPS    = 20
+# Edge profile uses lower resolution + FPS to stay within ARM CPU budget.
+FRAME_WIDTH   = 640  if DEPLOYMENT_PROFILE == "edge" else 1280
+FRAME_HEIGHT  = 480  if DEPLOYMENT_PROFILE == "edge" else 720
+STREAM_FPS    = 6    if DEPLOYMENT_PROFILE == "edge" else 20
 JPEG_QUALITY  = 85
 
 # Live YouTube HLS URLs expire; cache resolved stream URLs for this long.

@@ -18,7 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import config
-from src.inference.classifier import ParkingClassifier
+from src.inference.classifier import get_classifier
 from src.roi.roi_store import RoiStore
 
 logger = logging.getLogger("smartpark.slot_detector")
@@ -42,7 +42,7 @@ class SlotDetector:
     def __init__(self, model_name=None, spots_config_path=None, camera_id: str = "default"):
         self.camera_id = camera_id
         self.spots_config_path = Path(spots_config_path or config.SPOTS_CONFIG_PATH)
-        self.classifier = ParkingClassifier(model_name=model_name)
+        self.classifier = get_classifier(model_name=model_name)
         self.slots = []
 
         self._load_slots()

@@ -13,7 +13,7 @@ from src.models.cnn_transfer import ParkingResNet, ParkingMobileNetV4
 MODEL_REGISTRY = {
     "cnn_scratch": ParkingCNN,
     "resnet50": ParkingResNet,
-    "mobilenetv4": ParkingMobileNetV4,
+    "mobilenetv4s": ParkingMobileNetV4,
 }
 
 
@@ -22,7 +22,7 @@ def create_model(name, **kwargs):
     Create a model by name.
 
     Args:
-        name (str): Model name — one of 'cnn_scratch', 'resnet50', 'mobilenetv4'.
+        name (str): Model name — one of 'cnn_scratch', 'resnet50', 'mobilenetv4s'.
         **kwargs: Additional arguments passed to the model constructor
 
     Returns:
@@ -43,7 +43,7 @@ def get_model_path(name):
     paths = {
         "cnn_scratch": config.CNN_SCRATCH_PATH,
         "resnet50": config.RESNET50_PATH,
-        "mobilenetv4": config.MOBILENETV4_PATH,
+        "mobilenetv4s": config.MOBILENETV4_PATH,
     }
     return paths.get(name)
 
@@ -63,6 +63,7 @@ def load_model(name, device=None, **kwargs):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    kwargs.setdefault("pretrained", False)
     model = create_model(name, **kwargs)
     model_path = get_model_path(name)
 

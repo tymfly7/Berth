@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -10,6 +11,14 @@ logger = logging.getLogger("smartpark.roi")
 
 _ROI_DIR = Path(__file__).resolve().parent.parent.parent.parent / "roi_configs"
 
+# Only allow safe characters in camera IDs to prevent path traversal.
+_SAFE_CAM_ID = re.compile(r'^[a-zA-Z0-9_\-]{1,64}$')
+
+
+def _validate_camera_id(camera_id: str) -> None:
+    if not _SAFE_CAM_ID.match(camera_id):
+        raise ValueError(f"Invalid camera_id '{camera_id}': only letters, digits, hyphens, and underscores are allowed")
+
 
 class RoiStore:
     @classmethod
@@ -19,10 +28,12 @@ class RoiStore:
 
     @classmethod
     def _roi_path(cls, camera_id: str) -> Path:
+        _validate_camera_id(camera_id)
         return cls._ensure_dir() / f"{camera_id}.json"
 
     @classmethod
     def _snapshot_path(cls, camera_id: str) -> Path:
+        _validate_camera_id(camera_id)
         return cls._ensure_dir() / f"{camera_id}_snapshot.jpg"
 
     @classmethod
