@@ -72,8 +72,10 @@ export default function CameraFeedCell({ cameraId, name, onMetricsUpdate }) {
   const [frame, setFrame] = useState(null)
   const [metrics, setMetrics] = useState({ available: 0, occupied: 0 })
   const [connected, setConnected] = useState(false)
+  const [unavailable, setUnavailable] = useState(null)
   const wsRef = useRef(null)
   const reconnectTimer = useRef(null)
+  const stopReconnect = useRef(false)
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -81,11 +83,22 @@ export default function CameraFeedCell({ cameraId, name, onMetricsUpdate }) {
     const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cameraId}${wsToken}`)
     wsRef.current = ws
 
-    ws.onopen = () => setConnected(true)
+    ws.onopen = () => {
+      setConnected(true)
+      setUnavailable(null)
+    }
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        if (data.type === 'feed_unavailable') {
+          stopReconnect.current = true
+          setUnavailable(data.reason ?? 'Feed unavailable')
+          setConnected(false)
+          clearTimeout(reconnectTimer.current)
+          ws.close()
+          return
+        }
         if (data.error) {
           ws.close()
           return
@@ -100,7 +113,7 @@ export default function CameraFeedCell({ cameraId, name, onMetricsUpdate }) {
 
     ws.onclose = () => {
       setConnected(false)
-      reconnectTimer.current = setTimeout(connect, 3000)
+      if (!stopReconnect.current) reconnectTimer.current = setTimeout(connect, 3000)
     }
 
     ws.onerror = () => ws.close()
@@ -116,7 +129,7 @@ export default function CameraFeedCell({ cameraId, name, onMetricsUpdate }) {
 
   return (
     <div style={s.cell}>
-      {frame ? (
+      {frame && !unavailable ? (
         <img
           src={`data:image/jpeg;base64,${frame}`}
           style={s.img}
@@ -124,7 +137,7 @@ export default function CameraFeedCell({ cameraId, name, onMetricsUpdate }) {
         />
       ) : (
         <div style={s.placeholder}>
-          {connected ? 'Waiting for frames…' : 'Connecting…'}
+          {unavailable ?? (connected ? 'Waiting for frames…' : 'Connecting…')}
         </div>
       )}
 
