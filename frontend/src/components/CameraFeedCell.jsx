@@ -1,8 +1,3 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
-
-const WS_BASE = `ws://${window.location.hostname}:8000`
-const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
-
 const s = {
   cell: {
     position: 'relative',
@@ -43,6 +38,15 @@ const s = {
     color: '#fff',
     textShadow: '0 1px 3px rgba(0,0,0,0.8)',
   },
+  nameMini: {
+    fontSize: '0.65rem',
+    fontWeight: 600,
+    color: '#fff',
+    textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
   badges: {
     display: 'flex',
     gap: 6,
@@ -68,67 +72,20 @@ const s = {
   }),
 }
 
-export default function CameraFeedCell({ cameraId, name, onMetricsUpdate }) {
-  const [frame, setFrame] = useState(null)
-  const [metrics, setMetrics] = useState({ available: 0, occupied: 0 })
-  const [connected, setConnected] = useState(false)
-  const [unavailable, setUnavailable] = useState(null)
-  const wsRef = useRef(null)
-  const reconnectTimer = useRef(null)
-  const stopReconnect = useRef(false)
-
-  const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
-    const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-    const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cameraId}${wsToken}`)
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      setConnected(true)
-      setUnavailable(null)
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.type === 'feed_unavailable') {
-          stopReconnect.current = true
-          setUnavailable(data.reason ?? 'Feed unavailable')
-          setConnected(false)
-          clearTimeout(reconnectTimer.current)
-          ws.close()
-          return
-        }
-        if (data.error) {
-          ws.close()
-          return
-        }
-        if (data.frame) setFrame(data.frame)
-        if (data.metrics) {
-          setMetrics(data.metrics)
-          onMetricsUpdate?.(cameraId, data.metrics)
-        }
-      } catch { /* ignore parse errors */ }
-    }
-
-    ws.onclose = () => {
-      setConnected(false)
-      if (!stopReconnect.current) reconnectTimer.current = setTimeout(connect, 3000)
-    }
-
-    ws.onerror = () => ws.close()
-  }, [cameraId, onMetricsUpdate])
-
-  useEffect(() => {
-    connect()
-    return () => {
-      clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
-    }
-  }, [connect])
-
+export default function CameraFeedCell({
+  name,
+  frame = null,
+  metrics = { available: 0, occupied: 0 },
+  connected = false,
+  unavailable = null,
+  onClick,
+  mini = false,
+}) {
   return (
-    <div style={s.cell}>
+    <div
+      style={{ ...s.cell, cursor: onClick ? 'pointer' : 'default' }}
+      onClick={onClick}
+    >
       {frame && !unavailable ? (
         <img
           src={`data:image/jpeg;base64,${frame}`}
@@ -144,11 +101,13 @@ export default function CameraFeedCell({ cameraId, name, onMetricsUpdate }) {
       <div style={s.dot(connected)} />
 
       <div style={s.nameOverlay}>
-        <span style={s.name}>{name}</span>
-        <div style={s.badges}>
-          <span style={s.badge('var(--color-vacant)')}>■ {metrics.available ?? 0} avail</span>
-          <span style={s.badge('var(--color-occupied)')}>■ {metrics.occupied ?? 0} occ</span>
-        </div>
+        <span style={mini ? s.nameMini : s.name}>{name}</span>
+        {!mini && (
+          <div style={s.badges}>
+            <span style={s.badge('var(--color-vacant)')}>■ {metrics.available ?? 0} avail</span>
+            <span style={s.badge('var(--color-occupied)')}>■ {metrics.occupied ?? 0} occ</span>
+          </div>
+        )}
       </div>
     </div>
   )

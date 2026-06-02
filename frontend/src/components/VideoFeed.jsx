@@ -3,11 +3,8 @@ import { apiFetch } from '../api'
 import RoiEditor from './RoiEditor'
 import MultiCameraGrid from './MultiCameraGrid'
 
-// Frame dimensions must match config.FRAME_WIDTH / config.FRAME_HEIGHT on the backend.
-// The ROI canvas is sized to this ratio so normalized coords map 1-to-1 to VideoProcessor pixels.
 const FRAME_W = 1280
 const FRAME_H = 720
-
 
 const roiBtnStyle = {
   padding: '3px 10px',
@@ -22,32 +19,85 @@ const roiBtnStyle = {
   lineHeight: '1.4',
 }
 
-const saveBtnStyle = {
-  padding: '7px 16px',
-  borderRadius: 4,
-  border: 'none',
-  background: 'var(--accent-primary, #3498db)',
-  color: '#fff',
-  cursor: 'pointer',
-  fontSize: '0.85rem',
-  fontWeight: 600,
+// Thumbnail card used in the camera picker. Opens its own short-lived WS to show
+// a live frame so the admin can identify which feed to edit ROIs on.
+function PickerCell({ cameraId, name, apiBase, onClick }) {
+  const [frame, setFrame] = useState(null)
+  const wsRef = useRef(null)
+
+  useEffect(() => {
+    const apiKey = import.meta.env.VITE_API_KEY ?? ''
+    const wsToken = apiKey ? `?token=${apiKey}` : ''
+    const ws = new WebSocket(
+      apiBase.replace(/^http/, 'ws') + `/ws/cameras/${cameraId}${wsToken}`
+    )
+    wsRef.current = ws
+    ws.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data)
+        if (d.frame) setFrame(d.frame)
+      } catch { /* ignore */ }
+    }
+    ws.onerror = () => ws.close()
+    return () => ws.close()
+  }, [cameraId, apiBase])
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        width: 210,
+        flexShrink: 0,
+        borderRadius: 6,
+        overflow: 'hidden',
+        border: '1px solid var(--border-color)',
+        cursor: 'pointer',
+        transition: 'border-color 0.15s',
+      }}
+      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
+      onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
+    >
+      <div style={{ aspectRatio: '16/9', background: '#000', position: 'relative' }}>
+        {frame
+          ? <img src={`data:image/jpeg;base64,${frame}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} alt={name} />
+          : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.72rem' }}>Connecting…</div>
+        }
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.32)' }}>
+          <span style={{ background: 'rgba(99,102,241,0.88)', color: '#fff', padding: '4px 12px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700, pointerEvents: 'none' }}>
+            ✎ Edit ROIs
+          </span>
+        </div>
+      </div>
+      <div style={{ padding: '5px 8px', background: 'var(--bg-card)', fontSize: '0.73rem', fontWeight: 600, color: 'var(--text-primary)', borderTop: '1px solid var(--border-color)' }}>
+        {name}
+      </div>
+    </div>
+  )
 }
 
 export default function VideoFeed({ frame, connected, activeCamera, apiBase, cameras = [] }) {
-  const [roiOpen, setRoiOpen]     = useState(false)
-  const [rois, setRois]           = useState([])
-  const [saveMsg, setSaveMsg]     = useState(null)
-  const [proposals, setProposals] = useState([])
-  const [proposing, setProposing] = useState(false)
-  // Background frame captured from the active camera WS when the ROI editor opens.
-  // Using the actual camera frame (not the legacy /ws/video frame) ensures the canvas
-  // coordinate system matches the VideoProcessor's 900×500 frame exactly.
-  const [editBg, setEditBg]       = useState(null)
-  const editWsRef                 = useRef(null)
+  const [roiOpen, setRoiOpen]       = useState(false)
+  const [picking, setPicking]       = useState(false)
+  const [selectedCamId, setSelectedCamId] = useState(null)
+  const [focusedCamId, setFocusedCamId]   = useState(null)
+  const [rois, setRois]             = useState([])
+  const [saveMsg, setSaveMsg]       = useState(null)
+  const [proposals, setProposals]   = useState([])
+  const [proposing, setProposing]   = useState(false)
+  const [editBg, setEditBg]         = useState(null)
+  const editWsRef                   = useRef(null)
+  const skipSnapshotUpload          = useRef(false)
 
-  const cameraId = activeCamera ? (activeCamera.roi_camera_id || activeCamera.id) : null
+  const activeCams = cameras.filter(c => c.active)
 
-  // Reload ROIs whenever active camera changes
+  // The camera object being edited (selected by picker or fallback to activeCamera).
+  const editCam = selectedCamId
+    ? cameras.find(c => c.id === selectedCamId)
+    : activeCamera
+  // ROI camera ID (may differ from the WS camera ID via roi_camera_id mapping).
+  const cameraId = editCam ? (editCam.roi_camera_id || editCam.id) : null
+
+  // Reload ROIs whenever the target camera changes.
   useEffect(() => {
     if (!cameraId || !apiBase) { setRois([]); return }
     apiFetch(`${apiBase}/api/roi/${cameraId}`)
@@ -56,18 +106,17 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
       .catch(() => {})
   }, [cameraId, apiBase])
 
-  // Clean up the frame-capture WS on unmount.
   useEffect(() => () => { editWsRef.current?.close() }, [])
 
-  // Opens a short-lived WS to capture one frame from the active camera for the ROI editor
-  // background. Closes immediately after the first frame arrives.
-  const captureEditFrame = useCallback(() => {
-    if (!cameraId || !apiBase) return
+  // Capture one live frame from camId to use as the ROI editor background.
+  const captureEditFrame = useCallback((camId) => {
+    if (!camId || !apiBase) return
     editWsRef.current?.close()
     const apiKey = import.meta.env.VITE_API_KEY ?? ''
     const wsToken = apiKey ? `?token=${apiKey}` : ''
-    const wsUrl = apiBase.replace(/^http/, 'ws') + `/ws/cameras/${cameraId}${wsToken}`
-    const ws = new WebSocket(wsUrl)
+    const ws = new WebSocket(
+      apiBase.replace(/^http/, 'ws') + `/ws/cameras/${camId}${wsToken}`
+    )
     editWsRef.current = ws
     ws.onmessage = (e) => {
       try {
@@ -79,26 +128,13 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
       } catch { /* ignore */ }
     }
     ws.onerror = () => ws.close()
-  }, [cameraId, apiBase])
+  }, [apiBase])
 
-  const showMsg = (msg) => {
-    setSaveMsg(msg)
-    setTimeout(() => setSaveMsg(null), 4000)
-  }
-
-  const openRoiEditor = async () => {
-    if (!cameraId) return
-    // Capture a frame from the active camera to use as the ROI editor background.
-    // This frame also becomes the auto-detect snapshot so both use the same source.
-    captureEditFrame()
-    setProposals([])
-    setRoiOpen(true)
-  }
-
-  // When editBg is updated (frame arrives from camera WS), also upload it as the
-  // auto-detect snapshot so proposals are generated against the correct camera view.
+  // Upload live-captured frames as the snapshot. Skipped when editBg was loaded
+  // from the server (no point re-uploading what we just downloaded).
   useEffect(() => {
     if (!editBg || !cameraId || !apiBase) return
+    if (skipSnapshotUpload.current) { skipSnapshotUpload.current = false; return }
     apiFetch(editBg)
       .then(r => r.blob())
       .then(blob => {
@@ -108,6 +144,65 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
       })
       .catch(() => { /* non-fatal */ })
   }, [editBg, cameraId, apiBase])
+
+  const showMsg = (msg) => {
+    setSaveMsg(msg)
+    setTimeout(() => setSaveMsg(null), 4000)
+  }
+
+  // Select a camera and open the ROI editor for it.
+  // Loads the saved snapshot immediately as background, then replaces it with a
+  // fresh live frame so the editor always has something to show.
+  const selectCameraForEdit = useCallback(async (camId) => {
+    const cam = cameras.find(c => c.id === camId)
+    const roiCamId = cam ? (cam.roi_camera_id || cam.id) : camId
+
+    setSelectedCamId(camId)
+    setPicking(false)
+    setProposals([])
+    setEditBg(null)
+    setRoiOpen(true)
+
+    // Show saved snapshot right away so the editor isn't blank.
+    try {
+      const res = await apiFetch(`${apiBase}/api/roi/${roiCamId}/snapshot`)
+      if (res.ok) {
+        const blob = await res.blob()
+        const dataUrl = await new Promise(resolve => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result)
+          reader.readAsDataURL(blob)
+        })
+        skipSnapshotUpload.current = true
+        setEditBg(dataUrl)
+      }
+    } catch { /* no snapshot yet — live capture below will provide one */ }
+
+    // Capture a fresh frame to replace/set the snapshot.
+    captureEditFrame(camId)
+  }, [cameras, apiBase, captureEditFrame])
+
+  const openRoiEditor = () => {
+    if (!activeCams.length) return
+    // If a camera is already in focus, go straight to editing it.
+    if (focusedCamId) {
+      selectCameraForEdit(focusedCamId)
+      return
+    }
+    if (activeCams.length === 1) {
+      selectCameraForEdit(activeCams[0].id)
+    } else {
+      setPicking(true)
+    }
+  }
+
+  // Switch to a different camera while already inside the ROI editor.
+  const switchEditorCamera = (camId) => {
+    setSelectedCamId(camId)
+    setProposals([])
+    setEditBg(null)
+    captureEditFrame(camId)
+  }
 
   const handleSave = async () => {
     if (!cameraId) return
@@ -174,22 +269,42 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
 
   return (
     <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
-      {/* Toolbar */}
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
-        {!roiOpen && connected && frame && (
+
+        {/* Normal live view */}
+        {!roiOpen && !picking && connected && frame && (
           <span className="badge badge-occupied" style={{ background: 'rgba(239,68,68,0.9)', color: '#fff', fontSize: '0.65rem' }}>
             ● LIVE
           </span>
         )}
-        {!roiOpen && cameraId && (
-          <button style={{ ...roiBtnStyle, background: 'rgba(255,255,255,0.07)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }} onClick={openRoiEditor} title="Draw parking slot ROIs on this camera">
+        {!roiOpen && !picking && activeCams.length > 0 && (
+          <button
+            style={{ ...roiBtnStyle, background: 'rgba(255,255,255,0.07)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+            onClick={openRoiEditor}
+            title="Select a camera feed and draw parking slot ROIs"
+          >
             ✎ Edit ROIs
           </button>
         )}
+
+        {/* Picker mode toolbar */}
+        {picking && !roiOpen && (
+          <>
+            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', flex: 1 }}>
+              Select a camera to edit ROIs
+            </span>
+            <button style={roiBtnStyle} onClick={() => setPicking(false)}>
+              Cancel
+            </button>
+          </>
+        )}
+
+        {/* ROI editor toolbar */}
         {roiOpen && (
           <>
             <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              ROI Editor — {activeCamera?.name || cameraId}
+              ROI Editor — {editCam?.name || cameraId}
             </span>
             <button
               style={{ ...roiBtnStyle, borderColor: 'rgba(100,200,255,0.5)', color: proposing ? 'rgba(100,200,255,0.4)' : '#64c8ff', background: 'rgba(100,200,255,0.08)', cursor: proposing ? 'default' : 'pointer' }}
@@ -201,11 +316,12 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
             <button style={{ ...roiBtnStyle, background: 'var(--accent-primary, #3498db)', border: 'none' }} onClick={handleSave}>
               Save
             </button>
-            <button style={roiBtnStyle} onClick={() => setRoiOpen(false)}>
+            <button style={roiBtnStyle} onClick={() => { setRoiOpen(false); setPicking(false) }}>
               Done
             </button>
           </>
         )}
+
         {saveMsg && (
           <span style={{ fontSize: '0.75rem', marginLeft: 4, color: isError(saveMsg) ? 'var(--color-occupied, #e74c3c)' : 'var(--color-vacant, #2ecc71)' }}>
             {saveMsg}
@@ -213,13 +329,58 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
         )}
       </div>
 
-      {/* Live camera grid (shown when not editing) */}
-      {!roiOpen && <MultiCameraGrid cameras={cameras} bare />}
+      {/* ── Camera strip switcher (shown inside editor when multiple cameras) ── */}
+      {roiOpen && activeCams.length > 1 && (
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', padding: '8px 16px', borderBottom: '1px solid var(--border-color)', scrollbarWidth: 'thin', scrollbarColor: 'var(--border-color) transparent' }}>
+          {activeCams.map(cam => {
+            const isActive = (selectedCamId || activeCamera?.id) === cam.id
+            return (
+              <button
+                key={cam.id}
+                onClick={() => switchEditorCamera(cam.id)}
+                style={{
+                  padding: '3px 12px',
+                  borderRadius: 4,
+                  border: isActive ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
+                  background: isActive ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.04)',
+                  color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  transition: 'all 0.15s',
+                }}
+              >
+                {cam.name}
+              </button>
+            )
+          })}
+        </div>
+      )}
 
-      {/* ROI editor (shown instead of live grid while editing).
-          The container is locked to the backend frame's aspect ratio (FRAME_W:FRAME_H)
-          so the canvas coordinate system is identical to VideoProcessor pixel space,
-          giving exact 1-to-1 ROI placement on the rendered frames. */}
+      {/* ── Live camera grid — kept mounted to preserve WS connections ── */}
+      <div style={{ display: roiOpen || picking ? 'none' : 'block' }}>
+        <MultiCameraGrid cameras={cameras} bare onFocusChange={setFocusedCamId} />
+      </div>
+
+      {/* ── Camera picker (slidable feed thumbnails) ── */}
+      {picking && !roiOpen && (
+        <div style={{ padding: '14px 16px', borderTop: '1px solid var(--border-color)' }}>
+          <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 6, scrollbarWidth: 'thin', scrollbarColor: 'var(--border-color) transparent' }}>
+            {activeCams.map(cam => (
+              <PickerCell
+                key={cam.id}
+                cameraId={cam.id}
+                name={cam.name}
+                apiBase={apiBase}
+                onClick={() => selectCameraForEdit(cam.id)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── ROI editor ─────────────────────────────────────────────────── */}
       {roiOpen && (
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border-color)' }}>
           <div style={{ aspectRatio: `${FRAME_W} / ${FRAME_H}`, width: '100%' }}>
@@ -249,21 +410,12 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
                       fontSize: '0.75rem',
                     }}
                   >
-                    <span
-                      style={{
-                        display: 'inline-block', width: 8, height: 8,
-                        borderRadius: '50%', background: roi.color || '#888', flexShrink: 0,
-                      }}
-                    />
+                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: roi.color || '#888', flexShrink: 0 }} />
                     <span style={{ color: 'var(--text-primary)' }}>{roi.label}</span>
                     <button
                       onClick={() => handleDeleteRoi(roi.id)}
                       title={`Delete ${roi.label}`}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        color: 'var(--color-occupied, #e74c3c)', fontSize: '0.7rem',
-                        padding: '0 2px', lineHeight: 1,
-                      }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-occupied, #e74c3c)', fontSize: '0.7rem', padding: '0 2px', lineHeight: 1 }}
                     >
                       ✕
                     </button>
