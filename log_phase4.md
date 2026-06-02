@@ -2,6 +2,115 @@
 
 ---
 
+## 2026-06-02 — Streams metric card: replace FPS with connected-stream fill bar
+
+**Files changed:** `frontend/src/components/MetricCards.jsx`, `frontend/src/pages/AdminView.jsx`
+
+Replaced the "Stream FPS" metric card with a "Streams" card (📡) that shows `connected / total` cameras as the value and a green progress bar (fill ratio = active cameras ÷ total cameras). `AdminView` now passes `streams={{ connected, total }}` derived from `cameras.filter(c => c.active).length` / `cameras.length`.
+
+---
+
+## 2026-06-02 — Fix yolo26_classify Missing P/R/F1 + Document Metrics
+
+**Files changed:** `backend/src/train/train_manager.py`, `LResearch.md`
+
+### What changed
+`train_manager.py` was silently swallowing the confusion matrix error for `yolo26_classify` with `except Exception: pass`, so P/R/F1 never appeared after Evaluate All. Fixed by:
+- Trying `.matrix` then `.data` attributes on the confusion matrix object (YOLO26 API may differ from earlier Ultralytics versions)
+- Logging the failure with `logger.warning` so the cause is visible in backend logs if it still fails
+
+Added **Appendix A** to `LResearch.md` documenting: classification metrics (Acc/Prec/Rec/F1), detection metrics (mAP@50/P/R with IoU diagram), why they are not comparable, and the root cause of the missing P/R/F1 values.
+
+---
+
+## 2026-06-02 — Evaluation Chart: Separate Classifier vs Detector Metrics
+
+**Files changed:** `frontend/src/components/ModelStatus.jsx`
+
+### What changed
+The comparison table was mixing classification accuracy (top-1 %) with detection mAP@50 in the same "Acc" column, making the numbers meaningless to compare. Split the display:
+- **Classifier table** (`type !== 'detection'`): CNN, ResNet50, MobileNetV4, YOLO26 Classify — unchanged Acc/Prec/Rec/F1/Time columns.
+- **Detect panel** (`type === 'detection'`): YOLO26 Detect shown as a separate pill below the table, labelled "mAP@50 / P / R" so the metric type is unambiguous.
+- Accordion "Test Acc" label for the detect model row changed to "mAP@50".
+- Footnote updated to explain the metric split.
+
+---
+
+## 2026-06-02 — Fix `yolo26` Classifier Route
+
+**File changed:** `backend/src/inference/classifier.py`
+
+### What changed
+`classifier.py` routed `model_name == "yolo26"` to `_load_yolo_detect()`, giving a detect model individual slot crops. A detect model trained on full parking-lot images can't classify small crops — it fires random or no detections, yielding 0.1% accuracy. Changed the route to `_load_yolo_classify()` so `"yolo26"` in the slot-classifier is now an alias for `"yolo26_classify"`. The detect model itself is unchanged and still used exclusively in the anomaly detection path via `ParkingYOLO26`.
+
+---
+
+## 2026-06-02 — Fix YOLO Detect Model (3 issues)
+
+**Files changed:** `backend/models/best_yolo26_detect.pt`, `backend/src/models/yolo_detector.py`, `backend/src/inference/classifier.py`
+
+### What changed
+1. **Deployed trained weights** — Copied `outputs/yolo26_detect/run/weights/best.pt` (20.7 MB, mAP50=66.2% @ epoch 52) to `models/best_yolo26_detect.pt`, replacing the stale 5.1 MB base model that was never updated because training was interrupted before the auto-copy in `train_manager.py:385` ran.
+2. **Removed `classes=[1]` from anomaly detector** (`yolo_detector.py:57`) — Filtering to only class 1 (occupied) meant cars parked entirely outside defined ROI polygons were never detected. All detections are now returned and `classify_vehicle_parking` decides what is anomalous.
+3. **Fixed hardcoded confidence** (`classifier.py:149`) — `_yolo_detect_to_dict` was returning `confidence=0.9` for vacant slots with no detections. Changed to `1.0 / 0.0` to be consistent with other model paths.
+
+---
+
+## 2026-06-02 — Smooth Video: Jitter Buffer for HLS Burst Absorption
+
+**File changed:** `backend/src/inference/video_processor.py`
+
+### What changed
+Added a `deque`-based jitter buffer (`_jitter_buffer`, maxlen = `STREAM_FPS * 3 = 60 frames`) between the source thread and the display thread to smooth out HLS segment-boundary stalls.
+
+**Root cause:** YouTube HLS delivers a full segment (~60 frames) all at once, then stalls for 0.5–2 s while the next segment downloads. The display thread had no buffer to drain during the gap → periodic freeze.
+
+**Fix:**
+- `_ingest_raw_frame` now pushes every frame into `_jitter_buffer` as well as `_latest_raw`.
+- `_display_loop` pops one frame per tick at `STREAM_FPS`; when the buffer is empty it repeats `_last_display_raw` so the screen stays live.
+- `_frame_seq` only increments for genuinely new frames (buffer non-empty), so the WebSocket continues to skip resending repeated stills.
+- `_latest_raw_seq` removed (replaced by jitter buffer approach).
+
+**Effect:** A 3-second buffer window absorbs all typical HLS inter-segment gaps transparently, trading ~0–3 s of added latency (acceptable since live HLS is already 6–15 s behind real-time).
+
+---
+
+## 2026-06-02 — Smooth Video: Timer-Driven Display + Deduplicate WebSocket Frames
+
+**Files changed:** `backend/src/inference/video_processor.py`, `backend/main.py`
+
+### What changed
+
+**video_processor.py**
+- `_display_loop` changed from event-driven to **timer-driven at `STREAM_FPS`**. Tracks `_latest_raw_seq`; only re-encodes when a genuinely new raw frame has arrived. Sleeping to the next tick absorbs HLS segment bursts so the user sees smooth video instead of fast-then-freeze.
+- Added `_latest_raw_seq` (increments on each `_ingest_raw_frame`) and `_frame_seq` (increments on each new JPEG encoded).
+- Added `get_frame_seq()` public method.
+- Removed `_display_event` (no longer needed; display loop drives itself by clock).
+- `_ingest_raw_frame` now only sets `_infer_event`.
+
+**main.py**
+- Both WebSocket handlers (`/ws/video`, `/ws/cameras/{id}`) now track `last_frame_seq` and only include `frame` in the JSON payload when `_frame_seq` has changed. Metrics still send every tick. Eliminates resending the same 200 KB JPEG 20×/second.
+
+---
+
+## 2026-06-02 — Decouple Video Display from Inference
+
+**File changed:** `backend/src/inference/video_processor.py`
+
+### What changed
+Replaced the single-threaded `_process_frame` pipeline with a three-thread architecture so model inference never blocks live video display:
+
+- **Source thread** (`sp-source`): reads raw frames from the capture device/stream and writes to `_latest_raw`, then signals `_display_event` and `_infer_event`.
+- **Display thread** (`sp-display`): wakes on `_display_event`, resizes the frame, draws ROI overlays using *cached* slot statuses, encodes JPEG, and stores `_frame_b64`. Never waits for inference.
+- **Inference thread** (`sp-infer`): wakes on `_infer_event`, runs the slot detector and optional YOLO anomaly pass, updates `_metrics`/`_history`/`_heatmap`/DB, and writes results to `_cached_status_map` and `_cached_anomalies` for the display thread to use.
+
+Removed: `_process_frame`, `_youtube_loop`, `_regular_loop`, `queue` import.
+Added: `_ingest_raw_frame`, `_display_loop`, `_inference_loop`, `_youtube_source_loop`, `_regular_source_loop`.
+
+`stop_processing` now sets both events before joining threads so they unblock cleanly.
+
+---
+
 ## 2026-06-01 — .gitignore Audit
 
 **File changed:** `.gitignore`
@@ -548,3 +657,66 @@ Clicking any live camera cell in the multi-feed grid expands it to fill the full
 - **Auto-clear**: `useEffect` watches `active` cameras list — if the focused camera is deactivated, `focusedId` resets to `null` automatically.
 - **WebSocket connections**: all cameras remain connected in both modes; only the layout changes. No reconnects triggered by focus switching.
 - **Totals row**: always visible in both grid and focus modes.
+
+---
+
+## 2026-06-02 — Code Quality Audit & Slop Fixes
+
+**Files changed:**
+- `backend/main.py`
+- `backend/src/inference/classifier.py`
+- `backend/src/inference/video_processor.py`
+- `backend/src/inference/roi_proposer.py`
+- `frontend/src/components/ControlPanel.jsx`
+- `frontend/src/components/RoiEditor.jsx`
+
+### backend/main.py
+- Added `import base64` at top level (was imported inline 3× inside endpoint functions)
+- Extracted `_read_image(file)` async helper — validates format, decodes to numpy array, raises `HTTPException` on failure
+- Extracted `_frame_to_b64(frame)` helper — encodes annotated frame to base64 JPEG string
+- Refactored `analyze_lot`, `analyze_roi`, `analyze_misparked` to use both helpers; eliminated ~20 lines of duplicated image decode + encode boilerplate
+- Removed 5 decorative `# ── Label ──────` section dividers from the setup block (lines labelling 2–3 line expressions)
+- Fixed 2 bare `except Exception: pass` in camera anomaly setup — now logs at `DEBUG` level
+
+### backend/src/inference/classifier.py
+- Added `self._loaded: bool = False` flag to `__init__`
+- Replaced `self.model = True` sentinel (used in both YOLO load methods) with `self._loaded = True`; `self.model` is now always `None` for YOLO models or the actual PyTorch model for CNN models — semantically unambiguous
+- Updated `is_loaded()` to `return self._loaded`; added `self._loaded = True` to the CNN model load success path
+- Updated `predict()` and `predict_batch()` to check `if not self.is_loaded()` instead of `if self.model is None`
+- Trimmed 14-line `predict` and 9-line `predict_batch` docstrings to one-liners
+
+### backend/src/inference/video_processor.py
+- Moved `_STATUS_COLOR` dict from inside `_process_frame()` (rebuilt on every frame) to a class-level constant
+- Renamed local variable `_fps_elapsed` → `fps_elapsed` (underscore prefix is reserved for module-level private names, not locals)
+
+### backend/src/inference/roi_proposer.py
+- Expanded semicolon-chained assignments in `_iou()` lines 30–31 to one statement per line
+
+### frontend/src/components/ControlPanel.jsx
+- Extracted `showStatus(msg, delay=4000)` helper (mirrors existing `showRoiMsg` pattern) — eliminates 6× repeated `setStatus(...); setTimeout(() => setStatus(''), N)` pattern scattered across `handleAction`, `handleUpload`, and `handleTest`
+- Extracted `roiIsError` boolean derived from `roiMsg` — eliminated duplicated `roiMsg.startsWith('Error') || roiMsg.startsWith('A lot')` condition that appeared in two separate JSX render blocks
+
+### frontend/src/components/RoiEditor.jsx
+- Replaced IIFE-in-JSX anti-pattern (`{selectedId && (() => { ... })()}`) in spot-type toolbar with pre-computed `selectedRoi`, `selectedSpotType`, and `typeBtnStyle` declared before `return (`, and a clean `{selectedRoi && (<div>...</div>)}` conditional render
+
+**Verification:** Frontend `npm run build` — clean (0 errors, 0 warnings). All 4 modified Python files pass `ast.parse`.
+
+---
+
+## 2026-06-02 — Move Anomaly Detection Toggle into Controls
+
+**File changed:** `frontend/src/components/SettingsPanel.jsx`
+
+Moved `<AnomalyPanel>` from its own "Anomalies" subsection into the "Controls" subsection, placed below `<ControlPanel>` with a hairline divider separating them. Removed the standalone Anomalies subsection and its preceding divider.
+
+---
+
+## 2026-06-02 — UX: ROI lot controls visible on video upload + editable lots with ✎ icon
+
+**File changed:** `frontend/src/components/ControlPanel.jsx`
+
+- Added `videoUploaded` state: set `true` on video upload, reset on clear. Lot selector section now renders for both image and video uploads (`uploadedImage || videoUploaded`); image preview only shown when an image is present.
+- Added `roiEditorBg` state as the ROI modal background. "Draw ROIs" sets it to the uploaded image; ✎ button fetches the server snapshot (`/api/roi/:id/snapshot`) as background fallback.
+- Added `openLotRoiEditor(lotId)`: loads ROIs from server, resolves best background (uploaded image → server snapshot → blank), opens modal.
+- Added ✎ edit button before delete button in lot selector row; opens ROI editor for selected lot.
+- Replaced 🗑 (bin) with ✕ (cross) on the lot delete button.

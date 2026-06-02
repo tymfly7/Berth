@@ -99,6 +99,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   const [rois, setRois]               = useState([])
   const [roiModalOpen, setRoiModalOpen] = useState(false)
   const [roiMsg, setRoiMsg]           = useState(null)
+  const [videoUploaded, setVideoUploaded] = useState(false)
+  const [roiEditorBg, setRoiEditorBg] = useState(null)
   const fileRef                       = useRef(null)
   const uploadedFileRef               = useRef(null)
 
@@ -125,6 +127,11 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       .then(data => setRois(Array.isArray(data) ? data : []))
       .catch(() => {})
   }, [apiBase, selectedLotId])
+
+  const showStatus = (msg, delay = 4000) => {
+    setStatus(msg)
+    setTimeout(() => setStatus(''), delay)
+  }
 
   const showRoiMsg = (msg) => {
     setRoiMsg(msg)
@@ -179,12 +186,39 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     showRoiMsg(`Deleted "${lot.name}"`)
   }
 
+  const openLotRoiEditor = async (lotId) => {
+    try {
+      const res = await apiFetch(`${apiBase}/api/roi/${lotId}`)
+      const data = res.ok ? await res.json() : []
+      setRois(Array.isArray(data) ? data : [])
+    } catch {}
+
+    if (uploadedImage) {
+      setRoiEditorBg(uploadedImage)
+      setRoiModalOpen(true)
+      return
+    }
+
+    try {
+      const res = await apiFetch(`${apiBase}/api/roi/${lotId}/snapshot`)
+      if (res.ok) {
+        const blob = await res.blob()
+        const reader = new FileReader()
+        reader.onload = (e) => { setRoiEditorBg(e.target.result); setRoiModalOpen(true) }
+        reader.onerror = () => { setRoiEditorBg(null); setRoiModalOpen(true) }
+        reader.readAsDataURL(blob)
+        return
+      }
+    } catch {}
+    setRoiEditorBg(null)
+    setRoiModalOpen(true)
+  }
+
   const handleAction = async (endpoint, label) => {
     setStatus(`${label}...`)
     const res = await apiAction(endpoint)
-    setStatus(res?.message || 'Done')
     fetchModelInfo?.()
-    setTimeout(() => setStatus(''), 4000)
+    showStatus(res?.message || 'Done')
   }
 
   const handleActivateLive = () => {
@@ -198,6 +232,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     setResultImage(null)
     setResultData(null)
     setStatus('')
+    setVideoUploaded(false)
+    setRoiEditorBg(null)
   }
 
   const handleUpload = async (file) => {
@@ -210,21 +246,22 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     const isImage = /\.(jpg|jpeg|png|bmp)$/i.test(file.name)
 
     if (isVideo) {
+      setVideoUploaded(true)
       setStatus('Uploading video...')
       const form = new FormData()
       form.append('file', file)
       try {
         const res = await apiFetch(`${apiBase}/api/upload-video`, { method: 'POST', body: form })
         const data = await res.json()
-        setStatus(data.message || 'Uploaded')
-      } catch { setStatus('Upload failed') }
-      setTimeout(() => setStatus(''), 6000)
+        showStatus(data.message || 'Uploaded', 6000)
+      } catch { showStatus('Upload failed', 6000) }
       return
     }
 
     if (isImage) {
       uploadedFileRef.current = file
       setUploadedImage(null)
+      setVideoUploaded(false)
 
       if (selectedLotId) {
         const snapshotForm = new FormData()
@@ -241,8 +278,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       reader.onload = (ev) => setUploadedImage(ev.target.result)
       reader.readAsDataURL(file)
 
-      setStatus('Image ready — select a lot, draw ROIs, then click Analyze.')
-      setTimeout(() => setStatus(''), 6000)
+      showStatus('Image ready — select a lot, draw ROIs, then click Analyze.', 6000)
     }
   }
 
@@ -250,13 +286,11 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     const hasImage = !!uploadedImage && !!uploadedFileRef.current
     if (hasImage) {
       if (!selectedLotId) {
-        setStatus('Select or create a lot first.')
-        setTimeout(() => setStatus(''), 4000)
+        showStatus('Select or create a lot first.')
         return
       }
       if (rois.length === 0) {
-        setStatus('No ROIs defined — click "Draw ROIs" to mark parking spots first.')
-        setTimeout(() => setStatus(''), 5000)
+        showStatus('No ROIs defined — click "Draw ROIs" to mark parking spots first.', 5000)
         return
       }
       setStatus('Analyzing with ROIs...')
@@ -274,15 +308,15 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
         if (data.annotated_image) {
           setResultImage(data.annotated_image)
           setResultData(data)
-          setStatus(
+          showStatus(
             `${data.total} ROIs: ${data.available} available, ` +
-            `${data.occupied} occupied (${data.occupancy_percent}%)`
+            `${data.occupied} occupied (${data.occupancy_percent}%)`,
+            15000,
           )
         } else {
-          setStatus(data.detail ? `Error: ${data.detail}` : 'Done')
+          showStatus(data.detail ? `Error: ${data.detail}` : 'Done')
         }
-      } catch { setStatus('Analysis failed') }
-      setTimeout(() => setStatus(''), 15000)
+      } catch { showStatus('Analysis failed') }
       return
     }
     handleAction(
@@ -290,6 +324,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       `Testing ${MODELS.find(m => m.id === testModel)?.label}`
     )
   }
+
+  const roiIsError = roiMsg && (roiMsg.startsWith('Error') || roiMsg.startsWith('A lot'))
 
   return (
     <div className="glass-card" style={style.section}>
@@ -366,9 +402,9 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       </div>
 
       {/* Raw uploaded image + lot selector + ROI controls */}
-      {uploadedImage && !resultImage && (
+      {(uploadedImage || videoUploaded) && !resultImage && (
         <div style={{ marginTop: 12 }}>
-          <img src={uploadedImage} alt="Uploaded" style={style.resultImg} />
+          {uploadedImage && <img src={uploadedImage} alt="Uploaded" style={style.resultImg} />}
 
           {/* Lot selector — shown inline with Draw ROIs */}
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -386,12 +422,21 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               </select>
               <button
                 className="btn btn-ghost btn-sm"
+                style={{ flexShrink: 0 }}
+                title={`Edit ROIs for "${lots.find(l => l.id === selectedLotId)?.name}"`}
+                onClick={() => selectedLotId && openLotRoiEditor(selectedLotId)}
+                disabled={!selectedLotId}
+              >
+                ✎
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
                 style={{ color: 'var(--color-occupied)', flexShrink: 0 }}
                 title={`Delete "${lots.find(l => l.id === selectedLotId)?.name}" ROI set`}
                 onClick={() => selectedLotId && handleDeleteLot(selectedLotId)}
                 disabled={!selectedLotId}
               >
-                🗑
+                ✕
               </button>
             </div>
 
@@ -410,7 +455,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => setRoiModalOpen(true)}
+                onClick={() => { setRoiEditorBg(uploadedImage); setRoiModalOpen(true) }}
                 disabled={!selectedLotId}
                 title={!selectedLotId ? 'Select or create a lot first' : `Draw ROIs for ${lots.find(l => l.id === selectedLotId)?.name}`}
               >
@@ -434,8 +479,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
           {roiMsg && (
             <div style={{
               ...style.statusMsg,
-              color: roiMsg.startsWith('Error') || roiMsg.startsWith('A lot') ? 'var(--color-occupied)' : 'var(--color-vacant)',
-              background: roiMsg.startsWith('Error') || roiMsg.startsWith('A lot') ? 'rgba(244,63,94,0.1)' : 'rgba(16,185,129,0.1)',
+              color: roiIsError ? 'var(--color-occupied)' : 'var(--color-vacant)',
+              background: roiIsError ? 'rgba(244,63,94,0.1)' : 'rgba(16,185,129,0.1)',
             }}>
               {roiMsg}
             </div>
@@ -478,7 +523,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       )}
 
       {/* ROI Editor Modal — fullscreen */}
-      {roiModalOpen && uploadedImage && (
+      {roiModalOpen && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 1000,
           background: 'rgba(0,0,0,0.96)',
@@ -490,7 +535,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
             background: 'var(--bg-card)', flexShrink: 0,
           }}>
             <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-              ROI Editor — {lots.find(l => l.id === selectedLotId)?.name || selectedLotId} — click to add points, double-click to close polygon
+              {lots.find(l => l.id === selectedLotId)?.name || selectedLotId}
             </span>
             <div style={{ display: 'flex', gap: 10 }}>
               <button
@@ -506,13 +551,13 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
           </div>
 
           <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
-            <RoiEditor backgroundImage={uploadedImage} rois={rois} onRoisChange={setRois} idPrefix="test" />
+            <RoiEditor backgroundImage={roiEditorBg} rois={rois} onRoisChange={setRois} idPrefix="test" />
           </div>
 
           {roiMsg && (
             <div style={{
               padding: '8px 20px', fontSize: '0.8rem', flexShrink: 0,
-              color: roiMsg.startsWith('Error') ? 'var(--color-occupied)' : 'var(--color-vacant)',
+              color: roiIsError ? 'var(--color-occupied)' : 'var(--color-vacant)',
               background: 'var(--bg-card)',
             }}>
               {roiMsg}

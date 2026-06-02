@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { apiFetch } from '../api'
+import DataAugmentPanel from './DataAugmentPanel'
 
 const MODELS = [
   { id: 'cnn_scratch',     label: 'CNN Scratch'     },
@@ -117,6 +118,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
   const [occupiedFiles, setOccupiedFiles] = useState([])
   const [vacantFiles, setVacantFiles] = useState([])
   const [uploading, setUploading] = useState(false)
+  const [augOpen, setAugOpen] = useState(false)
   const [uploadMsg, setUploadMsg] = useState(null)
   const [uploadError, setUploadError] = useState(null)
   const [selectedModel, setSelectedModel] = useState('cnn_scratch')
@@ -129,6 +131,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
         const data = await res.json()
         setTraining(data)
         if (data.status === 'training') {
+          if (data.model_name) setSelectedModel(data.model_name)
           pollRef.current = setTimeout(pollStatus, 2000)
         }
       }
@@ -149,10 +152,6 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
     const endpoint = `/api/train/start?model_name=${modelName}&compare_all=${compareAll}`
     await apiAction(endpoint)
     pollStatus()
-  }
-
-  const generateSample = async () => {
-    await apiAction('/api/dataset/prepare?generate_sample=true&sample_count=200')
   }
 
   const uploadZone = async (files, label) => {
@@ -244,11 +243,16 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
         </div>
       </div>
 
-      {/* ── Dataset prep ─────────────────────────────────── */}
-      <div style={style.row}>
-        <button className="btn btn-ghost btn-sm" onClick={generateSample}>
-          📦 Generate Sample Data
+      {/* ── Data Augmentation ────────────────────────────── */}
+      <div style={{ marginBottom: 12, border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)' }}>
+        <button
+          onClick={() => setAugOpen(o => !o)}
+          style={{ width: '100%', background: 'transparent', border: 'none', padding: '8px 12px', textAlign: 'left', cursor: 'pointer', color: 'var(--text-primary)', fontSize: '0.82rem', fontWeight: 600, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        >
+          <span>Data Augmentation</span>
+          <span>{augOpen ? '▲' : '▼'}</span>
         </button>
+        {augOpen && <div style={{ padding: '0 12px 12px' }}><DataAugmentPanel apiBase={apiBase} /></div>}
       </div>
 
       {/* ── Training controls ────────────────────────────── */}

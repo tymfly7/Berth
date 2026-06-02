@@ -42,6 +42,9 @@ export default function AdminView() {
   const wsRef = useRef(null)
   const reconnectTimer = useRef(null)
   const camWsRefs = useRef({})
+  const unloading = useRef(false)
+  const metricsThrottleRef = useRef(0)
+  const camMetricsThrottleRef = useRef({})
 
   const displayMetrics = (() => {
     const entries = Object.values(allCameraMetrics)
@@ -76,7 +79,13 @@ export default function AdminView() {
       try {
         const data = JSON.parse(event.data)
         if (data.frame) setFrame(data.frame)
-        if (data.metrics) setMetrics(data.metrics)
+        if (data.metrics) {
+          const now = Date.now()
+          if (now - metricsThrottleRef.current >= 500) {
+            metricsThrottleRef.current = now
+            setMetrics(data.metrics)
+          }
+        }
       } catch (e) {
         console.error('Parse error:', e)
       }
@@ -84,8 +93,8 @@ export default function AdminView() {
 
     ws.onclose = () => {
       setConnected(false)
-      console.log('❌ WebSocket disconnected, reconnecting...')
-      reconnectTimer.current = setTimeout(connectWs, 3000)
+      if (!unloading.current)
+        reconnectTimer.current = setTimeout(connectWs, 3000)
     }
 
     ws.onerror = () => ws.close()
@@ -136,7 +145,6 @@ export default function AdminView() {
   }, [fetchRoiSlots])
 
   useEffect(() => {
-    connectWs()
     fetchHistory()
     fetchModelInfo()
     fetchCameras()
@@ -146,12 +154,31 @@ export default function AdminView() {
       fetchCameras()
     }, 10000)
 
+    const handleUnload = () => {
+      unloading.current = true
+      clearTimeout(reconnectTimer.current)
+      wsRef.current?.close()
+    }
+    window.addEventListener('beforeunload', handleUnload)
+
     return () => {
+      window.removeEventListener('beforeunload', handleUnload)
       clearInterval(interval)
       clearTimeout(reconnectTimer.current)
       wsRef.current?.close()
     }
-  }, [connectWs, fetchCameras])
+  }, [fetchCameras])
+
+  // Only open the legacy /ws/video connection when at least one camera is active.
+  useEffect(() => {
+    if (cameras.some(c => c.active)) {
+      connectWs()
+    } else {
+      clearTimeout(reconnectTimer.current)
+      wsRef.current?.close()
+      setConnected(false)
+    }
+  }, [cameras, connectWs])
 
   // Subscribe to all active cameras' WS for live slot statuses.
   useEffect(() => {
@@ -173,19 +200,30 @@ export default function AdminView() {
         try {
           const d = JSON.parse(e.data)
           if (d.metrics) {
-            setAllCameraMetrics(prev => ({ ...prev, [cam.id]: d.metrics }))
-            if (Array.isArray(d.metrics.slots))
-              setLiveSlotsMap(prev => ({ ...prev, [cam.id]: d.metrics.slots }))
+            const now = Date.now()
+            const last = camMetricsThrottleRef.current[cam.id] || 0
+            if (now - last >= 500) {
+              camMetricsThrottleRef.current[cam.id] = now
+              setAllCameraMetrics(prev => ({ ...prev, [cam.id]: d.metrics }))
+              if (Array.isArray(d.metrics.slots))
+                setLiveSlotsMap(prev => ({ ...prev, [cam.id]: d.metrics.slots }))
+            }
           }
         } catch { /* ignore */ }
       }
       ws.onerror = () => { ws.close(); delete camWsRefs.current[cam.id] }
     })
 
-    return () => {
+    const closeAll = () => {
       Object.values(camWsRefs.current).forEach(ws => ws.close())
       camWsRefs.current = {}
       setAllCameraMetrics({})
+    }
+
+    window.addEventListener('beforeunload', closeAll)
+    return () => {
+      window.removeEventListener('beforeunload', closeAll)
+      closeAll()
     }
   }, [cameras])
 
@@ -223,7 +261,10 @@ export default function AdminView() {
             cameras={cameras}
           />
           <div className="metrics-row fade-in">
-            <MetricCards metrics={displayMetrics} />
+            <MetricCards
+              metrics={displayMetrics}
+              streams={{ connected: cameras.filter(c => c.active).length, total: cameras.length }}
+            />
           </div>
           {allCameraSlots.length > 0 && (() => {
             const safeIdx = Math.min(lotMapIdx, allCameraSlots.length - 1)

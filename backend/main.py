@@ -13,6 +13,7 @@ Features:
   - Multi-camera registry with persistent activation
 """
 
+import base64
 import hmac
 import os
 import re
@@ -49,7 +50,6 @@ from src.db import database as db
 import config
 
 
-# ── Logging ───────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -57,10 +57,8 @@ logging.basicConfig(
 logger = logging.getLogger("smartpark")
 sys.path.insert(0, str(Path(__file__).parent))
 
-# ── Rate limiter ──────────────────────────────────────────
 limiter = Limiter(key_func=get_remote_address)
 
-# ── Lifespan ──────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
@@ -74,7 +72,6 @@ async def lifespan(app: FastAPI):
     yield
     camera_registry.shutdown()
 
-# ── FastAPI app ───────────────────────────────────────────
 app = FastAPI(
     title="Smart Parking AI",
     description="Real-time parking detection powered by deep learning",
@@ -99,7 +96,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── API key auth ──────────────────────────────────────────
 API_KEY = config.API_KEY
 
 async def verify_api_key(request: Request):
@@ -233,6 +229,22 @@ def _resolve_model_name():
             return name
     return None
 
+
+async def _read_image(file: UploadFile) -> np.ndarray:
+    allowed = (".jpg", ".jpeg", ".png", ".bmp")
+    if not file.filename.lower().endswith(allowed):
+        raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
+    content = await file.read()
+    frame = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(400, "Could not decode image")
+    return frame
+
+
+def _frame_to_b64(frame: np.ndarray) -> str:
+    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return base64.b64encode(buf).decode("utf-8")
+
 # ═══════════════════════════════════════════════════════════════
 # REST Endpoints
 # ═══════════════════════════════════════════════════════════════
@@ -319,18 +331,8 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
         if not 1 <= rows <= 50 or not 1 <= cols <= 50:
             raise HTTPException(400, "rows and cols must each be between 1 and 50")
 
-        allowed = (".jpg", ".jpeg", ".png", ".bmp")
-        if not file.filename.lower().endswith(allowed):
-            raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
+        frame = await _read_image(file)
 
-        content = await file.read()
-        nparr = np.frombuffer(content, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-        if frame is None:
-            raise HTTPException(400, "Could not decode image")
-
-        # Load classifier
         model_name = _resolve_model_name()
         if model_name is None:
             raise HTTPException(400, "No trained model available. Train a model first.")
@@ -343,7 +345,6 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
         cell_h = h // rows
         cell_w = w // cols
 
-        # Split into grid cells and classify each
         cells = []
         slot_id = 1
         for r in range(rows):
@@ -352,15 +353,11 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
                 y2 = (r + 1) * cell_h if r < rows - 1 else h
                 x1 = c * cell_w
                 x2 = (c + 1) * cell_w if c < cols - 1 else w
-                cell_img = frame[y1:y2, x1:x2]
-                cells.append((slot_id, cell_img, x1, y1, x2, y2))
+                cells.append((slot_id, frame[y1:y2, x1:x2], x1, y1, x2, y2))
                 slot_id += 1
 
-        # Batch classify
-        cell_images = [c[1] for c in cells]
-        predictions = clf.predict_batch(cell_images)
+        predictions = clf.predict_batch([c[1] for c in cells])
 
-        # Build annotated image
         annotated = frame.copy()
         slots = []
         available = 0
@@ -401,10 +398,6 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
         avg_conf = total_conf / total if total > 0 else 0
         occ_pct = round(100.0 * occupied / total, 1) if total > 0 else 0
 
-        import base64
-        _, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
-        img_b64 = base64.b64encode(buffer).decode("utf-8")
-
         return {
             "type": "lot_analysis",
             "model": _active_mode,
@@ -415,7 +408,7 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
             "occupancy_percent": occ_pct,
             "avg_confidence": round(avg_conf, 4),
             "slots": slots,
-            "annotated_image": img_b64,
+            "annotated_image": _frame_to_b64(annotated),
         }
     finally:
         _finish_op(op_id)
@@ -430,15 +423,7 @@ async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id:
     """
     op_id = _register_op("roi_analysis", "Analyzing with ROIs…")
     try:
-        allowed = (".jpg", ".jpeg", ".png", ".bmp")
-        if not file.filename.lower().endswith(allowed):
-            raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
-
-        content = await file.read()
-        nparr = np.frombuffer(content, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if frame is None:
-            raise HTTPException(400, "Could not decode image")
+        frame = await _read_image(file)
 
         rois = RoiStore.get_rois(camera_id)
         if not rois:
@@ -506,10 +491,6 @@ async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id:
         occ_pct = round(100.0 * occupied / total, 1) if total > 0 else 0
         avg_conf = round(total_conf / total, 4) if total > 0 else 0
 
-        import base64
-        _, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
-        img_b64 = base64.b64encode(buffer).decode("utf-8")
-
         return {
             "type": "roi_analysis",
             "model": _active_mode,
@@ -519,7 +500,7 @@ async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id:
             "occupancy_percent": occ_pct,
             "avg_confidence": avg_conf,
             "slots": slots,
-            "annotated_image": img_b64,
+            "annotated_image": _frame_to_b64(annotated),
         }
     finally:
         _finish_op(op_id)
@@ -545,15 +526,7 @@ async def analyze_misparked(
     """
     op_id = _register_op("misparked_analysis", "Detecting misparked vehicles…")
     try:
-        allowed = (".jpg", ".jpeg", ".png", ".bmp")
-        if not file.filename.lower().endswith(allowed):
-            raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
-
-        content = await file.read()
-        nparr = np.frombuffer(content, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if frame is None:
-            raise HTTPException(400, "Could not decode image")
+        frame = await _read_image(file)
 
         rois = RoiStore.get_rois(camera_id)
         if not rois:
@@ -636,10 +609,6 @@ async def analyze_misparked(
                 1,
             )
 
-        import base64
-        _, buffer = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
-        img_b64 = base64.b64encode(buffer).decode("utf-8")
-
         return {
             "type": "misparked_analysis",
             "camera_id": camera_id,
@@ -649,7 +618,7 @@ async def analyze_misparked(
             "misparked": lot["misparked_count"],        # int for metrics shape
             "misparked_vehicles": lot["misparked"],     # detailed list
             "slots": lot["slots"],
-            "annotated_image": img_b64,
+            "annotated_image": _frame_to_b64(annotated),
         }
     finally:
         _finish_op(op_id)
@@ -773,8 +742,8 @@ async def set_anomaly(request: Request):
             if p:
                 try:
                     p.set_anomaly_detection(enabled)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Anomaly toggle skipped for camera {cam['id']}: {e}")
     return {"enabled": _anomaly_enabled}
 
 # ── Model switching ──────────────────────────────────────
@@ -1338,6 +1307,29 @@ async def add_camera(request: Request):
         raise HTTPException(409, str(e))
     return cam
 
+@app.patch("/api/cameras/{camera_id}", dependencies=[Depends(verify_api_key)])
+async def update_camera(camera_id: str, request: Request):
+    body = await request.json()
+    name    = body.get("name",    "").strip() or None
+    source  = body.get("source",  "").strip() or None
+    type_   = body.get("type",    "").strip() or None
+    roi_camera_id = body.get("roi_camera_id", "").strip() or None
+
+    if type_ is not None and type_ not in ("usb", "rtsp", "file", "youtube"):
+        raise HTTPException(400, "type must be usb, rtsp, file, or youtube")
+
+    cam_current = camera_registry.get(camera_id)
+    if cam_current is None:
+        raise HTTPException(404, f"Camera '{camera_id}' not found")
+
+    if source is not None:
+        _validate_camera_source(source, type_ or cam_current["type"])
+
+    cam = camera_registry.update_camera(
+        camera_id, name=name, source=source, type_=type_, roi_camera_id=roi_camera_id
+    )
+    return cam
+
 @app.delete("/api/cameras/{camera_id}", dependencies=[Depends(verify_api_key)])
 def remove_camera(camera_id: str):
     if not camera_registry.remove_camera(camera_id):
@@ -1356,8 +1348,8 @@ def activate_camera(camera_id: str):
         if p:
             try:
                 p.set_anomaly_detection(True)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Anomaly setup skipped for {camera_id}: {e}")
     return {"activated": camera_id}
 
 @app.post("/api/cameras/{camera_id}/deactivate", dependencies=[Depends(verify_api_key)])
@@ -1389,13 +1381,15 @@ async def video_ws(websocket: WebSocket, token: str = ""):
     proc = _get_processor()
     proc.start_processing()
     logger.info("WebSocket client connected")
+    last_frame_seq = -1
     try:
         while True:
             proc = _get_processor()
-            frame_b64 = proc.get_latest_frame_base64()
             metrics = proc.get_metrics()
             payload = {"metrics": metrics}
-            if frame_b64:
+            frame_b64, frame_seq = proc.get_frame_and_seq()
+            if frame_b64 and frame_seq != last_frame_seq:
+                last_frame_seq = frame_seq
                 payload["frame"] = frame_b64
             await websocket.send_json(payload)
             await asyncio.sleep(0.05)
@@ -1420,6 +1414,7 @@ async def camera_ws(websocket: WebSocket, camera_id: str, token: str = ""):
         return
     logger.info(f"Camera WS connected: {camera_id}")
     no_frame_ticks = 0
+    last_frame_seq = -1
     try:
         while True:
             proc = camera_registry.get_processor(camera_id)
@@ -1427,18 +1422,20 @@ async def camera_ws(websocket: WebSocket, camera_id: str, token: str = ""):
                 await websocket.send_json({"type": "feed_unavailable", "reason": "Camera feed stopped"})
                 await websocket.close()
                 break
-            frame_b64 = proc.get_latest_frame_base64()
             metrics = proc.get_metrics()
             payload = {"metrics": metrics}
-            if frame_b64:
-                no_frame_ticks = 0
-                payload["frame"] = frame_b64
-            else:
+            frame_b64, frame_seq = proc.get_frame_and_seq()
+            if frame_b64 is None:
                 no_frame_ticks += 1
                 if no_frame_ticks >= 600:  # ~30 s with 0.05 s sleep
                     await websocket.send_json({"type": "feed_unavailable", "reason": "Video stream unavailable or timed out"})
                     await websocket.close()
                     break
+            else:
+                no_frame_ticks = 0
+                if frame_seq != last_frame_seq:
+                    last_frame_seq = frame_seq
+                    payload["frame"] = frame_b64
             await websocket.send_json(payload)
             await asyncio.sleep(0.05)
     except WebSocketDisconnect:

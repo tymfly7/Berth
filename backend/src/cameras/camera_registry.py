@@ -125,6 +125,29 @@ class CameraRegistry:
             self._save()
             return dict(cam)
 
+    def update_camera(self, id: str, name: str = None, source: str = None,
+                      type_: str = None, roi_camera_id: str = None) -> dict | None:
+        with self._lock:
+            cam = self._cameras.get(id)
+            if not cam:
+                return None
+            new_type = type_ or cam["type"]
+            source_changed = source is not None and source != cam["source"]
+            type_changed = type_ is not None and type_ != cam["type"]
+            if cam.get("active") and (source_changed or type_changed):
+                self._deactivate(id)
+            if name is not None:
+                cam["name"] = name
+            if source is not None:
+                stored = _redact_url_credentials(source) if new_type in ("rtsp", "youtube") else source
+                cam["source"] = stored
+            if type_ is not None:
+                cam["type"] = type_
+            if roi_camera_id is not None:
+                cam["roi_camera_id"] = roi_camera_id or id
+            self._save()
+            return dict(cam)
+
     def remove_camera(self, id: str) -> bool:
         with self._lock:
             if id not in self._cameras:

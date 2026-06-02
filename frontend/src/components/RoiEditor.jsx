@@ -596,6 +596,18 @@ export default function RoiEditor({
 
   const hasProposals = proposals.length > 0
   const selProp = selectedProposalId ? proposals.find(p => p.id === selectedProposalId) : null
+  const selectedRoi = selectedId ? rois.find(r => r.id === selectedId) : null
+  const selectedSpotType = selectedRoi?.spotType || 'normal'
+  const typeBtnStyle = (active, accent) => ({
+    padding: '4px 10px',
+    borderRadius: 4,
+    border: `1px solid ${active ? accent : 'rgba(255,255,255,0.18)'}`,
+    background: active ? `${accent}22` : 'rgba(255,255,255,0.04)',
+    color: active ? accent : 'var(--text-muted,#aaa)',
+    cursor: 'pointer',
+    fontSize: '0.76rem',
+    fontWeight: active ? 700 : 400,
+  })
 
   return (
     <div style={overlay ? { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' } : {}}>
@@ -654,57 +666,42 @@ export default function RoiEditor({
       </div>
 
       {/* ── Spot type toolbar (visible when a ROI is selected) ── */}
-      {selectedId && (() => {
-        const selRoi = rois.find(r => r.id === selectedId)
-        if (!selRoi) return null
-        const t = selRoi.spotType || 'normal'
-        const typeBtnStyle = (active, accent) => ({
-          padding: '4px 10px',
-          borderRadius: 4,
-          border: `1px solid ${active ? accent : 'rgba(255,255,255,0.18)'}`,
-          background: active ? `${accent}22` : 'rgba(255,255,255,0.04)',
-          color: active ? accent : 'var(--text-muted,#aaa)',
-          cursor: 'pointer',
-          fontSize: '0.76rem',
-          fontWeight: active ? 700 : 400,
-        })
-        return (
-          <div style={{
-            display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
-            marginBottom: overlay ? 0 : 6,
-            padding: '5px 8px',
-            background: overlay ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.04)',
-            borderRadius: overlay ? 0 : 4,
-            border: overlay ? 'none' : '1px solid rgba(255,255,255,0.1)',
-            backdropFilter: overlay ? 'blur(4px)' : undefined,
-          }}>
-            <input
-              value={selRoi.label}
-              onChange={e => commitChange(rois.map(r => r.id === selectedId ? { ...r, label: e.target.value } : r))}
-              style={{
-                padding: '3px 7px', borderRadius: 4, fontSize: '0.76rem',
-                border: '1px solid rgba(255,255,255,0.22)',
-                background: 'rgba(255,255,255,0.07)', color: '#fff',
-                width: 80, outline: 'none',
-              }}
-              title="Rename this spot (e.g. A1, B3)"
-            />
-            <span style={{ fontSize: '0.73rem', color: 'var(--text-muted,#aaa)', margin: '0 2px' }}>type:</span>
-            <button style={typeBtnStyle(t === 'normal', '#2ecc71')} onClick={() => setSpotType('normal')}>Normal</button>
-            <button style={typeBtnStyle(t === 'reserved', '#e6a817')} onClick={() => setSpotType('reserved')}>Reserved</button>
-            <button style={typeBtnStyle(t === 'handicap', '#1a7fc1')} onClick={() => setSpotType('handicap')}>♿ Handicap</button>
-            {t === 'reserved' && (
-              <button
-                style={{ ...typeBtnStyle(false, '#e6a817'), borderColor: 'rgba(230,168,23,0.4)', color: '#e6a817' }}
-                onClick={setOwner}
-                title="Set owner / reservation name shown on the spot"
-              >
-                {selRoi.owner ? `Owner: ${selRoi.owner}` : 'Set Owner…'}
-              </button>
-            )}
-          </div>
-        )
-      })()}
+      {selectedRoi && (
+        <div style={{
+          display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
+          marginBottom: overlay ? 0 : 6,
+          padding: '5px 8px',
+          background: overlay ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.04)',
+          borderRadius: overlay ? 0 : 4,
+          border: overlay ? 'none' : '1px solid rgba(255,255,255,0.1)',
+          backdropFilter: overlay ? 'blur(4px)' : undefined,
+        }}>
+          <input
+            value={selectedRoi.label}
+            onChange={e => commitChange(rois.map(r => r.id === selectedId ? { ...r, label: e.target.value } : r))}
+            style={{
+              padding: '3px 7px', borderRadius: 4, fontSize: '0.76rem',
+              border: '1px solid rgba(255,255,255,0.22)',
+              background: 'rgba(255,255,255,0.07)', color: '#fff',
+              width: 80, outline: 'none',
+            }}
+            title="Rename this spot (e.g. A1, B3)"
+          />
+          <span style={{ fontSize: '0.73rem', color: 'var(--text-muted,#aaa)', margin: '0 2px' }}>type:</span>
+          <button style={typeBtnStyle(selectedSpotType === 'normal', '#2ecc71')} onClick={() => setSpotType('normal')}>Normal</button>
+          <button style={typeBtnStyle(selectedSpotType === 'reserved', '#e6a817')} onClick={() => setSpotType('reserved')}>Reserved</button>
+          <button style={typeBtnStyle(selectedSpotType === 'handicap', '#1a7fc1')} onClick={() => setSpotType('handicap')}>♿ Handicap</button>
+          {selectedSpotType === 'reserved' && (
+            <button
+              style={{ ...typeBtnStyle(false, '#e6a817'), borderColor: 'rgba(230,168,23,0.4)', color: '#e6a817' }}
+              onClick={setOwner}
+              title="Set owner / reservation name shown on the spot"
+            >
+              {selectedRoi.owner ? `Owner: ${selectedRoi.owner}` : 'Set Owner…'}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Proposals toolbar ── */}
       {hasProposals && (
