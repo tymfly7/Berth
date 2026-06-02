@@ -301,7 +301,7 @@ body::before {
 .text-vacant { color: var(--color-vacant); }
 .text-occupied { color: var(--color-occupied); }
 .text-warning { color: var(--color-warning); }
-.text-muted { color: var(--text-secondary); }
+.text-muted { color: var(--text-muted); }
 .text-xs { font-size: 0.75rem; }
 .text-sm { font-size: 0.875rem; }
 .text-lg { font-size: 1.125rem; }
@@ -364,13 +364,6 @@ body::before {
 
 .fade-in {
   animation: fadeIn 0.4s ease-out both;
-}
-
-/* ── Indeterminate progress bar ────────────────────────── */
-@keyframes indeterminate {
-  0%   { transform: scaleX(0.1) translateX(-100%); }
-  50%  { transform: scaleX(0.5) translateX(30%); }
-  100% { transform: scaleX(0.1) translateX(400%); }
 }
 
 /* ── Number counter animation ──────────────────────────── */

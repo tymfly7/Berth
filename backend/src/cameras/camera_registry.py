@@ -45,7 +45,9 @@ class CameraRegistry:
         self._cameras: dict = {}          # id -> camera dict
         self._processors: dict = {}       # id -> VideoProcessor
         self._load()
-        self._restore_active()
+        # _restore_active() is intentionally deferred — it creates VideoProcessors
+        # which load ML models and blocks for seconds.  Call it from lifespan in a
+        # background thread so the server starts accepting connections immediately.
 
     # ── Persistence ────────────────────────────────────────────────────────
 

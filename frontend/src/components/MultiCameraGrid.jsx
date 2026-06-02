@@ -30,10 +30,14 @@ const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onClick, mini }) {
       try {
         const data = JSON.parse(event.data)
         if (data.type === 'feed_unavailable') {
-          stopReconnect.current = true
+          // "Camera is not active" is transient — the processor may still be
+          // loading on startup.  Allow the onclose handler to schedule a retry.
+          // All other reasons (stream timeout, camera removed) are permanent.
+          const permanent = data.reason !== 'Camera is not active'
+          stopReconnect.current = permanent
           clearTimeout(reconnectTimer.current)
           setConnected(false)
-          setUnavailable(data.reason ?? 'Feed unavailable')
+          setUnavailable(permanent ? (data.reason ?? 'Feed unavailable') : null)
           ws.close()
           return
         }

@@ -296,9 +296,12 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       setStatus('Analyzing with ROIs...')
       setResultImage(null)
       setResultData(null)
-      await saveRois(rois)
+      // Fire save in the background for persistence; pass ROIs inline so the
+      // analysis doesn't have to wait for the save round-trip to finish.
+      saveRois(rois)
       const form = new FormData()
       form.append('file', uploadedFileRef.current)
+      form.append('rois_json', JSON.stringify(rois))
       try {
         const res = await apiFetch(`${apiBase}/api/analyze-roi?camera_id=${selectedLotId}&model_name=${testModel}`, {
           method: 'POST',

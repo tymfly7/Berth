@@ -15,17 +15,6 @@ const style = {
     alignItems: 'center',
     gap: '14px',
   },
-  icon: {
-    width: 44,
-    height: 44,
-    borderRadius: 'var(--radius-md)',
-    background: 'var(--gradient-accent)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '1.4rem',
-    boxShadow: '0 2px 12px rgba(99,102,241,0.3)',
-  },
   title: {
     fontSize: '1.35rem',
     fontWeight: 800,
@@ -85,10 +74,9 @@ export default function Header({ connected, model }) {
   return (
     <header style={style.header}>
       <div style={style.logoArea}>
-        <div style={style.icon}>🅿️</div>
         <div>
-          <div style={style.title}>Smart Parking AI</div>
-          <div style={style.subtitle}>Intelligent Parking Detection System</div>
+          <div style={style.title}>Berth</div>
+          <div style={style.subtitle}>Find your space.</div>
         </div>
       </div>
       <div style={style.right}>
@@ -111,6 +99,15 @@ export default function Header({ connected, model }) {
             }}
           >
             Admin
+          </Link>
+          <Link
+            to="/admin/docs"
+            style={{
+              ...style.navLink,
+              ...(location.pathname === '/admin/docs' ? style.navLinkActive : {}),
+            }}
+          >
+            Docs
           </Link>
         </nav>
 

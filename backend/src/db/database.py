@@ -34,7 +34,8 @@ def init_db() -> None:
             available         INTEGER NOT NULL,
             occupied          INTEGER NOT NULL,
             occupancy_percent REAL    NOT NULL,
-            synced            INTEGER NOT NULL DEFAULT 0
+            synced            INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (camera_id, timestamp)
         );
         CREATE INDEX IF NOT EXISTS idx_occ_ts     ON occupancy_history(timestamp);
         CREATE INDEX IF NOT EXISTS idx_occ_cam_ts ON occupancy_history(camera_id, timestamp);
@@ -46,7 +47,8 @@ def init_db() -> None:
             level             TEXT NOT NULL,
             occupancy_percent REAL NOT NULL,
             message           TEXT,
-            synced            INTEGER NOT NULL DEFAULT 0
+            synced            INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (camera_id, timestamp, level)
         );
         CREATE INDEX IF NOT EXISTS idx_alert_ts ON alert_events(timestamp);
 
@@ -75,12 +77,13 @@ def init_db() -> None:
 def record_occupancy(camera_id: str, available: int, occupied: int,
                      occupancy_percent: float) -> None:
     ts = datetime.now(timezone.utc).isoformat()
-    _conn().execute(
+    c = _conn()
+    c.execute(
         "INSERT INTO occupancy_history (timestamp, camera_id, available, occupied, occupancy_percent) "
         "VALUES (?, ?, ?, ?, ?)",
         (ts, camera_id, available, occupied, occupancy_percent),
     )
-    _conn().commit()
+    c.commit()
 
 
 _TREND_CONFIG = {
@@ -141,6 +144,7 @@ def query_trends(range_: str, camera_id: str = None):
 # ── Alerts ────────────────────────────────────────────────────────────────────
 
 _alert_cooldown: dict[str, datetime] = {}
+_alert_cooldown_lock = threading.Lock()
 _COOLDOWN_MINUTES = 10
 
 
@@ -158,18 +162,20 @@ def maybe_record_alert(camera_id: str, occupancy_percent: float) -> None:
 
     key = f"{camera_id}:{level}"
     now = datetime.now(timezone.utc)
-    last = _alert_cooldown.get(key)
-    if last and (now - last).total_seconds() < _COOLDOWN_MINUTES * 60:
-        return
+    with _alert_cooldown_lock:
+        last = _alert_cooldown.get(key)
+        if last and (now - last).total_seconds() < _COOLDOWN_MINUTES * 60:
+            return
+        _alert_cooldown[key] = now
 
-    _alert_cooldown[key] = now
     msg = f"Occupancy at {occupancy_percent:.1f}%"
-    _conn().execute(
+    c = _conn()
+    c.execute(
         "INSERT INTO alert_events (timestamp, camera_id, level, occupancy_percent, message) "
         "VALUES (?, ?, ?, ?, ?)",
         (now.isoformat(), camera_id, level, occupancy_percent, msg),
     )
-    _conn().commit()
+    c.commit()
 
 
 def get_alerts(limit: int = 50):

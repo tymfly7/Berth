@@ -1,21 +1,13 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { apiFetch } from '../api'
+import { API_BASE } from '../config'
 import { Link } from 'react-router-dom'
 import MetricCards from '../components/MetricCards'
 import LotMap from '../components/LotMap'
 import AnalyticsChart from '../components/AnalyticsChart'
+import { roiToSlot } from '../utils/roiUtils'
 
-const API_BASE = `http://${window.location.hostname}:8000`
 const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
-const CANVAS_W = 1000, CANVAS_H = 600
-
-function roiToSlot(roi) {
-  const pts = roi.polygon.map(([nx, ny]) => [nx * CANVAS_W, ny * CANVAS_H])
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
-  const x = Math.min(...xs), y = Math.min(...ys)
-  const w = Math.max(...xs) - x, h = Math.max(...ys) - y
-  return { id: roi.id, label: roi.label, status: null, bbox: [x, y, w, h], polygon: pts, spotType: roi.spotType || 'normal', owner: roi.owner || '' }
-}
 
 export default function PublicView() {
   const [metrics, setMetrics] = useState({
@@ -31,7 +23,7 @@ export default function PublicView() {
   const [lastUpdate, setLastUpdate] = useState(null)
   const camWsRefs = useRef({})
 
-  const displayMetrics = (() => {
+  const displayMetrics = useMemo(() => {
     const entries = Object.values(liveCamMetrics)
     if (!entries.length) return metrics
     const total     = entries.reduce((s, m) => s + (m.total     || 0), 0)
@@ -45,7 +37,7 @@ export default function PublicView() {
       occupancy_percent: total > 0 ? Math.round(occupied / total * 1000) / 10 : 0,
       slots: entries.flatMap(m => m.slots || []),
     }
-  })()
+  }, [liveCamMetrics, metrics])
 
   useEffect(() => {
     const fetchMetrics = async () => {
@@ -65,10 +57,12 @@ export default function PublicView() {
     fetchMetrics()
     fetchHistory()
     const pollInterval = setInterval(fetchMetrics, 8000)
+    const historyInterval = setInterval(fetchHistory, 60000)
     const clockInterval = setInterval(() => setTime(new Date()), 1000)
 
     return () => {
       clearInterval(pollInterval)
+      clearInterval(historyInterval)
       clearInterval(clockInterval)
     }
   }, [])
@@ -112,23 +106,49 @@ export default function PublicView() {
       if (!activeIds.has(id)) { ws.close(); delete camWsRefs.current[id] }
     })
 
+    // Drop stale metrics/slots for cameras that are gone, so the aggregate
+    // stops summing ghost lots (metric hallucination).
+    const pruneStale = prev => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next
+    }
+    setLiveCamMetrics(pruneStale)
+    setLiveSlotsMap(pruneStale)
+
     allCameraSlots.forEach(cam => {
       if (camWsRefs.current[cam.cameraId]) return
-      const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-      const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.cameraId}${wsToken}`)
-      camWsRefs.current[cam.cameraId] = ws
-      ws.onmessage = (e) => {
-        try {
-          const d = JSON.parse(e.data)
-          if (d.metrics) {
-            setLastUpdate(Date.now())
-            setLiveCamMetrics(prev => ({ ...prev, [cam.cameraId]: d.metrics }))
-            if (Array.isArray(d.metrics.slots))
-              setLiveSlotsMap(prev => ({ ...prev, [cam.cameraId]: d.metrics.slots }))
-          }
-        } catch { /* ignore */ }
+
+      const connect = () => {
+        const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
+        const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.cameraId}${wsToken}`)
+        camWsRefs.current[cam.cameraId] = ws
+        ws.onmessage = (e) => {
+          try {
+            const d = JSON.parse(e.data)
+            if (d.type === 'feed_unavailable') {
+              // Feed stopped/deactivated — drop its metrics so it stops
+              // counting toward the aggregate.
+              setLiveCamMetrics(({ [cam.cameraId]: _drop, ...rest }) => rest)
+              setLiveSlotsMap(({ [cam.cameraId]: _drop, ...rest }) => rest)
+              return
+            }
+            if (d.metrics) {
+              setLastUpdate(Date.now())
+              setLiveCamMetrics(prev => ({ ...prev, [cam.cameraId]: d.metrics }))
+              if (Array.isArray(d.metrics.slots))
+                setLiveSlotsMap(prev => ({ ...prev, [cam.cameraId]: d.metrics.slots }))
+            }
+          } catch { /* ignore */ }
+        }
+        ws.onerror = () => ws.close()
+        ws.onclose = () => {
+          delete camWsRefs.current[cam.cameraId]
+          setTimeout(() => {
+            if (activeIds.has(cam.cameraId) && !camWsRefs.current[cam.cameraId]) connect()
+          }, 3000)
+        }
       }
-      ws.onerror = () => { ws.close(); delete camWsRefs.current[cam.cameraId] }
+      connect()
     })
 
     return () => {
@@ -145,19 +165,6 @@ export default function PublicView() {
       : 'var(--color-vacant)'
 
   const isFull = displayMetrics.available === 0
-
-  const trend = (() => {
-    if (history.length < 4) return null
-    const vals = history.map(h => h.occupancy_percent ?? 0)
-    const recent = vals.slice(-3)
-    const prior = vals.slice(-6, -3)
-    if (!prior.length) return null
-    const avg = a => a.reduce((s, v) => s + v, 0) / a.length
-    const delta = avg(recent) - avg(prior)
-    if (delta > 2) return { label: 'Filling up', icon: '↑', color: 'var(--color-occupied)' }
-    if (delta < -2) return { label: 'Emptying', icon: '↓', color: 'var(--color-vacant)' }
-    return { label: 'Steady', icon: '→', color: 'var(--text-muted)' }
-  })()
 
   return (
     <div style={{
@@ -178,10 +185,13 @@ export default function PublicView() {
           background: 'var(--gradient-accent)',
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent',
-          marginBottom: 8,
+          marginBottom: 4,
         }}>
-          Parking Availability
+          Berth
         </h1>
+        <div style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', fontWeight: 500, letterSpacing: '1px', marginBottom: 10 }}>
+          Find your space.
+        </div>
         <div style={{ fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: '1rem' }}>
           {time.toLocaleTimeString()}
         </div>
@@ -234,15 +244,6 @@ export default function PublicView() {
         }}>
           spots available
         </div>
-        {trend && (
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-            marginTop: 12, fontSize: '0.9rem', fontWeight: 600, color: trend.color,
-          }}>
-            <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>{trend.icon}</span>
-            {trend.label}
-          </div>
-        )}
       </div>
 
       {/* Per-lot breakdown */}
@@ -293,14 +294,12 @@ export default function PublicView() {
             )}
             <div style={{ position: 'relative' }}>
               {multi && <>
-                <button onClick={() => setLotMapIdx(i => (i - 1 + allCameraSlots.length) % allCameraSlots.length)}
-                  style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 2,
-                    background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)',
-                    borderRadius: 'var(--radius-sm)', padding: '6px 14px', cursor: 'pointer', fontSize: '1.2rem' }}>‹</button>
-                <button onClick={() => setLotMapIdx(i => (i + 1) % allCameraSlots.length)}
-                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 2,
-                    background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-color)', color: 'var(--text-secondary)',
-                    borderRadius: 'var(--radius-sm)', padding: '6px 14px', cursor: 'pointer', fontSize: '1.2rem' }}>›</button>
+                <button className="btn btn-ghost btn-sm"
+                  style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 2, fontSize: '1.2rem', padding: '6px 14px' }}
+                  onClick={() => setLotMapIdx(i => (i - 1 + allCameraSlots.length) % allCameraSlots.length)}>‹</button>
+                <button className="btn btn-ghost btn-sm"
+                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 2, fontSize: '1.2rem', padding: '6px 14px' }}
+                  onClick={() => setLotMapIdx(i => (i + 1) % allCameraSlots.length)}>›</button>
               </>}
               <LotMap slots={slots} demo={liveForCam.length === 0} title={multi ? cam.name : null} />
             </div>
@@ -322,7 +321,7 @@ export default function PublicView() {
 
       {/* Trends chart */}
       <div style={{ width: '100%', maxWidth: 800, marginBottom: 32 }}>
-        <AnalyticsChart history={history} />
+        <AnalyticsChart />
       </div>
 
       {/* Admin link — bottom-right corner */}
