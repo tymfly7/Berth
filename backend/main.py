@@ -1078,7 +1078,7 @@ def model_info():
 
 # ── Training ─────────────────────────────────────────────
 @app.post("/api/train/start", dependencies=[Depends(verify_api_key)])
-@limiter.limit("3/hour")
+@limiter.limit("20/hour")
 def start_training(request: Request, model_name: str = "cnn_scratch",
                    compare_all: bool = False):
     if config.DEPLOYMENT_PROFILE == "edge":
@@ -1412,22 +1412,33 @@ async def camera_ws(websocket: WebSocket, camera_id: str, token: str = ""):
     await websocket.accept()
     if camera_registry.get(camera_id) is None:
         await websocket.send_json({"error": "Camera not found"})
+        await websocket.close()
         return
     if camera_registry.get_processor(camera_id) is None:
-        await websocket.send_json({"error": "Camera not found"})
+        await websocket.send_json({"type": "feed_unavailable", "reason": "Camera is not active"})
+        await websocket.close()
         return
     logger.info(f"Camera WS connected: {camera_id}")
+    no_frame_ticks = 0
     try:
         while True:
             proc = camera_registry.get_processor(camera_id)
             if proc is None:
-                await asyncio.sleep(0.5)
-                continue
+                await websocket.send_json({"type": "feed_unavailable", "reason": "Camera feed stopped"})
+                await websocket.close()
+                break
             frame_b64 = proc.get_latest_frame_base64()
             metrics = proc.get_metrics()
             payload = {"metrics": metrics}
             if frame_b64:
+                no_frame_ticks = 0
                 payload["frame"] = frame_b64
+            else:
+                no_frame_ticks += 1
+                if no_frame_ticks >= 600:  # ~30 s with 0.05 s sleep
+                    await websocket.send_json({"type": "feed_unavailable", "reason": "Video stream unavailable or timed out"})
+                    await websocket.close()
+                    break
             await websocket.send_json(payload)
             await asyncio.sleep(0.05)
     except WebSocketDisconnect:

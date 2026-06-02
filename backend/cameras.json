@@ -16,5 +16,14 @@
     "roi_camera_id": "krom-b-a74b30",
     "active": true,
     "added_at": "2026-06-01T09:49:40.764059+00:00"
+  },
+  {
+    "id": "kromc-eba892",
+    "name": "KromC",
+    "source": "https://youtu.be/Cq1EUkQcn-k",
+    "type": "youtube",
+    "roi_camera_id": "kromc-eba892",
+    "active": true,
+    "added_at": "2026-06-02T08:39:59.151534+00:00"
   }
 ]

@@ -5,7 +5,7 @@ import RoiEditor from './RoiEditor'
 const MODELS = [
   { id: 'cnn_scratch',     label: 'CNN Scratch'      },
   { id: 'resnet50',        label: 'ResNet-50'        },
-  { id: 'mobilenetv4',     label: 'MobileNetV4'      },
+  { id: 'mobilenetv4s',    label: 'MobileNetV4'      },
   { id: 'yolo26_classify', label: 'YOLO26 Classify'  },
   { id: 'yolo26',          label: 'YOLO26 Detect'    },
 ]
