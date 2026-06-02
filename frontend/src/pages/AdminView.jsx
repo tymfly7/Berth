@@ -263,7 +263,11 @@ export default function AdminView() {
           <div className="metrics-row fade-in">
             <MetricCards
               metrics={displayMetrics}
-              streams={{ connected: cameras.filter(c => c.active).length, total: cameras.length }}
+              streams={cameras.filter(c => c.active).map(c => ({
+                id: c.id,
+                name: c.name,
+                fps: allCameraMetrics[c.id]?.fps ?? 0,
+              }))}
             />
           </div>
           {allCameraSlots.length > 0 && (() => {

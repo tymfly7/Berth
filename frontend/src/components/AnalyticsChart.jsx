@@ -92,9 +92,9 @@ function drawChart(canvas, data) {
   ctx.textAlign = 'center'
   labelIdxs.forEach(i => {
     const raw = data[i]?.timestamp || ''
-    const label = raw.includes('T')
-      ? raw.slice(11, 16)   // HH:MM for day view
-      : raw.slice(5, 10)    // MM-DD for week/month view
+    const label = raw.length > 10
+      ? raw.slice(11, 16)   // HH:MM — ISO or space-separated datetime
+      : raw.slice(5, 10)    // MM-DD — date-only (month view)
     const x = pad.left + (i / (data.length - 1)) * plotW
     ctx.fillText(label, x, pad.top + plotH + 16)
   })
@@ -129,14 +129,13 @@ export default function AnalyticsChart({ history }) {
   }, [])
 
   useEffect(() => {
-    if (tab !== 'live') {
-      fetchTrend(tab)
-      const id = setInterval(() => fetchTrend(tab), 60_000)
-      return () => clearInterval(id)
-    }
+    const range = tab === 'live' ? 'today' : tab
+    fetchTrend(range)
+    const id = setInterval(() => fetchTrend(range), tab === 'live' ? 30_000 : 60_000)
+    return () => clearInterval(id)
   }, [tab, fetchTrend])
 
-  const activeData = tab === 'live' ? (history?.slice(-60) ?? []) : (trendData ?? [])
+  const activeData = trendData ?? []
 
   useEffect(() => {
     drawChart(canvasRef.current, activeData)
@@ -176,7 +175,7 @@ export default function AnalyticsChart({ history }) {
         </div>
       ) : isEmpty ? (
         <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '40px 0' }}>
-          {tab === 'live' ? 'Chart will update with live data...' : 'No historical data yet — data accumulates over time.'}
+          {tab === 'live' ? 'No data recorded today yet.' : 'No historical data yet — data accumulates over time.'}
         </div>
       ) : (
         <canvas ref={canvasRef} style={{ width: '100%', height: 180, borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.2)' }} />

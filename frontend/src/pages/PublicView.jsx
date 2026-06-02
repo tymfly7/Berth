@@ -6,6 +6,7 @@ import LotMap from '../components/LotMap'
 import AnalyticsChart from '../components/AnalyticsChart'
 
 const API_BASE = `http://${window.location.hostname}:8000`
+const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
 const CANVAS_W = 1000, CANVAS_H = 600
 
 function roiToSlot(roi) {
@@ -26,7 +27,25 @@ export default function PublicView() {
   const [allCameraSlots, setAllCameraSlots] = useState([])
   const [lotMapIdx, setLotMapIdx] = useState(0)
   const [liveSlotsMap, setLiveSlotsMap] = useState({})
+  const [liveCamMetrics, setLiveCamMetrics] = useState({})
+  const [lastUpdate, setLastUpdate] = useState(null)
   const camWsRefs = useRef({})
+
+  const displayMetrics = (() => {
+    const entries = Object.values(liveCamMetrics)
+    if (!entries.length) return metrics
+    const total     = entries.reduce((s, m) => s + (m.total     || 0), 0)
+    const available = entries.reduce((s, m) => s + (m.available || 0), 0)
+    const occupied  = entries.reduce((s, m) => s + (m.occupied  || 0), 0)
+    return {
+      ...metrics,
+      total,
+      available,
+      occupied,
+      occupancy_percent: total > 0 ? Math.round(occupied / total * 1000) / 10 : 0,
+      slots: entries.flatMap(m => m.slots || []),
+    }
+  })()
 
   useEffect(() => {
     const fetchMetrics = async () => {
@@ -95,13 +114,18 @@ export default function PublicView() {
 
     allCameraSlots.forEach(cam => {
       if (camWsRefs.current[cam.cameraId]) return
-      const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.cameraId}`)
+      const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
+      const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.cameraId}${wsToken}`)
       camWsRefs.current[cam.cameraId] = ws
       ws.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data)
-          if (d.metrics && Array.isArray(d.metrics.slots))
-            setLiveSlotsMap(prev => ({ ...prev, [cam.cameraId]: d.metrics.slots }))
+          if (d.metrics) {
+            setLastUpdate(Date.now())
+            setLiveCamMetrics(prev => ({ ...prev, [cam.cameraId]: d.metrics }))
+            if (Array.isArray(d.metrics.slots))
+              setLiveSlotsMap(prev => ({ ...prev, [cam.cameraId]: d.metrics.slots }))
+          }
         } catch { /* ignore */ }
       }
       ws.onerror = () => { ws.close(); delete camWsRefs.current[cam.cameraId] }
@@ -114,11 +138,26 @@ export default function PublicView() {
   }, [allCameraSlots])
 
   const availableColor =
-    metrics.available === 0
+    displayMetrics.available === 0
       ? 'var(--color-occupied)'
-      : metrics.occupancy_percent > 85
+      : displayMetrics.occupancy_percent > 85
       ? 'var(--color-warning)'
       : 'var(--color-vacant)'
+
+  const isFull = displayMetrics.available === 0
+
+  const trend = (() => {
+    if (history.length < 4) return null
+    const vals = history.map(h => h.occupancy_percent ?? 0)
+    const recent = vals.slice(-3)
+    const prior = vals.slice(-6, -3)
+    if (!prior.length) return null
+    const avg = a => a.reduce((s, v) => s + v, 0) / a.length
+    const delta = avg(recent) - avg(prior)
+    if (delta > 2) return { label: 'Filling up', icon: '↑', color: 'var(--color-occupied)' }
+    if (delta < -2) return { label: 'Emptying', icon: '↓', color: 'var(--color-vacant)' }
+    return { label: 'Steady', icon: '→', color: 'var(--text-muted)' }
+  })()
 
   return (
     <div style={{
@@ -146,6 +185,17 @@ export default function PublicView() {
         <div style={{ fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: '1rem' }}>
           {time.toLocaleTimeString()}
         </div>
+        {(() => {
+          const agoSec = lastUpdate ? Math.max(0, Math.round((time.getTime() - lastUpdate) / 1000)) : null
+          const live = agoSec != null && agoSec < 15
+          const color = live ? 'var(--color-vacant)' : 'var(--text-muted)'
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8, fontSize: '0.8rem', color }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: live ? `0 0 8px ${color}` : 'none' }} />
+              {live ? `Live · updated ${agoSec}s ago` : 'Connecting…'}
+            </div>
+          )
+        })()}
       </div>
 
 
@@ -155,6 +205,16 @@ export default function PublicView() {
         margin: '32px 0',
       }}>
         <div style={{
+          fontSize: 'clamp(1.1rem, 3vw, 1.6rem)',
+          fontWeight: 800,
+          letterSpacing: '1.5px',
+          textTransform: 'uppercase',
+          color: isFull ? 'var(--color-occupied)' : 'var(--color-vacant)',
+          marginBottom: 8,
+        }}>
+          {isFull ? 'Lot Full' : 'Spaces Available'}
+        </div>
+        <div style={{
           fontSize: 'clamp(5rem, 18vw, 10rem)',
           fontWeight: 900,
           lineHeight: 1,
@@ -162,7 +222,7 @@ export default function PublicView() {
           textShadow: `0 0 60px ${availableColor}55`,
           letterSpacing: '-4px',
         }}>
-          {metrics.available}
+          {displayMetrics.available}
         </div>
         <div style={{
           fontSize: '1rem',
@@ -174,18 +234,49 @@ export default function PublicView() {
         }}>
           spots available
         </div>
+        {trend && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            marginTop: 12, fontSize: '0.9rem', fontWeight: 600, color: trend.color,
+          }}>
+            <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>{trend.icon}</span>
+            {trend.label}
+          </div>
+        )}
       </div>
+
+      {/* Per-lot breakdown */}
+      {allCameraSlots.length > 1 && (
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', justifyContent: 'center',
+          gap: '8px 18px', marginBottom: 24, width: '100%', maxWidth: 800,
+        }}>
+          {allCameraSlots.map(cam => {
+            const free = liveCamMetrics[cam.cameraId]?.available
+            return (
+              <span key={cam.cameraId} style={{ fontSize: '0.95rem', color: 'var(--text-secondary)' }}>
+                <span style={{ fontWeight: 600 }}>{cam.name}:</span>{' '}
+                {free == null
+                  ? <span style={{ color: 'var(--text-muted)' }}>—</span>
+                  : free > 0
+                    ? <span style={{ color: 'var(--color-vacant)', fontWeight: 700 }}>{free} free</span>
+                    : <span style={{ color: 'var(--color-occupied)', fontWeight: 700 }}>Full</span>}
+              </span>
+            )
+          })}
+        </div>
+      )}
 
       {/* Lot map */}
       {allCameraSlots.length > 0 && (() => {
         const safeIdx = Math.min(lotMapIdx, allCameraSlots.length - 1)
         const cam = allCameraSlots[safeIdx]
-        const liveForCam = liveSlotsMap[cam.cameraId] || metrics.slots
+        const liveForCam = liveSlotsMap[cam.cameraId] || displayMetrics.slots
         const statusById = Object.fromEntries(liveForCam.map(s => [s.id, s.status]))
         const slots = cam.slots.map(s => ({ ...s, status: statusById[s.id] ?? null }))
         const multi = allCameraSlots.length > 1
         return (
-          <div style={{ width: '100%', maxWidth: 860, marginBottom: 24 }}>
+          <div style={{ width: '100%', maxWidth: 800, marginBottom: 24 }}>
             {multi && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -226,7 +317,7 @@ export default function PublicView() {
         maxWidth: 800,
         marginBottom: 32,
       }}>
-        <MetricCards metrics={metrics} />
+        <MetricCards metrics={displayMetrics} />
       </div>
 
       {/* Trends chart */}

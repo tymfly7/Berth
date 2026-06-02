@@ -1,31 +1,31 @@
 const cardStyle = {
-  padding: '9px 11px',
+  padding: '5px 8px',
   display: 'flex',
   flexDirection: 'column',
-  gap: '4px',
+  gap: '2px',
   position: 'relative',
   overflow: 'hidden',
 }
 
 const iconWrap = {
-  width: 24,
-  height: 24,
+  width: 18,
+  height: 18,
   borderRadius: 'var(--radius-sm)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontSize: '0.8rem',
+  fontSize: '0.65rem',
 }
 
 const bigNum = {
-  fontSize: '1.25rem',
+  fontSize: '1rem',
   fontWeight: 800,
   lineHeight: 1,
   letterSpacing: '-0.5px',
 }
 
 const label = {
-  fontSize: '0.63rem',
+  fontSize: '0.58rem',
   fontWeight: 500,
   color: 'var(--text-secondary)',
   textTransform: 'uppercase',
@@ -79,14 +79,19 @@ const CARDS = [
     icon: '📡',
     iconBg: 'rgba(16,185,129,0.15)',
     color: 'var(--color-vacant)',
-    getValue: (_, s) => s?.total > 0 ? `${s.connected} / ${s.total}` : '–',
+    getValue: (_, s) => Array.isArray(s) ? s.length : '–',
   },
 ]
 
+import { useState } from 'react'
+
 export default function MetricCards({ metrics, streams }) {
+  const [streamIdx, setStreamIdx] = useState(0)
+  const safeIdx = Array.isArray(streams) && streams.length > 0 ? streamIdx % streams.length : 0
+
   return (
     <>
-      {CARDS.map((card, i) => (
+      {CARDS.filter(card => card.key !== 'streams' || Array.isArray(streams)).map((card, i) => (
         <div
           key={card.key}
           className="glass-card fade-in"
@@ -110,17 +115,38 @@ export default function MetricCards({ metrics, streams }) {
               />
             </div>
           )}
-          {card.key === 'streams' && (
-            <div className="progress-bar" style={{ marginTop: 4 }}>
-              <div
-                className="progress-bar-fill"
-                style={{
-                  width: `${streams?.total > 0 ? (streams.connected / streams.total) * 100 : 0}%`,
-                  background: 'var(--color-vacant)',
-                }}
-              />
-            </div>
-          )}
+          {card.key === 'streams' && Array.isArray(streams) && streams.length > 0 && (() => {
+            const s = streams[safeIdx]
+            return (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', marginTop: 6 }}>
+                  <button
+                    onClick={() => setStreamIdx(i => (i - 1 + streams.length) % streams.length)}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem', padding: '0 4px', flexShrink: 0 }}
+                  >‹</button>
+                  <div style={{ flex: 1, textAlign: 'center', minWidth: 0 }}>
+                    <div style={{ fontSize: '0.63rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {s.name}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: s.fps > 0 ? 'var(--color-vacant)' : 'var(--text-muted)' }}>
+                      {s.fps > 0 ? `${s.fps} fps` : '–'}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setStreamIdx(i => (i + 1) % streams.length)}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem', padding: '0 4px', flexShrink: 0 }}
+                  >›</button>
+                </div>
+                {streams.length > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginTop: 4 }}>
+                    {streams.map((_, i) => (
+                      <div key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: i === safeIdx ? 'var(--color-vacant)' : 'rgba(255,255,255,0.18)' }} />
+                    ))}
+                  </div>
+                )}
+              </>
+            )
+          })()}
         </div>
       ))}
       {metrics.anomaly_enabled && (

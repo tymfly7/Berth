@@ -672,8 +672,8 @@ def get_history():
 
 @app.get("/api/trends", dependencies=[Depends(verify_api_key)])
 def get_trends(range: str = "day", camera_id: str = None):
-    if range not in ("day", "week", "month"):
-        raise HTTPException(400, "range must be day, week, or month")
+    if range not in ("today", "day", "week", "month"):
+        raise HTTPException(400, "range must be today, day, week, or month")
     return db.query_trends(range, camera_id)
 
 @app.get("/api/alerts", dependencies=[Depends(verify_api_key)])
