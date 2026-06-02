@@ -473,3 +473,78 @@ On every server start, timm was downloading ImageNet pretrained weights from Hug
 
 ### Why
 Eliminate the startup network hit (>300 ms HF HTTP request per boot), pin the exact architecture used during training, and surface the model size in the identifier.
+
+---
+
+## 2026-06-02 — WebSocket: feed_unavailable notification on camera toggle-off
+
+### Problem
+When a camera feed was toggled OFF in the Camera Registry, the backend removed the processor but the WebSocket handler silently slept in a loop, causing the connection to close without explanation. The frontend's `onclose` handler then rescheduled a reconnect every 3 seconds — infinite loop.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `backend/main.py` | `camera_ws` — sends `{"type": "feed_unavailable"}` and closes cleanly instead of looping |
+| `frontend/src/components/CameraFeedCell.jsx` | Handles `feed_unavailable` message type — stops reconnecting, shows reason in placeholder |
+
+### What changed
+
+**`main.py` — `camera_ws`**
+- At connect: if processor is `None` (camera inactive), sends `{"type": "feed_unavailable", "reason": "Camera is not active"}` and closes.
+- In loop: if processor becomes `None` mid-stream (camera toggled off), sends `{"type": "feed_unavailable", "reason": "Camera feed stopped"}` and breaks.
+- In loop: if no frames received for 600 ticks (~30 s), sends `{"type": "feed_unavailable", "reason": "Video stream unavailable or timed out"}` and breaks.
+- Removed the `asyncio.sleep(0.5); continue` no-op loop for missing processor.
+
+**`CameraFeedCell.jsx`**
+- Added `stopReconnect` ref (avoids causing re-render/reconnect loop from state change in `useCallback` deps).
+- On `feed_unavailable`: sets `stopReconnect.current = true`, sets `unavailable` display state, clears reconnect timer, closes WS. No reconnect scheduled.
+- `ws.onclose`: only schedules reconnect if `!stopReconnect.current`.
+- Placeholder now shows the reason string from the server instead of "Connecting…".
+- Wake-up: `MultiCameraGrid` unmounts/remounts `CameraFeedCell` when `c.active` changes, so toggling back ON mounts a fresh cell with `stopReconnect = false` and reconnects immediately.
+
+---
+
+## 2026-06-02 — Fix: training rate limit raised to 20/hour
+
+**File:** `backend/main.py`
+
+`@limiter.limit` on `POST /api/train/start` raised from `"3/hour"` → `"20/hour"`.
+Previous limit was hit during normal iterative training sessions on localhost.
+
+---
+
+## 2026-06-02 — Fix: mobilenetv4 → mobilenetv4s in frontend
+
+### Problem
+Three frontend components sent `model_name=mobilenetv4` to the backend, but the valid identifier is `mobilenetv4s`. Every training start returned `400 Bad Request`. `ModelStatus.jsx` also checked `available_models?.mobilenetv4` (always `undefined`) so the MobileNetV4 model always appeared unavailable.
+
+### Files changed
+
+| File | Line | Change |
+|---|---|---|
+| `frontend/src/components/TrainingPanel.jsx` | 7 | `'mobilenetv4'` → `'mobilenetv4s'` |
+| `frontend/src/components/ControlPanel.jsx` | 8 | `'mobilenetv4'` → `'mobilenetv4s'` |
+| `frontend/src/components/ModelStatus.jsx` | 86 | id + availability key both → `mobilenetv4s` |
+
+---
+
+## 2026-06-02 — Feature: Multi-camera focus mode
+
+### What was added
+Clicking any live camera cell in the multi-feed grid expands it to fill the full panel width. All other cameras move to a horizontally scrollable thumbnail strip below the main feed. Clicking a thumbnail switches focus to that camera. An "← All Feeds" button in the top-left corner of the focused feed returns to the grid.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `frontend/src/components/MultiCameraGrid.jsx` | Added `focusedId` state; focused layout with main feed + strip; auto-clears focus on camera deactivation |
+| `frontend/src/components/CameraFeedCell.jsx` | Added `onClick` prop (cursor + handler); added `mini` prop (hides metric badges for compact strip thumbnails) |
+
+### Behaviour details
+- **Grid mode**: every cell is clickable (`cursor: pointer`). Click → sets `focusedId`.
+- **Focus mode**: focused camera renders full-width (16:9). `← All Feeds` button overlaid top-left. Other cameras shown at 152 px wide in a scrollable flex row below.
+- **Thumbnail strip**: clicking any thumbnail calls `setFocusedId(cam.id)` to switch the main feed without leaving focus mode.
+- **Auto-clear**: `useEffect` watches `active` cameras list — if the focused camera is deactivated, `focusedId` resets to `null` automatically.
+- **WebSocket connections**: all cameras remain connected in both modes; only the layout changes. No reconnects triggered by focus switching.
+- **Totals row**: always visible in both grid and focus modes.
