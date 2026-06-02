@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { apiFetch } from '../api'
+import { API_BASE } from '../config'
 import '../App.css'
 import Header from '../components/Header'
 import VideoFeed from '../components/VideoFeed'
@@ -10,20 +11,10 @@ import ConfidenceGauge from '../components/ConfidenceGauge'
 import ServerStatus from '../components/ServerStatus'
 import SettingsPanel from '../components/SettingsPanel'
 import LotMap from '../components/LotMap'
+import { roiToSlot } from '../utils/roiUtils'
 
 const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
 const WS_URL = `ws://${window.location.hostname}:8000/ws/video${_API_KEY ? `?token=${_API_KEY}` : ''}`
-const API_BASE = `http://${window.location.hostname}:8000`
-
-const CANVAS_W = 1000, CANVAS_H = 600
-
-function roiToSlot(roi) {
-  const pts = roi.polygon.map(([nx, ny]) => [nx * CANVAS_W, ny * CANVAS_H])
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1])
-  const x = Math.min(...xs), y = Math.min(...ys)
-  const w = Math.max(...xs) - x, h = Math.max(...ys) - y
-  return { id: roi.id, label: roi.label, status: null, bbox: [x, y, w, h], polygon: pts, spotType: roi.spotType || 'normal', owner: roi.owner || '' }
-}
 
 export default function AdminView() {
   const [connected, setConnected] = useState(false)
@@ -45,8 +36,9 @@ export default function AdminView() {
   const unloading = useRef(false)
   const metricsThrottleRef = useRef(0)
   const camMetricsThrottleRef = useRef({})
+  const prevCamIdsRef = useRef('')
 
-  const displayMetrics = (() => {
+  const displayMetrics = useMemo(() => {
     const entries = Object.values(allCameraMetrics)
     if (!entries.length) return metrics
     const total     = entries.reduce((s, m) => s + (m.total     || 0), 0)
@@ -62,7 +54,7 @@ export default function AdminView() {
       fps:               Math.round(entries.reduce((s, m) => s + (m.fps || 0), 0) / entries.length * 10) / 10,
       slots:             entries.flatMap(m => m.slots || []),
     }
-  })()
+  }, [allCameraMetrics, metrics])
 
   const connectWs = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -100,19 +92,19 @@ export default function AdminView() {
     ws.onerror = () => ws.close()
   }, [])
 
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/history`)
       if (res.ok) setHistory(await res.json())
     } catch { /* silent */ }
-  }
+  }, [])
 
-  const fetchModelInfo = async () => {
+  const fetchModelInfo = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/model/info`)
       if (res.ok) setModelInfo(await res.json())
     } catch { /* silent */ }
-  }
+  }, [])
 
   const fetchRoiSlots = useCallback(async (camList) => {
     if (!camList?.length) return
@@ -139,7 +131,13 @@ export default function AdminView() {
       if (res.ok) {
         const cams = await res.json()
         setCameras(cams)
-        fetchRoiSlots(cams)
+        // Only re-fetch ROIs when the camera set actually changed to avoid
+        // N × ROI requests on every 10-second poll.
+        const newKey = cams.map(c => `${c.id}:${c.roi_camera_id || ''}`).sort().join(',')
+        if (newKey !== prevCamIdsRef.current) {
+          prevCamIdsRef.current = newKey
+          fetchRoiSlots(cams)
+        }
       }
     } catch { /* silent */ }
   }, [fetchRoiSlots])
@@ -148,11 +146,11 @@ export default function AdminView() {
     fetchHistory()
     fetchModelInfo()
     fetchCameras()
-    const interval = setInterval(() => {
-      fetchHistory()
-      fetchModelInfo()
-      fetchCameras()
-    }, 10000)
+    // Camera state needs to be responsive (10s); history and model info are cheaper
+    // to poll less often since the backend now caches model info for 60s.
+    const cameraInterval  = setInterval(fetchCameras,   10_000)
+    const historyInterval = setInterval(fetchHistory,   30_000)
+    const modelInterval   = setInterval(fetchModelInfo, 60_000)
 
     const handleUnload = () => {
       unloading.current = true
@@ -163,11 +161,13 @@ export default function AdminView() {
 
     return () => {
       window.removeEventListener('beforeunload', handleUnload)
-      clearInterval(interval)
+      clearInterval(cameraInterval)
+      clearInterval(historyInterval)
+      clearInterval(modelInterval)
       clearTimeout(reconnectTimer.current)
       wsRef.current?.close()
     }
-  }, [fetchCameras])
+  }, [fetchCameras, fetchModelInfo, fetchHistory])
 
   // Only open the legacy /ws/video connection when at least one camera is active.
   useEffect(() => {
@@ -180,52 +180,62 @@ export default function AdminView() {
     }
   }, [cameras, connectWs])
 
+  // Stable signature of the active-camera set so the WS effect only
+  // re-subscribes when membership actually changes — not on every 10s camera
+  // poll, which previously tore down all sockets and wiped metrics (flicker).
+  const activeCamKey = cameras.filter(c => c.active).map(c => c.id).sort().join(',')
+
   // Subscribe to all active cameras' WS for live slot statuses.
   useEffect(() => {
-    const activeCams = cameras.filter(c => c.active)
-    const activeIds = new Set(activeCams.map(c => c.id))
+    const activeIds = new Set(activeCamKey ? activeCamKey.split(',') : [])
 
     Object.entries(camWsRefs.current).forEach(([id, ws]) => {
       if (!activeIds.has(id)) { ws.close(); delete camWsRefs.current[id] }
     })
 
-    if (!activeCams.length) { setLiveSlotsMap({}); setAllCameraMetrics({}); return }
+    // Drop metrics/slots for cameras no longer active, so deactivated lots
+    // stop counting toward the aggregate (metric hallucination).
+    const pruneStale = prev => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
+      return Object.keys(next).length === Object.keys(prev).length ? prev : next
+    }
+    setAllCameraMetrics(pruneStale)
+    setLiveSlotsMap(pruneStale)
 
-    activeCams.forEach((cam, i) => {
-      if (camWsRefs.current[cam.id]) return
+    activeIds.forEach(id => {
+      if (camWsRefs.current[id]) return
       const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-      const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.id}${wsToken}`)
-      camWsRefs.current[cam.id] = ws
+      const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${id}${wsToken}`)
+      camWsRefs.current[id] = ws
       ws.onmessage = (e) => {
         try {
           const d = JSON.parse(e.data)
+          if (d.type === 'feed_unavailable') {
+            // Feed stopped/deactivated — drop its metrics immediately.
+            setAllCameraMetrics(({ [id]: _drop, ...rest }) => rest)
+            setLiveSlotsMap(({ [id]: _drop, ...rest }) => rest)
+            return
+          }
           if (d.metrics) {
             const now = Date.now()
-            const last = camMetricsThrottleRef.current[cam.id] || 0
+            const last = camMetricsThrottleRef.current[id] || 0
             if (now - last >= 500) {
-              camMetricsThrottleRef.current[cam.id] = now
-              setAllCameraMetrics(prev => ({ ...prev, [cam.id]: d.metrics }))
+              camMetricsThrottleRef.current[id] = now
+              setAllCameraMetrics(prev => ({ ...prev, [id]: d.metrics }))
               if (Array.isArray(d.metrics.slots))
-                setLiveSlotsMap(prev => ({ ...prev, [cam.id]: d.metrics.slots }))
+                setLiveSlotsMap(prev => ({ ...prev, [id]: d.metrics.slots }))
             }
           }
         } catch { /* ignore */ }
       }
-      ws.onerror = () => { ws.close(); delete camWsRefs.current[cam.id] }
+      ws.onerror = () => { ws.close(); delete camWsRefs.current[id] }
     })
 
-    const closeAll = () => {
+    return () => {
       Object.values(camWsRefs.current).forEach(ws => ws.close())
       camWsRefs.current = {}
-      setAllCameraMetrics({})
     }
-
-    window.addEventListener('beforeunload', closeAll)
-    return () => {
-      window.removeEventListener('beforeunload', closeAll)
-      closeAll()
-    }
-  }, [cameras])
+  }, [activeCamKey])
 
   useEffect(() => {
     setLotMapIdx(i => Math.min(i, Math.max(0, allCameraSlots.length - 1)))
@@ -273,9 +283,8 @@ export default function AdminView() {
           {allCameraSlots.length > 0 && (() => {
             const safeIdx = Math.min(lotMapIdx, allCameraSlots.length - 1)
             const cam = allCameraSlots[safeIdx]
-            const liveForCam = liveSlotsMap[cam.cameraId] || []
-            const allLive = [...displayMetrics.slots, ...liveForCam]
-            const statusById = Object.fromEntries(allLive.map(s => [s.id, s.status]))
+            const liveForCam = liveSlotsMap[cam.cameraId] || displayMetrics.slots
+            const statusById = Object.fromEntries(liveForCam.map(s => [s.id, s.status]))
             const slots = cam.slots.map(s => ({ ...s, status: statusById[s.id] ?? null }))
             const multi = allCameraSlots.length > 1
             return (
@@ -303,12 +312,12 @@ export default function AdminView() {
                       style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 2, fontSize: '1.1rem', padding: '4px 10px' }}
                       onClick={() => setLotMapIdx(i => (i + 1) % allCameraSlots.length)}>›</button>
                   </>}
-                  <LotMap slots={slots} demo={allLive.length === 0} title={multi ? cam.name : null} />
+                  <LotMap slots={slots} demo={liveForCam.length === 0} title={multi ? cam.name : null} />
                 </div>
               </>
             )
           })()}
-          <AnalyticsChart history={history} />
+          <AnalyticsChart />
 
           <div className="analytics-row">
             <ConfidenceGauge confidence={displayMetrics.avg_confidence} />

@@ -1,7 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { apiFetch } from '../api'
-
-const API_BASE = `http://${window.location.hostname}:8000`
+import { API_BASE } from '../config'
 
 const TABS = [
   { key: 'live',  label: 'Live' },
@@ -47,21 +46,21 @@ function drawChart(canvas, data) {
 
   function drawLine(points, color, fill) {
     if (points.length === 0) return
-    // 1-point case: draw a flat horizontal line across the full plot width
-    const getX = (i) => points.length === 1 ? pad.left + plotW / 2 : pad.left + (i / (points.length - 1)) * plotW
-    ctx.beginPath()
-    points.forEach((p, i) => {
-      const x = points.length === 1 ? pad.left : getX(i)
-      const y = pad.top + plotH - (p / maxVal) * plotH
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)
-    })
-    if (points.length === 1) {
-      // extend to a visible horizontal segment
-      const y = pad.top + plotH - (points[0] / maxVal) * plotH
-      ctx.moveTo(pad.left, y)
-      ctx.lineTo(pad.left + plotW, y)
-    }
+
+    const isSingle = points.length === 1
+    const getX = (i) => pad.left + (i / (points.length - 1)) * plotW
+    const getY = (v) => pad.top + plotH - (v / maxVal) * plotH
+
     if (fill) {
+      ctx.beginPath()
+      if (isSingle) {
+        ctx.moveTo(pad.left, getY(points[0]))
+        ctx.lineTo(pad.left + plotW, getY(points[0]))
+      } else {
+        points.forEach((p, i) => {
+          i === 0 ? ctx.moveTo(getX(i), getY(p)) : ctx.lineTo(getX(i), getY(p))
+        })
+      }
       ctx.lineTo(pad.left + plotW, pad.top + plotH)
       ctx.lineTo(pad.left, pad.top + plotH)
       ctx.closePath()
@@ -71,6 +70,15 @@ function drawChart(canvas, data) {
       ctx.fillStyle = grad
       ctx.fill()
     } else {
+      ctx.beginPath()
+      if (isSingle) {
+        ctx.moveTo(pad.left, getY(points[0]))
+        ctx.lineTo(pad.left + plotW, getY(points[0]))
+      } else {
+        points.forEach((p, i) => {
+          i === 0 ? ctx.moveTo(getX(i), getY(p)) : ctx.lineTo(getX(i), getY(p))
+        })
+      }
       ctx.strokeStyle = color
       ctx.lineWidth = 2
       ctx.stroke()
@@ -95,7 +103,7 @@ function drawChart(canvas, data) {
     const label = raw.length > 10
       ? raw.slice(11, 16)   // HH:MM — ISO or space-separated datetime
       : raw.slice(5, 10)    // MM-DD — date-only (month view)
-    const x = pad.left + (i / (data.length - 1)) * plotW
+    const x = data.length === 1 ? pad.left + plotW / 2 : pad.left + (i / (data.length - 1)) * plotW
     ctx.fillText(label, x, pad.top + plotH + 16)
   })
 
@@ -113,18 +121,26 @@ function drawChart(canvas, data) {
   ctx.fillText('Occupied', pad.left + 106, legendY)
 }
 
-export default function AnalyticsChart({ history }) {
+export default function AnalyticsChart() {
   const canvasRef = useRef(null)
   const [tab, setTab] = useState('live')
   const [trendData, setTrendData] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [fetchError, setFetchError] = useState(false)
 
   const fetchTrend = useCallback(async (range) => {
     setLoading(true)
+    setFetchError(false)
     try {
       const res = await apiFetch(`${API_BASE}/api/trends?range=${range}`)
-      if (res.ok) setTrendData(await res.json())
-    } catch { /* silent */ }
+      if (res.ok) {
+        setTrendData(await res.json())
+      } else {
+        setFetchError(true)
+      }
+    } catch {
+      setFetchError(true)
+    }
     setLoading(false)
   }, [])
 
@@ -138,6 +154,11 @@ export default function AnalyticsChart({ history }) {
   const activeData = trendData ?? []
 
   useEffect(() => {
+    if (activeData.length === 0 && canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d')
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+      return
+    }
     drawChart(canvasRef.current, activeData)
   }, [activeData])
 
@@ -172,6 +193,10 @@ export default function AnalyticsChart({ history }) {
       {loading ? (
         <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '40px 0' }}>
           Loading...
+        </div>
+      ) : fetchError ? (
+        <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '40px 0' }}>
+          Could not load trend data. Retrying…
         </div>
       ) : isEmpty ? (
         <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '40px 0' }}>

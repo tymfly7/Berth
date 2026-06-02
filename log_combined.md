@@ -178,3 +178,97 @@ Replaced hardcoded 18-slot grid with polygon/rectangle ROI editor. `RoiStore` pe
 - **Code quality audit** — extracted `_read_image`/`_frame_to_b64` helpers in `main.py`; `self.model=True` sentinel replaced with `self._loaded` flag in `classifier.py`; `_STATUS_COLOR` moved to class-level constant; `showStatus` helper extracted in ControlPanel; IIFE-in-JSX removed from RoiEditor.
 - **Anomaly toggle moved** — `AnomalyPanel` placed inside Controls subsection (was separate Settings section).
 - **UX: ROI controls on video upload** — lot selector visible for both image and video uploads; ✎ edit icon on each named lot fetches server snapshot as background.
+
+---
+
+## 2026-06-02 — Public View Live Metrics + Berth Rebrand
+
+- **Public View metrics now live** — root cause: with an API key configured, the public camera WebSocket connected with no token and was rejected (`code 4001`), so it never delivered data; the polled `/api/public/metrics` returns the empty *default* processor, not the registered cameras. Fix: public camera WS now appends `?token=${_API_KEY}` (matching Admin), and a `displayMetrics` aggregate sums total/available/occupied/slots across `liveCamMetrics`, falling back to the polled metrics until live data arrives. All hero/card/lot-map reads switched to `displayMetrics`. (`PublicView.jsx`)
+- **`/api/public/metrics` aggregates active cameras** — now sums total/available/occupied (recomputing `occupancy_percent`), averages `avg_confidence`/`fps`, sums `misparked_count`, OR-s `anomaly_enabled`, and concatenates `slots` across all active camera processors (mirrors `/api/history`); falls back to the default processor when none are active. Makes the public polling fallback correct even without the WebSocket. (`backend/main.py`)
+- **Streams/FPS card hidden on Public View** — `CARDS.filter(card => card.key !== 'streams' || Array.isArray(streams))`; the Streams card (with its FPS detail) renders only when a `streams` prop is passed, so Admin keeps it and Public drops it. (`MetricCards.jsx`)
+- **Equal section widths** — lot map `maxWidth` `860 → 800` to match the metric cards and trends chart; all three stacked sections now align into one centered column. (`PublicView.jsx`)
+- **Per-lot breakdown** — centered row shown only when >1 lot: each lot reads `Name: N free` (green) / `Full` (red) / `—` (muted, pre-report), pulled from `liveCamMetrics[id].available`; avoids click-through on the carousel. (`PublicView.jsx`)
+- **Live freshness indicator** — `● Live · updated Xs ago` (green) when WS data arrived within 15s, else `● Connecting…` (muted); `lastUpdate` set on every WS metrics message, recomputed off the existing per-second clock tick. (`PublicView.jsx`)
+- **Status banner** — headline above the big number: `Spaces Available` (green) vs `Lot Full` (red) when `displayMetrics.available === 0`. (`PublicView.jsx`)
+- **Trend direction** — `Filling up ↑` / `Emptying ↓` / `Steady →` from mean `occupancy_percent` of the last 3 history points vs the prior 3, 2-pt threshold to avoid jitter; hidden until ≥4 points. (`PublicView.jsx`)
+- **Rebrand → Berth** — app name "Smart Parking AI" → **Berth**, tagline **"Find your space."** Public View heading wordmark + tagline (`PublicView.jsx`); Admin header title + subtitle (`Header.jsx`); browser tab title + meta description (`index.html`). Removed the 🅿️ header logo and its orphaned `icon` style block (`Header.jsx`).
+
+---
+
+## 2026-06-02 — Code Quality Audit Fixes
+
+### Backend
+
+- **`database.py`** — Added `threading.Lock` (`_alert_cooldown_lock`) around all reads/writes of `_alert_cooldown` to prevent race conditions under concurrent FastAPI threads. Added `UNIQUE(camera_id, timestamp)` constraint to `occupancy_history` and `UNIQUE(camera_id, timestamp, level)` to `alert_events` so that `INSERT OR IGNORE` in `upsert_occupancy_batch`/`upsert_alerts_batch` actually deduplicates edge-sync rows. Fixed `record_occupancy` to call `_conn()` once into a local variable instead of twice.
+
+- **`main.py`** — Extracted `_read_image_from_bytes(filename, content)` helper so both `/api/predict` and the existing `_read_image` UploadFile wrapper share one extension-check + decode path. Removed duplicate `allowed` extension check from `/api/predict` (it was checked again after `_read_image` already does it). Forwarded the `RuntimeError` exception message to the HTTP 400 response and added a `logger.error` call in the YOLO26 detector load path (previously message was silently dropped).
+
+### Frontend — New Files
+
+- **`src/config.js`** *(new)* — Single export `API_BASE = http://${hostname}:8000` shared across all components; eliminates three identical hardcoded copies.
+
+- **`src/utils/roiUtils.js`** *(new)* — Extracted `roiToSlot(roi)` helper that was duplicated identically in `AdminView.jsx` and `PublicView.jsx`.
+
+### Frontend — Component Fixes
+
+- **`AdminView.jsx`** — Added `useMemo` for `displayMetrics` (was an IIFE recomputed on every render). Fixed `beforeunload` event-listener leak: the per-camera WebSocket effect was adding a new `closeAll` listener on every cameras-array update without removing the previous one; moved cleanup into the effect `return`. Fixed slot-status dedup: `allLive` merged `displayMetrics.slots` + `liveSlotsMap` producing potential duplicate IDs; now uses `liveSlotsMap[cam.cameraId]` with a fallback to `displayMetrics.slots`. Removed unused `history` prop from `<AnalyticsChart />` call. Updated to import `API_BASE` from `../config` and `roiToSlot` from `../utils/roiUtils`.
+
+- **`PublicView.jsx`** — Added `useMemo` for `displayMetrics`. Added per-camera WebSocket reconnect on close (3-second delay, guards against reconnect if camera is no longer in the active set). Added `historyInterval` (60 s) so `history` state refreshes during long-running sessions (previously fetched once and never updated). Fixed nav arrow buttons to use `className="btn btn-ghost btn-sm"` matching AdminView (were using verbose inline style objects). Updated imports to use shared `API_BASE` and `roiToSlot`. Removed unused `history` prop from `<AnalyticsChart />` call.
+
+- **`AnalyticsChart.jsx`** — Fixed single-point (`data.length === 1`) rendering bug in `drawLine`: the `fill=false` path previously left a `moveTo`-only canvas path and drew a horizontal segment that was never stroked. Refactored `drawLine` to use a shared `getX`/`getY` helper and handle single-point correctly in both fill and stroke branches. Added `fetchError` state — failed fetches now show "Could not load trend data. Retrying…" instead of silently showing empty-data message. Replaced hardcoded `API_BASE` with import from `../config`. Removed `history` prop from component signature (was accepted but never used; the component fetches its own data).
+
+- **`MetricCards.jsx`** — Moved `import { useState }` to the top of the file (was on line 86 after all constants — a hard lint error). Renamed module-level `label` style object to `labelStyle` to eliminate name collision with `label` properties in the `CARDS` array. Extracted stream carousel JSX into a `<StreamCarousel streams={...} />` sub-component, removing the IIFE-in-JSX antipattern. Renamed stream nav button updater parameter from `i` (shadowed outer `.map()` index `i`) to `prev`. Added `?? 0` guard to `metrics.occupancy_percent` reads in the progress bar to prevent `undefined%` width when metrics arrive without the field.
+
+### Styles
+
+- **`index.css`** — Fixed `.text-muted` class: was mapped to `var(--text-secondary)` (medium brightness) instead of the correctly named `var(--text-muted)` (darkest/most muted). Removed dead `@keyframes indeterminate` definition (no class referenced it).
+
+---
+
+## 2026-06-02 — Page Load / Refresh Performance
+
+### Backend (`backend/main.py`)
+
+- **`model_info` response cache** — Added `_model_info_cache` (60s TTL). `GET /api/model/info` now returns the cached dict on repeated calls, skipping the expensive `occ_dir.glob("*.*")` directory walk and multi-file `_load_model_training_details()` read on every poll. Cache is invalidated when training starts (`/api/train/start`) or dataset images are uploaded (`/api/dataset/upload`), and also when `_active_mode` changes so a model switch is reflected immediately.
+- **VideoProcessor pre-warm at startup** — `lifespan()` now calls `_get_processor()` during server startup so the model is loaded before the first browser request arrives, eliminating the multi-second delay on the very first page load.
+
+### Frontend (`frontend/src/pages/AdminView.jsx`)
+
+- **Split polling intervals** — Previously `fetchHistory`, `fetchModelInfo`, and `fetchCameras` all fired together every 10 s. Now: cameras poll every 10 s (unchanged), history every 30 s, model info every 60 s (matches backend cache TTL). Converted `fetchHistory` and `fetchModelInfo` to `useCallback` so they are stable references in the `useEffect` dependency array.
+- **ROI re-fetch guard** — `fetchCameras` now tracks the last-seen camera-ID set in `prevCamIdsRef`. ROI slots are only re-fetched when the set actually changes (camera added/removed/renamed), not on every 10 s poll, eliminating the N × `/api/roi/{id}` fan-out that fired every tick.
+
+---
+
+## 2026-06-02 — Analyze ROI Inference Speed
+
+### Backend (`backend/main.py`)
+
+- **Batched inference in `analyze_roi`** — Previous code called `clf.predict_batch([crop])` once per ROI inside a loop — N forward passes for N spots. Restructured into three explicit passes: (1) collect all valid crops, (2) ONE `clf.predict_batch(all_crops)` call for all crops together, (3) annotate. For CNN models this reduces inference from N serial forward passes to 1 batched forward pass; for YOLO it already batched but now avoids N Python dispatch calls.
+- **Single overlay blend** — Previous code did `annotated.copy()` + `cv2.addWeighted` inside the per-ROI loop — N full-image copies. Now builds one overlay, draws all fills into it, then blends once. With 20 ROIs on a 1080p frame this saves ~19 full frame copies.
+- **Inline ROI parameter** — Added optional `rois_json: str = Form(default=None)` to `analyze_roi`. If the client sends ROIs directly in the multipart body the endpoint uses them, bypassing the disk read entirely.
+
+### Frontend (`frontend/src/components/ControlPanel.jsx`)
+
+- **Parallel save + analyze** — `handleTest` previously did `await saveRois(rois)` before dispatching `analyze-roi`, adding a full HTTP round-trip to every click. Now fires `saveRois(rois)` without await (background persistence) and appends `rois_json` to the FormData so analysis starts immediately.
+
+---
+
+## 2026-06-02 — Camera WS Failures and 5-Second Page Blank on Refresh
+
+### Root causes identified
+
+- `CameraRegistry.__init__` called `_restore_active()` synchronously at **module import time**. With 3 active cameras each loading a ResNet50/YOLO model, Python import blocked for 5–15 s before uvicorn even started accepting connections. Browser connections during this window get "can't establish connection".
+- Our prior pre-warm (`_get_processor()` in lifespan) ran synchronously on the asyncio event loop, blocking uvicorn from accepting any new connections during additional model load time.
+- Frontend `MultiCameraGrid` treated `feed_unavailable: "Camera is not active"` as permanent, stopping all reconnect retries. Cameras whose processors were still loading on startup would be permanently shown as unavailable until page refresh.
+
+### Backend (`backend/src/cameras/camera_registry.py`)
+
+- **Deferred `_restore_active()`** — Removed the `self._restore_active()` call from `CameraRegistry.__init__`. Module import now only reads `cameras.json` (fast). Model loading is deferred until the server is ready.
+
+### Backend (`backend/main.py`)
+
+- **Background startup warmup** — Replaced the blocking `_get_processor()` call in lifespan with a daemon thread (`startup-warmup`) that runs `camera_registry._restore_active()` followed by `_get_processor()`. Server starts accepting connections in milliseconds; models load in background over the following seconds.
+
+### Frontend (`frontend/src/components/MultiCameraGrid.jsx`)
+
+- **Transient vs permanent `feed_unavailable`** — `"Camera is not active"` is now treated as transient: `stopReconnect.current` stays `false`, `onclose` schedules a 3-second retry, and the cell shows "Connecting…" instead of an error. All other reasons (stream timeout, camera removed) remain permanent and stop retrying. When the background warmup thread finishes and the processor is ready, the retry succeeds and the feed appears automatically.

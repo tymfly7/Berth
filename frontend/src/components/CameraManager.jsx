@@ -440,7 +440,6 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
                         <select style={{ ...compactSelect }} value={editCamForm.type} onChange={setEditCamField('type')}>
                           <option value="usb">USB</option>
                           <option value="rtsp">RTSP</option>
-                          <option value="file">File</option>
                           <option value="youtube">YouTube Live</option>
                         </select>
                       </div>
@@ -481,13 +480,12 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
             <select style={compactSelect} value={form.type} onChange={setField('type')}>
               <option value="usb">USB</option>
               <option value="rtsp">RTSP</option>
-              <option value="file">File</option>
               <option value="youtube">YouTube Live</option>
             </select>
           </div>
           <div style={{ gridColumn: compact ? 'auto' : 'span 2' }}>
             <label style={{ ...s.label, fontSize: '0.7rem' }}>Source *</label>
-            <input style={compactInput} value={form.source} onChange={setField('source')} placeholder="0 · rtsp://… · /path · youtube URL" />
+            <input style={compactInput} value={form.source} onChange={setField('source')} placeholder="0 · rtsp://… · youtube URL" />
           </div>
           <div style={{ gridColumn: compact ? 'auto' : 'span 2' }}>
             <label style={{ ...s.label, fontSize: '0.7rem' }}>ROI Config ID (optional)</label>

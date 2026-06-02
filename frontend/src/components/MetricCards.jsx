@@ -1,31 +1,34 @@
+import { useState } from 'react'
+
 const cardStyle = {
-  padding: '5px 8px',
+  padding: '12px 10px',
   display: 'flex',
   flexDirection: 'column',
-  gap: '2px',
+  gap: '6px',
   position: 'relative',
   overflow: 'hidden',
+  textAlign: 'center',
 }
 
 const iconWrap = {
-  width: 18,
-  height: 18,
+  width: 24,
+  height: 24,
   borderRadius: 'var(--radius-sm)',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontSize: '0.65rem',
+  fontSize: '0.85rem',
 }
 
 const bigNum = {
-  fontSize: '1rem',
+  fontSize: '1.9rem',
   fontWeight: 800,
   lineHeight: 1,
   letterSpacing: '-0.5px',
 }
 
-const label = {
-  fontSize: '0.58rem',
+const labelStyle = {
+  fontSize: '0.72rem',
   fontWeight: 500,
   color: 'var(--text-secondary)',
   textTransform: 'uppercase',
@@ -38,6 +41,42 @@ function occupancyColor(pct) {
   const sat = 65 + p * 35          // 65% → 100%
   const lit = 44 - p * 10          // 44% → 34% (darker = more intense)
   return `hsl(${hue}, ${sat}%, ${lit}%)`
+}
+
+function StreamCarousel({ streams }) {
+  const [streamIdx, setStreamIdx] = useState(0)
+  const safeIdx = streams.length > 0 ? streamIdx % streams.length : 0
+  const s = streams[safeIdx]
+
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', marginTop: 6 }}>
+        <button
+          onClick={() => setStreamIdx(prev => (prev - 1 + streams.length) % streams.length)}
+          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem', padding: '0 4px', flexShrink: 0 }}
+        >‹</button>
+        <div style={{ flex: 1, textAlign: 'center', minWidth: 0 }}>
+          <div style={{ fontSize: '0.63rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {s.name}
+          </div>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: s.fps > 0 ? 'var(--color-vacant)' : 'var(--text-muted)' }}>
+            {s.fps > 0 ? `${s.fps} fps` : '–'}
+          </div>
+        </div>
+        <button
+          onClick={() => setStreamIdx(prev => (prev + 1) % streams.length)}
+          style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem', padding: '0 4px', flexShrink: 0 }}
+        >›</button>
+      </div>
+      {streams.length > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginTop: 4 }}>
+          {streams.map((_, i) => (
+            <div key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: i === safeIdx ? 'var(--color-vacant)' : 'rgba(255,255,255,0.18)' }} />
+          ))}
+        </div>
+      )}
+    </>
+  )
 }
 
 const CARDS = [
@@ -83,12 +122,7 @@ const CARDS = [
   },
 ]
 
-import { useState } from 'react'
-
 export default function MetricCards({ metrics, streams }) {
-  const [streamIdx, setStreamIdx] = useState(0)
-  const safeIdx = Array.isArray(streams) && streams.length > 0 ? streamIdx % streams.length : 0
-
   return (
     <>
       {CARDS.filter(card => card.key !== 'streams' || Array.isArray(streams)).map((card, i) => (
@@ -97,8 +131,8 @@ export default function MetricCards({ metrics, streams }) {
           className="glass-card fade-in"
           style={{ ...cardStyle, animationDelay: `${i * 80}ms` }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={label}>{card.label}</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <span style={labelStyle}>{card.label}</span>
             <div style={{ ...iconWrap, background: card.iconBg }}>{card.icon}</div>
           </div>
           <div className="count-animate" style={{ ...bigNum, color: card.color }}>
@@ -109,50 +143,21 @@ export default function MetricCards({ metrics, streams }) {
               <div
                 className="progress-bar-fill"
                 style={{
-                  width: `${metrics.occupancy_percent}%`,
-                  background: occupancyColor(metrics.occupancy_percent),
+                  width: `${metrics.occupancy_percent ?? 0}%`,
+                  background: occupancyColor(metrics.occupancy_percent ?? 0),
                 }}
               />
             </div>
           )}
-          {card.key === 'streams' && Array.isArray(streams) && streams.length > 0 && (() => {
-            const s = streams[safeIdx]
-            return (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', marginTop: 6 }}>
-                  <button
-                    onClick={() => setStreamIdx(i => (i - 1 + streams.length) % streams.length)}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem', padding: '0 4px', flexShrink: 0 }}
-                  >‹</button>
-                  <div style={{ flex: 1, textAlign: 'center', minWidth: 0 }}>
-                    <div style={{ fontSize: '0.63rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {s.name}
-                    </div>
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: s.fps > 0 ? 'var(--color-vacant)' : 'var(--text-muted)' }}>
-                      {s.fps > 0 ? `${s.fps} fps` : '–'}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setStreamIdx(i => (i + 1) % streams.length)}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem', padding: '0 4px', flexShrink: 0 }}
-                  >›</button>
-                </div>
-                {streams.length > 1 && (
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginTop: 4 }}>
-                    {streams.map((_, i) => (
-                      <div key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: i === safeIdx ? 'var(--color-vacant)' : 'rgba(255,255,255,0.18)' }} />
-                    ))}
-                  </div>
-                )}
-              </>
-            )
-          })()}
+          {card.key === 'streams' && Array.isArray(streams) && streams.length > 0 && (
+            <StreamCarousel streams={streams} />
+          )}
         </div>
       ))}
       {metrics.anomaly_enabled && (
         <div className="glass-card fade-in" style={cardStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={label}>Misparked</span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <span style={labelStyle}>Misparked</span>
             <div style={{ ...iconWrap, background: 'rgba(251,146,60,0.15)' }}>⚠️</div>
           </div>
           <div className="count-animate" style={{ ...bigNum, color: '#f97316' }}>

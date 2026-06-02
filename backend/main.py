@@ -69,6 +69,17 @@ async def lifespan(app: FastAPI):
         )
     from src.sync.sync_worker import SyncWorker
     SyncWorker().start()
+    # Restore active cameras and pre-warm the default processor in a background
+    # thread so the server starts accepting connections immediately — model loading
+    # is slow (5–15 s) and must not block the asyncio event loop.
+    def _startup_warmup():
+        camera_registry._restore_active()
+        try:
+            _get_processor()
+            logger.info("VideoProcessor pre-warmed")
+        except Exception as e:
+            logger.warning(f"Processor pre-warm skipped: {e}")
+    threading.Thread(target=_startup_warmup, daemon=True, name="startup-warmup").start()
     yield
     camera_registry.shutdown()
 
@@ -80,6 +91,13 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "We looked everywhere and we couldn't find that!"},
+    )
 _allowed_origins = [o for o in [
     "http://localhost:5173",
     "http://localhost:3000",
@@ -126,16 +144,6 @@ def _validate_camera_source(source: str, type_: str) -> None:
         p = urlparse(source)
         if p.hostname not in _YOUTUBE_HOSTS:
             raise HTTPException(400, "YouTube source must be a youtube.com or youtu.be URL")
-    elif type_ == "file":
-        try:
-            resolved = Path(source).resolve()
-            upload_resolved = config.UPLOAD_DIR.resolve()
-            if not str(resolved).startswith(str(upload_resolved)):
-                raise HTTPException(400, "File source must be within the uploads directory")
-        except HTTPException:
-            raise
-        except Exception:
-            raise HTTPException(400, "Invalid file path")
 
 # ── Active-operation tracking ─────────────────────────────
 _active_operations: dict = {}
@@ -171,6 +179,10 @@ _processor = None
 _active_mode = config.ACTIVE_MODEL
 _processor_lock = threading.Lock()
 _anomaly_enabled = False
+
+# ── model_info cache (invalidated on training start / dataset upload) ─
+_model_info_cache: dict = {"data": None, "ts": 0.0}
+_MODEL_INFO_TTL = 60.0  # seconds
 
 # ── Classifier cache — one loaded instance per model name ─
 _clf_cache: dict = {}
@@ -230,15 +242,19 @@ def _resolve_model_name():
     return None
 
 
-async def _read_image(file: UploadFile) -> np.ndarray:
+def _read_image_from_bytes(filename: str, content: bytes) -> np.ndarray:
     allowed = (".jpg", ".jpeg", ".png", ".bmp")
-    if not file.filename.lower().endswith(allowed):
+    if not filename.lower().endswith(allowed):
         raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
-    content = await file.read()
     frame = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         raise HTTPException(400, "Could not decode image")
     return frame
+
+
+async def _read_image(file: UploadFile) -> np.ndarray:
+    content = await file.read()
+    return _read_image_from_bytes(file.filename, content)
 
 
 def _frame_to_b64(frame: np.ndarray) -> str:
@@ -283,16 +299,14 @@ async def predict(request: Request, file: UploadFile = File(...)):
     Upload a parking space image and classify as occupied/vacant.
     Works best with cropped images of individual parking spots.
     """
-    allowed = (".jpg", ".jpeg", ".png", ".bmp")
-    if not file.filename.lower().endswith(allowed):
-        raise HTTPException(400, "Unsupported image format. Use JPG or PNG.")
-
     content = await file.read()
     if len(content) > 20 * 1024 * 1024:
         raise HTTPException(413, "Image exceeds 20 MB limit")
-    pil_image = Image.open(io.BytesIO(content)).convert("RGB")
 
-    # Single spot classification using the trained model
+    # Validate extension and decode via shared helper
+    frame = await _read_image_from_bytes(file.filename, content)
+    pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
     model_name = _resolve_model_name()
     if model_name is None:
         raise HTTPException(400, "No trained model available. Train a model first.")
@@ -416,16 +430,33 @@ async def analyze_lot(request: Request, file: UploadFile = File(...),
 
 @app.post("/api/analyze-roi", dependencies=[Depends(verify_api_key)])
 @limiter.limit(config.UPLOAD_RATE_LIMIT)
-async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id: str = "default", model_name: str = None):
+async def analyze_roi(
+    request: Request,
+    file: UploadFile = File(...),
+    camera_id: str = "default",
+    model_name: str = None,
+    rois_json: Optional[str] = Form(default=None),
+):
     """
     Analyze a parking lot image using saved ROI polygons for the given camera.
     Each ROI polygon is classified as occupied/vacant using the active model.
+
+    Pass rois_json (JSON-encoded list) to bypass the disk read and eliminate
+    the sequential save→analyze round-trip from the client.
     """
     op_id = _register_op("roi_analysis", "Analyzing with ROIs…")
     try:
         frame = await _read_image(file)
 
-        rois = RoiStore.get_rois(camera_id)
+        # Prefer inline ROIs from the request body (eliminates save→analyze round-trip)
+        rois = None
+        if rois_json:
+            try:
+                rois = json.loads(rois_json) or None
+            except (json.JSONDecodeError, ValueError):
+                pass
+        if not rois:
+            rois = RoiStore.get_rois(camera_id)
         if not rois:
             raise HTTPException(400, "No ROIs saved for this camera. Draw and save ROIs first.")
 
@@ -440,46 +471,59 @@ async def analyze_roi(request: Request, file: UploadFile = File(...), camera_id:
 
         h, w = frame.shape[:2]
         annotated = frame.copy()
-        slots = []
         available = 0
         occupied = 0
         total_conf = 0.0
 
+        # Pass 1 — filter valid ROIs and collect crops (no inference yet)
+        valid = []
         for roi in rois:
             polygon = roi.get("polygon", [])
             if len(polygon) < 3:
                 continue
-
             xs = [max(0, min(w - 1, int(p[0] * w))) for p in polygon]
             ys = [max(0, min(h - 1, int(p[1] * h))) for p in polygon]
             x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
             if x2 <= x1 or y2 <= y1:
                 continue
+            valid.append({"roi": roi, "crop": frame[y1:y2, x1:x2],
+                          "xs": xs, "ys": ys, "polygon": polygon})
 
-            crop = frame[y1:y2, x1:x2]
-            pred = clf.predict_batch([crop])[0]
+        # Single batched forward pass — all N crops classified in one model call
+        predictions = clf.predict_batch([v["crop"] for v in valid]) if valid else []
+
+        # Pass 2 — draw all semi-transparent fills in one blend (avoids N full-image copies)
+        overlay = annotated.copy()
+        for entry, pred in zip(valid, predictions):
+            pts = np.array([[int(p[0] * w), int(p[1] * h)]
+                            for p in entry["polygon"]], np.int32)
+            overlay_color = (0, 255, 0) if pred["status"] == "vacant" else (0, 0, 255)
+            cv2.fillPoly(overlay, [pts], overlay_color)
+        cv2.addWeighted(overlay, 0.3, annotated, 0.7, 0, annotated)
+
+        # Pass 3 — outlines, labels, slot data
+        slots = []
+        for entry, pred in zip(valid, predictions):
+            roi = entry["roi"]
+            xs, ys = entry["xs"], entry["ys"]
             status = pred["status"]
             conf = pred["confidence"]
             total_conf += conf
 
-            color = (0, 200, 0) if status == "vacant" else (0, 0, 220)
-            overlay_color = (0, 255, 0) if status == "vacant" else (0, 0, 255)
             if status == "vacant":
                 available += 1
+                color = (0, 200, 0)
             else:
                 occupied += 1
+                color = (0, 0, 220)
 
-            pts = np.array([[int(p[0] * w), int(p[1] * h)] for p in polygon], np.int32)
-            overlay = annotated.copy()
-            cv2.fillPoly(overlay, [pts], overlay_color)
-            cv2.addWeighted(overlay, 0.3, annotated, 0.7, 0, annotated)
+            pts = np.array([[int(p[0] * w), int(p[1] * h)]
+                            for p in entry["polygon"]], np.int32)
             cv2.polylines(annotated, [pts], True, color, 2)
-
             cx, cy = sum(xs) // len(xs), sum(ys) // len(ys)
-            label_text = f"{roi.get('label', 'Slot')} {status[:3].upper()} {conf:.0%}"
-            cv2.putText(annotated, label_text, (cx - 20, cy),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
-
+            cv2.putText(annotated,
+                        f"{roi.get('label', 'Slot')} {status[:3].upper()} {conf:.0%}",
+                        (cx - 20, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
             slots.append({
                 "id": roi.get("id"),
                 "label": roi.get("label", "Slot"),
@@ -546,7 +590,8 @@ async def analyze_misparked(
                 "Train a YOLO26 detector first via the Training panel.",
             )
         except RuntimeError as exc:
-            raise HTTPException(400, "YOLO26 detector failed to load")
+            logger.error(f"YOLO26 detector failed to load: {exc}")
+            raise HTTPException(400, f"YOLO26 detector failed to load: {exc}")
 
         h, w = frame.shape[:2]
         detections = detector.predict_frame(frame)
@@ -627,7 +672,33 @@ async def analyze_misparked(
 # ── Public metrics (no auth) ─────────────────────────────
 @app.get("/api/public/metrics")
 def get_public_metrics():
-    return _get_processor().get_metrics()
+    # Aggregate across active cameras (mirrors /api/history); fall back to the
+    # default processor when no cameras are active.
+    active_procs = [
+        camera_registry.get_processor(c["id"])
+        for c in camera_registry.get_all()
+        if c.get("active")
+    ]
+    active_procs = [p for p in active_procs if p is not None]
+    if not active_procs:
+        return _get_processor().get_metrics()
+
+    metrics = [p.get_metrics() for p in active_procs]
+    total     = sum(m.get("total", 0)     for m in metrics)
+    available = sum(m.get("available", 0) for m in metrics)
+    occupied  = sum(m.get("occupied", 0)  for m in metrics)
+    return {
+        **metrics[0],
+        "total": total,
+        "available": available,
+        "occupied": occupied,
+        "occupancy_percent": round(100.0 * occupied / total, 1) if total else 0.0,
+        "avg_confidence": round(sum(m.get("avg_confidence", 0.0) for m in metrics) / len(metrics), 4),
+        "fps": round(sum(m.get("fps", 0.0) for m in metrics) / len(metrics), 1),
+        "misparked_count": sum(m.get("misparked_count", 0) for m in metrics),
+        "anomaly_enabled": any(m.get("anomaly_enabled") for m in metrics),
+        "slots": [s for m in metrics for s in m.get("slots", [])],
+    }
 
 # ── Metrics / Heatmap / History ──────────────────────────
 @app.get("/api/metrics", dependencies=[Depends(verify_api_key)])
@@ -1014,6 +1085,12 @@ def _load_model_training_details() -> dict:
 
 @app.get("/api/model/info", dependencies=[Depends(verify_api_key)])
 def model_info():
+    now = time.monotonic()
+    # Return cached result if still fresh; active_model can change so check it too.
+    cached = _model_info_cache["data"]
+    if cached and (now - _model_info_cache["ts"]) < _MODEL_INFO_TTL and cached.get("active_model") == _active_mode:
+        return cached
+
     data_dir = config.DATA_DIR
     occ_dir = data_dir / "occupied"
     vac_dir = data_dir / "vacant"
@@ -1028,7 +1105,7 @@ def model_info():
         with open(comparison_path) as f:
             comparison = json.load(f)
 
-    return {
+    result = {
         "active_model": _active_mode,
         "available_models": {
             "cnn_scratch":     config.CNN_SCRATCH_PATH.exists(),
@@ -1044,6 +1121,9 @@ def model_info():
         "comparison": comparison,
         "model_details": _load_model_training_details(),
     }
+    _model_info_cache["data"] = result
+    _model_info_cache["ts"] = now
+    return result
 
 # ── Training ─────────────────────────────────────────────
 @app.post("/api/train/start", dependencies=[Depends(verify_api_key)])
@@ -1067,6 +1147,7 @@ def start_training(request: Request, model_name: str = "cnn_scratch",
             raise HTTPException(400, "Dataset not found. Prepare it first.")
     if model_name == "yolo26_detect" and not config.YOLO_GOPRO_DIR.exists():
         raise HTTPException(400, "Gopro annotated dataset not found. Expected: backend/data/yolo_data/parking_rois_gopro/")
+    _model_info_cache["data"] = None  # invalidate so next poll reflects new state
     result = mgr.start_training(model_name, compare_all=compare_all)
     op_id = _register_op("training", f"Training {model_name}…")
 
@@ -1135,6 +1216,7 @@ async def upload_dataset_images(
                 f.write(content)
             saved += 1
 
+        _model_info_cache["data"] = None  # dataset count changed
         return {"saved": saved, "skipped": skipped, "label": label}
     finally:
         _finish_op(op_id)
