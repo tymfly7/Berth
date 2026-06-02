@@ -89,18 +89,25 @@ _TREND_CONFIG = {
     "month": (timedelta(days=30),  "strftime('%Y-%m-%d', timestamp)"),
 }
 
+_TODAY_GROUP = "datetime(strftime('%s', timestamp) - (strftime('%s', timestamp) % 300), 'unixepoch')"
+
 
 def query_trends(range_: str, camera_id: str = None):
     """
     Returns aggregated occupancy data for the given range.
-      range_: 'day' (hourly, last 24h) | 'week' | 'month' (daily, last 7/30 days)
+      range_: 'today' (midnight→now, 5-min) | 'day' (last 24h, 5-min) | 'week' | 'month'
     Each row: { timestamp, available, occupied, occupancy_percent }
     """
-    if range_ not in _TREND_CONFIG:
-        raise ValueError(f"Invalid range '{range_}': must be day, week, or month")
+    if range_ not in (*_TREND_CONFIG, "today"):
+        raise ValueError(f"Invalid range '{range_}': must be today, day, week, or month")
 
-    delta, group_expr = _TREND_CONFIG[range_]
-    since = (datetime.now(timezone.utc) - delta).isoformat()
+    if range_ == "today":
+        now = datetime.now(timezone.utc)
+        since = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        group_expr = _TODAY_GROUP
+    else:
+        delta, group_expr = _TREND_CONFIG[range_]
+        since = (datetime.now(timezone.utc) - delta).isoformat()
 
     cam_filter = "AND camera_id = ?" if camera_id else ""
     params = [since] + ([camera_id] if camera_id else [])

@@ -260,6 +260,10 @@ body::before {
   animation: shimmer 1.5s infinite;
 }
 
+/* ── Stream chips row ─────────────────────────────────── */
+.stream-chips { scrollbar-width: none; -ms-overflow-style: none; }
+.stream-chips::-webkit-scrollbar { display: none; }
+
 /* ── Progress bar ──────────────────────────────────────── */
 .progress-bar {
   height: 6px;
