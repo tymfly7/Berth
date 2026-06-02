@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { apiFetch } from '../api'
 import RoiEditor from './RoiEditor'
 
@@ -121,7 +122,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   // Named ROI lots — separate from live camera ROIs
   const [lots, setLots]               = useState(loadLots)
   const [newLotName, setNewLotName]   = useState('')
-  const [selectedLotId, setSelectedLotId] = useState(() => loadLots()[0]?.id || DEFAULT_LOT.id)
+  const [selectedLotId, setSelectedLotId] = useState(() => loadLots()[0]?.id || DEFAULT_LOTS[0]?.id || null)
 
   // Keep live model in sync with server's active model
   useEffect(() => {
@@ -163,8 +164,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   const saveRois = async (roiList) => {
     if (!selectedLotId) return
     try {
-      const data = await saveRoisToLot(selectedLotId, roiList)
-      showRoiMsg(`Saved ${data.saved} ROIs`)
+      await saveRoisToLot(selectedLotId, roiList)
     } catch (e) {
       showRoiMsg(`Error: ${e.message}`)
     }
@@ -480,13 +480,14 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => {
-                  setModalLotName(lots.find(l => l.id === selectedLotId)?.name || '')
+                  setRois([])
+                  setModalLotName('')
                   setRoiEditorBg(uploadedImage)
                   setRoiModalOpen(true)
                 }}
                 title="Draw or edit ROIs — you can rename or save as a new set"
               >
-                ✏️ Draw ROIs
+                ✏️ ROI
               </button>
               {rois.length > 0 && (
                 <span className="badge badge-info">
@@ -559,10 +560,10 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
         </div>
       )}
 
-      {/* ROI Editor Modal — fullscreen */}
-      {roiModalOpen && (
+      {/* ROI Editor Modal — fullscreen portal */}
+      {roiModalOpen && createPortal(
         <div style={{
-          position: 'fixed', inset: 0, zIndex: 1000,
+          position: 'fixed', inset: 0, zIndex: 9999,
           background: 'rgba(0,0,0,0.96)',
           display: 'flex', flexDirection: 'column',
         }}>
@@ -571,8 +572,10 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
             padding: '10px 14px', borderBottom: '1px solid var(--border-color)',
             background: 'var(--bg-card)', flexShrink: 0, gap: 8,
           }}>
+            <style>{`.roi-name-input::placeholder{color:rgba(200,210,225,0.6)}`}</style>
             <input
               type="text"
+              className="roi-name-input"
               value={modalLotName}
               onChange={e => setModalLotName(e.target.value)}
               placeholder="ROI set name…"
@@ -601,8 +604,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 }
                 setSelectedLotId(targetId)
                 try {
-                  const data = await saveRoisToLot(targetId, rois)
-                  showRoiMsg(`Saved ${data.saved} ROIs to "${name}"`)
+                  await saveRoisToLot(targetId, rois)
                 } catch (e) {
                   showRoiMsg(`Error: ${e.message}`)
                 }
@@ -627,8 +629,19 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
             >✕</button>
           </div>
 
-          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-            <RoiEditor backgroundImage={roiEditorBg} rois={rois} onRoisChange={setRois} idPrefix="test" overlay />
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#000' }}>
+            <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%' }}>
+              {roiEditorBg && (
+                <img
+                  src={roiEditorBg}
+                  alt="ROI background"
+                  style={{ display: 'block', maxWidth: '100%', maxHeight: 'calc(100vh - 60px)', objectFit: 'contain', userSelect: 'none', pointerEvents: 'none' }}
+                />
+              )}
+              <div style={{ position: 'absolute', inset: 0 }}>
+                <RoiEditor rois={rois} onRoisChange={setRois} idPrefix="test" overlay />
+              </div>
+            </div>
           </div>
 
           {roiMsg && (
@@ -640,7 +653,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               {roiMsg}
             </div>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

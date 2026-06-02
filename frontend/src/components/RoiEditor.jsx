@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-const COLORS = ["#2ecc71", "#e74c3c", "#3498db", "#f39c12", "#9b59b6"]
+const ROI_COLOR = '#10b981'
 const SPOT_TYPE_COLORS = { normal: null, reserved: '#e6a817', handicap: '#1a7fc1' }
 const HIT_PX = 10
 
@@ -90,7 +90,7 @@ export default function RoiEditor({
       const isDrawing = inProgress.length > 0
       const spotType = roi.spotType || 'normal'
       const typeColor = SPOT_TYPE_COLORS[spotType]
-      const baseColor = typeColor || (roi.color || COLORS[idx % COLORS.length])
+      const baseColor = typeColor || ROI_COLOR
       const color = isDrawing && !isSelected ? '#2ecc71' : baseColor
       const fillColor = isDrawing && !isSelected ? 'rgba(46,204,113,0.25)' : hexToRgba(color, 0.3)
       const poly = (isSelected && editPolygon) ? editPolygon : roi.polygon
@@ -303,7 +303,7 @@ export default function RoiEditor({
       id: `${idPrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       label: `Slot ${rois.length + 1}`,
       polygon,
-      color: COLORS[rois.length % COLORS.length],
+      color: ROI_COLOR,
       spotType: 'normal',
       owner: '',
     }])
@@ -314,7 +314,7 @@ export default function RoiEditor({
     const prop = proposals.find(p => p.id === propId)
     if (!prop) return
     const { proposed: _omit, ...base } = prop
-    commitChange([...rois, { ...base, color: COLORS[rois.length % COLORS.length] }])
+    commitChange([...rois, { ...base, color: ROI_COLOR }])
     onProposalsChange(proposals.filter(p => p.id !== propId))
     setSelectedProposalId(null)
   }, [proposals, rois, commitChange, onProposalsChange])
@@ -323,7 +323,7 @@ export default function RoiEditor({
     if (!onProposalsChange || proposals.length === 0) return
     const newRois = proposals.map((prop, i) => {
       const { proposed: _omit, ...base } = prop
-      return { ...base, color: COLORS[(rois.length + i) % COLORS.length] }
+      return { ...base, color: ROI_COLOR }
     })
     commitChange([...rois, ...newRois])
     onProposalsChange([])
@@ -352,7 +352,7 @@ export default function RoiEditor({
       id: `${idPrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       label: `${roi.label} copy`,
       polygon: roi.polygon.map(([x, y]) => [Math.min(1, x + OFFSET), Math.min(1, y + OFFSET)]),
-      color: COLORS[rois.length % COLORS.length],
+      color: ROI_COLOR,
     }])
   }, [selectedId, rois, commitChange, idPrefix])
 
