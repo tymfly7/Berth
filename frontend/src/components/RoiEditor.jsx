@@ -235,7 +235,7 @@ export default function RoiEditor({
   }, [overlay])
 
   useEffect(() => {
-    if (overlay || !backgroundImage) {
+    if (!backgroundImage) {
       bgImgRef.current = null
       syncSize()
       redraw()
@@ -249,7 +249,8 @@ export default function RoiEditor({
   useEffect(() => {
     const handleResize = () => { syncSize(); redraw() }
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+    const raf = requestAnimationFrame(() => { syncSize(); redraw() })
+    return () => { window.removeEventListener('resize', handleResize); cancelAnimationFrame(raf) }
   }, [syncSize, redraw])
 
   const commitChange = useCallback((newRois) => {

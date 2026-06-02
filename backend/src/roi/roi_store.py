@@ -7,7 +7,7 @@ from typing import Optional
 import cv2
 import numpy as np
 
-logger = logging.getLogger("smartpark.roi")
+logger = logging.getLogger("berth.roi")
 
 _ROI_DIR = Path(__file__).resolve().parent.parent.parent.parent / "roi_configs"
 

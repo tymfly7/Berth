@@ -35,7 +35,7 @@ from pathlib import Path
 
 import config
 
-logger = logging.getLogger("smartpark.yolo_converter")
+logger = logging.getLogger("berth.yolo_converter")
 
 CLASS_VACANT   = 0
 CLASS_OCCUPIED = 1

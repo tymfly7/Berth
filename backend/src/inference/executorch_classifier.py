@@ -22,7 +22,7 @@ from PIL import Image
 
 import config
 
-logger = logging.getLogger("smartpark.edge_classifier")
+logger = logging.getLogger("berth.edge_classifier")
 
 # Detect which runtime is available once at import time.
 try:

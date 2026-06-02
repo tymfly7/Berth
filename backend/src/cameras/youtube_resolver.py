@@ -17,7 +17,7 @@ import logging
 
 import config
 
-logger = logging.getLogger("smartpark.youtube")
+logger = logging.getLogger("berth.youtube")
 
 # In-memory cache: {watch_url: (stream_url, expires_at)}
 _cache: dict = {}

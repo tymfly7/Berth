@@ -366,7 +366,7 @@ export default function DocsPage() {
         </p>
         <p style={s.body}>
           Paste a YouTube live URL as the source. The backend resolves it to an
-          HLS stream automatically (cached for <Code>SMARTPARK_YT_CACHE_TTL</Code>{' '}
+          HLS stream automatically (cached for <Code>BERTH_YT_CACHE_TTL</Code>{' '}
           seconds). No additional setup required.
         </p>
 
@@ -391,7 +391,7 @@ export default function DocsPage() {
           marginBottom: 0,
         }}>
           {'# camera id "lot-a-1f3c2d" →'}<br />
-          {'SMARTPARK_CAM_SOURCE_LOT_A_1F3C2D=rtsp://user:pass@192.168.1.10:554/Streaming/Channels/102'}
+          {'BERTH_CAM_SOURCE_LOT_A_1F3C2D=rtsp://user:pass@192.168.1.10:554/Streaming/Channels/102'}
         </div>
       </SectionCard>
 

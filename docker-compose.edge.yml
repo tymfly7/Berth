@@ -1,22 +1,22 @@
 services:
-  smartpark-edge:
-    image: smartpark-edge:latest
+  berth-edge:
+    image: berth-edge:latest
     build:
       context: .
       dockerfile: Dockerfile.edge
       platforms:
         - linux/arm64
     environment:
-      - SMARTPARK_DEPLOYMENT=edge
-      - SMARTPARK_MODEL=mobilenetv4        # MobileNetV4 recommended for RPi5 CPU
-      - SMARTPARK_EDGE_HUB_URL=http://HUB_IP:8000   # replace HUB_IP
-      - SMARTPARK_API_KEY=${SMARTPARK_API_KEY:-}
-      - SMARTPARK_PORT=8000
+      - BERTH_DEPLOYMENT=edge
+      - BERTH_MODEL=mobilenetv4        # MobileNetV4 recommended for RPi5 CPU
+      - BERTH_EDGE_HUB_URL=http://HUB_IP:8000   # replace HUB_IP
+      - BERTH_API_KEY=${BERTH_API_KEY:-}
+      - BERTH_PORT=8000
     volumes:
       # Persist exported edge models and the local SQLite buffer.
       # Copy edge_mobilenetv4.pte (or .onnx) from hub into ./models/ before first run.
       - ./backend/models:/app/models
-      - ./backend/smartpark.db:/app/smartpark.db
+      - ./backend/berth.db:/app/berth.db
     devices:
       # USB camera passthrough — adjust index if using /dev/video1, /dev/video2, etc.
       - /dev/video0:/dev/video0

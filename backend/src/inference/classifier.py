@@ -15,7 +15,7 @@ from torchvision import transforms
 import config
 
 
-logger = logging.getLogger("smartpark.classifier")
+logger = logging.getLogger("berth.classifier")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 _EDGE_CNN_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4s"}

@@ -12,7 +12,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
-logger = logging.getLogger("smartpark.utils")
+logger = logging.getLogger("berth.utils")
 
 
 def get_device():

@@ -24,7 +24,7 @@ from src.data_prep.preprocessor import prepare_dataset
 from src.eval.evaluator import evaluate_model
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-logger = logging.getLogger("smartpark.train_manager")
+logger = logging.getLogger("berth.train_manager")
 
 # Singleton state — shared across API requests
 _state = {

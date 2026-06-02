@@ -1,12 +1,12 @@
 """
-Smart Parking AI — FastAPI Backend
+Berth — FastAPI Backend
 ====================================
 REST + WebSocket endpoints for real-time parking detection.
 
 Features:
   - /predict endpoint: upload image, get slot-wise availability
   - WebSocket video streaming at ~20 FPS
-  - API key auth (optional via SMARTPARK_API_KEY)
+  - API key auth (optional via BERTH_API_KEY)
   - Rate limiting on uploads
   - Training management endpoints
   - Model switching (cnn_scratch / resnet50 / mobilenetv4 / yolo26_classify / yolo26)
@@ -54,7 +54,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
 )
-logger = logging.getLogger("smartpark")
+logger = logging.getLogger("berth")
 sys.path.insert(0, str(Path(__file__).parent))
 
 limiter = Limiter(key_func=get_remote_address)
@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
     db.init_db()
     if not config.API_KEY:
         logger.warning(
-            "SMARTPARK_API_KEY is not set — all protected endpoints are publicly accessible. "
+            "BERTH_API_KEY is not set — all protected endpoints are publicly accessible. "
             "Set this env var before any network-facing deployment."
         )
     from src.sync.sync_worker import SyncWorker
@@ -79,12 +79,20 @@ async def lifespan(app: FastAPI):
             logger.info("VideoProcessor pre-warmed")
         except Exception as e:
             logger.warning(f"Processor pre-warm skipped: {e}")
+        # Pre-load every classifier so the first analyze of each model isn't
+        # delayed by a cold ~2 s load (users switch models to compare them).
+        for _name in ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26"):
+            try:
+                _get_classifier(_name)
+            except Exception as e:
+                logger.warning(f"Classifier pre-warm skipped for {_name}: {e}")
+        logger.info("Classifiers pre-warmed")
     threading.Thread(target=_startup_warmup, daemon=True, name="startup-warmup").start()
     yield
     camera_registry.shutdown()
 
 app = FastAPI(
-    title="Smart Parking AI",
+    title="Berth",
     description="Real-time parking detection powered by deep learning",
     version="1.0.0",
     lifespan=lifespan,
@@ -103,7 +111,7 @@ _allowed_origins = [o for o in [
     "http://localhost:3000",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:3000",
-    os.getenv("SMARTPARK_ALLOWED_ORIGIN", ""),
+    os.getenv("BERTH_ALLOWED_ORIGIN", ""),
 ] if o]
 
 app.add_middleware(
@@ -268,7 +276,7 @@ def _frame_to_b64(frame: np.ndarray) -> str:
 @app.get("/")
 def root():
     return {
-        "service": "Smart Parking AI",
+        "service": "Berth",
         "version": "1.0.0",
         "status": "running",
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -535,6 +543,15 @@ async def analyze_roi(
         occ_pct = round(100.0 * occupied / total, 1) if total > 0 else 0
         avg_conf = round(total_conf / total, 4) if total > 0 else 0
 
+        # Cap output resolution — the result is shown in a narrow side panel, so a
+        # full-res annotated image only bloats the base64 response payload.
+        out_max = max(h, w)
+        if out_max > 1280:
+            s = 1280 / out_max
+            annotated = cv2.resize(annotated, (int(w * s), int(h * s)),
+                                   interpolation=cv2.INTER_AREA)
+        annotated_b64 = _frame_to_b64(annotated)
+
         return {
             "type": "roi_analysis",
             "model": _active_mode,
@@ -544,7 +561,7 @@ async def analyze_roi(
             "occupancy_percent": occ_pct,
             "avg_confidence": avg_conf,
             "slots": slots,
-            "annotated_image": _frame_to_b64(annotated),
+            "annotated_image": annotated_b64,
         }
     finally:
         _finish_op(op_id)

@@ -22,7 +22,7 @@ import config
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-logger = logging.getLogger("smartpark.visualizer")
+logger = logging.getLogger("berth.visualizer")
 
 
 def plot_confusion_matrix(cm, model_name="model", save_dir=None):

@@ -23,7 +23,7 @@ import numpy as np
 
 import config
 
-logger = logging.getLogger("smartpark.exporter")
+logger = logging.getLogger("berth.exporter")
 
 # Input shape expected by all classification CNNs after preprocessing.
 _EXAMPLE_INPUT = torch.zeros(1, 3, config.CNN_INPUT_SIZE, config.CNN_INPUT_SIZE)

@@ -21,7 +21,7 @@ import config
 from src.inference.classifier import get_classifier
 from src.roi.roi_store import RoiStore
 
-logger = logging.getLogger("smartpark.slot_detector")
+logger = logging.getLogger("berth.slot_detector")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 

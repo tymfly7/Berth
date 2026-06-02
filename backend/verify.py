@@ -6,7 +6,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, ".")
 
 print("=" * 60)
-print("SMART PARKING AI - Component Verification")
+print("BERTH - Component Verification")
 print("=" * 60)
 
 # 1. Test model architectures

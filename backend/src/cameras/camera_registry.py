@@ -13,7 +13,7 @@ from urllib.parse import urlparse, urlunparse
 import config
 from src.inference.video_processor import VideoProcessor
 
-logger = logging.getLogger("smartpark.cameras")
+logger = logging.getLogger("berth.cameras")
 
 CAMERAS_FILE = Path(__file__).resolve().parent.parent.parent / "cameras.json"
 
@@ -32,11 +32,11 @@ def _redact_url_credentials(url: str) -> str:
 
 def _env_source_key(cam_id: str) -> str:
     """Env-var name that overrides the stored source URL for a camera.
-    Example: camera id 'lot-a-1f3c2d' → SMARTPARK_CAM_SOURCE_LOT_A_1F3C2D
+    Example: camera id 'lot-a-1f3c2d' → BERTH_CAM_SOURCE_LOT_A_1F3C2D
     Set this var to an rtsp:// URL that includes credentials so they never
     touch cameras.json.
     """
-    return "SMARTPARK_CAM_SOURCE_" + cam_id.upper().replace("-", "_")
+    return "BERTH_CAM_SOURCE_" + cam_id.upper().replace("-", "_")
 
 
 class CameraRegistry:

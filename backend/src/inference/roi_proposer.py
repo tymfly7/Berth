@@ -16,7 +16,7 @@ import logging
 import numpy as np
 import cv2
 
-logger = logging.getLogger("smartpark.roi_proposer")
+logger = logging.getLogger("berth.roi_proposer")
 
 # Classes from the custom YOLO26 detect model (vacant=0, occupied=1)
 _VEHICLE_CLASSES = frozenset([0, 1])

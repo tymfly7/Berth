@@ -37,7 +37,7 @@ os.environ.setdefault(
     "|reconnect;1|reconnect_streamed;1|reconnect_delay_max;5",
 )
 
-logger = logging.getLogger("smartpark.video")
+logger = logging.getLogger("berth.video")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
