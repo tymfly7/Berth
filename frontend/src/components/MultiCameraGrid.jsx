@@ -56,7 +56,7 @@ const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onClick, mini }) {
 
     ws.onclose = () => {
       setConnected(false)
-      if (!stopReconnect.current) reconnectTimer.current = setTimeout(connect, 3000)
+      if (!stopReconnect.current) reconnectTimer.current = setTimeout(connect, 500)
     }
 
     ws.onerror = () => ws.close()
@@ -124,12 +124,6 @@ const s = {
     fontWeight: 700,
     color,
   }),
-  focusedWrap: {
-    position: 'relative',
-    width: '100%',
-    borderRadius: 'var(--radius-sm)',
-    overflow: 'hidden',
-  },
   exitBtn: {
     position: 'absolute',
     top: 10,
@@ -144,20 +138,6 @@ const s = {
     fontWeight: 600,
     cursor: 'pointer',
     letterSpacing: 0.3,
-  },
-  strip: {
-    display: 'flex',
-    gap: 8,
-    overflowX: 'auto',
-    marginTop: 10,
-    paddingBottom: 4,
-    scrollbarWidth: 'thin',
-    scrollbarColor: 'var(--border-color) transparent',
-  },
-  stripItem: {
-    width: 152,
-    flexShrink: 0,
-    borderRadius: 'var(--radius-sm)',
   },
 }
 
@@ -202,51 +182,64 @@ export default function MultiCameraGrid({ cameras, bare = false, onFocusChange }
     </div>
   )
 
-  const focusedCam = focusedId ? active.find(c => c.id === focusedId) : null
-  const others = focusedCam ? active.filter(c => c.id !== focusedId) : []
+  // Focused cam is sorted first so flex layout places it at the top full-width row.
+  const orderedCameras = focusedId
+    ? [active.find(c => c.id === focusedId), ...active.filter(c => c.id !== focusedId)]
+    : active
 
-  let layout
-
-  if (active.length === 0) {
-    layout = <div style={s.empty}>No active cameras. Activate one in Camera Registry.</div>
-  } else if (focusedCam) {
-    layout = (
-      <>
-        <div style={s.focusedWrap}>
-          <button style={s.exitBtn} onClick={() => setFocus(null)}>← All Feeds</button>
-          <CameraFeed cam={focusedCam} onMetrics={handleMetrics} />
-        </div>
-
-        {others.length > 0 && (
-          <div style={s.strip}>
-            {others.map(cam => (
-              <div key={cam.id} style={s.stripItem} onClick={() => setFocus(cam.id)}>
-                <CameraFeed cam={cam} onMetrics={handleMetrics} mini onClick={() => setFocus(cam.id)} />
-              </div>
-            ))}
-          </div>
-        )}
-
-        {totalsRow}
-      </>
-    )
-  } else {
-    layout = (
-      <>
-        <div style={{ display: 'grid', gridTemplateColumns: gridColumns(active.length), gap: 12 }}>
-          {active.map(cam => (
-            <CameraFeed key={cam.id} cam={cam} onMetrics={handleMetrics} onClick={() => setFocus(cam.id)} />
-          ))}
-        </div>
-        {totalsRow}
-      </>
-    )
-  }
+  // All CameraFeed instances stay in this single container across every layout
+  // transition. Only the container style and each slot's style change — the
+  // components themselves are never reparented, so WebSocket connections survive.
+  const containerStyle = focusedId
+    ? { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }
+    : { display: 'grid', gridTemplateColumns: gridColumns(active.length), gap: 12 }
 
   const content = (
     <>
       <div style={s.title}>Live Camera Feeds</div>
-      {layout}
+
+      {active.length === 0
+        ? <div style={s.empty}>No active cameras. Activate one in Camera Registry.</div>
+        : (
+          <div style={containerStyle}>
+            {orderedCameras.map(cam => {
+              const isFocused = cam.id === focusedId
+              const inStrip   = !!focusedId && !isFocused
+
+              const slotStyle = isFocused
+                ? { flex: '0 0 100%', position: 'relative', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }
+                : inStrip
+                  ? { width: 152, flexShrink: 0, borderRadius: 'var(--radius-sm)', overflow: 'hidden', cursor: 'pointer' }
+                  : { minWidth: 0 }
+
+              return (
+                <div
+                  key={cam.id}
+                  style={slotStyle}
+                  onClick={inStrip ? () => setFocus(cam.id) : undefined}
+                >
+                  {isFocused && (
+                    <button
+                      style={s.exitBtn}
+                      onClick={(e) => { e.stopPropagation(); setFocus(null) }}
+                    >
+                      ← All Feeds
+                    </button>
+                  )}
+                  <CameraFeed
+                    cam={cam}
+                    onMetrics={handleMetrics}
+                    mini={inStrip}
+                    onClick={!focusedId ? () => setFocus(cam.id) : undefined}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )
+      }
+
+      {totalsRow}
     </>
   )
 

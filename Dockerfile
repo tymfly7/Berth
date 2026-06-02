@@ -32,9 +32,9 @@ RUN mkdir -p data models outputs uploads
 EXPOSE 8000
 
 # Environment
-ENV SMARTPARK_HOST=0.0.0.0
-ENV SMARTPARK_PORT=8000
-ENV SMARTPARK_MODEL=demo
+ENV BERTH_HOST=0.0.0.0
+ENV BERTH_PORT=8000
+ENV BERTH_MODEL=demo
 
 # Run
 CMD ["python", "main.py"]

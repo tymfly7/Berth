@@ -27,7 +27,7 @@ if __name__ == "__main__":
         format="%(asctime)s  %(levelname)-8s  %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
-    logger = logging.getLogger("smartpark")
+    logger = logging.getLogger("berth")
 
     import warnings
     warnings.filterwarnings("ignore", category=UserWarning)
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     import config
 
     print("=" * 65)
-    print("  SMART PARKING AI - Train All Models (CPU)")
+    print("  BERTH - Train All Models (CPU)")
     print("=" * 65)
     print(f"  Dataset:    {config.PKLOT_ROOT}")
     print(f"  Images:     1000/class = 2000 total (per model)")

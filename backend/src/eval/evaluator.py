@@ -24,7 +24,7 @@ from sklearn.metrics import (
     classification_report,
 )
 
-logger = logging.getLogger("smartpark.evaluator")
+logger = logging.getLogger("berth.evaluator")
 
 
 @torch.no_grad()

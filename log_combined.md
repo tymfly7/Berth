@@ -193,6 +193,16 @@ Replaced hardcoded 18-slot grid with polygon/rectangle ROI editor. `RoiStore` pe
 - **Trend direction** — `Filling up ↑` / `Emptying ↓` / `Steady →` from mean `occupancy_percent` of the last 3 history points vs the prior 3, 2-pt threshold to avoid jitter; hidden until ≥4 points. (`PublicView.jsx`)
 - **Rebrand → Berth** — app name "Smart Parking AI" → **Berth**, tagline **"Find your space."** Public View heading wordmark + tagline (`PublicView.jsx`); Admin header title + subtitle (`Header.jsx`); browser tab title + meta description (`index.html`). Removed the 🅿️ header logo and its orphaned `icon` style block (`Header.jsx`).
 
+### Follow-ups (same day)
+
+- **Metric hallucination fixed (Public + Admin)** — stale cameras were never pruned from the live aggregate, so deactivated/stopped lots kept inflating totals. Now both views prune `liveCamMetrics`/`liveSlotsMap` when a camera leaves the active set and on a `feed_unavailable` WS message. Admin's WS effect also re-keyed from `[cameras]` to a stable `activeCamKey` so the 10s camera poll no longer tears down sockets and wipes metrics (the periodic "refresh" flicker). (`PublicView.jsx`, `AdminView.jsx`)
+- **Metric cards enlarged + centered** — number `1rem → 1.9rem`, label `0.58 → 0.72rem`, icon `18 → 24px`; `textAlign: center` + centered header row. (`MetricCards.jsx`)
+- **Trend direction removed** — reverted the `Filling up ↑ / Emptying ↓` indicator (above) per request; not useful. (`PublicView.jsx`)
+- **File camera source removed** — dropped the `File` option from Add/Edit camera Type dropdowns and the `file` branch in `_validate_camera_source`; live read path (USB/RTSP) untouched. Conceptually out of place for a live board (looped footage under a "Live" indicator). (`CameraManager.jsx`, `backend/main.py`)
+- **README camera-connection guide** — added a "Connecting a camera" section (USB device index, RTSP/CCTV URL format + sub-stream tip, YouTube, and `BERTH_CAM_SOURCE_<ID>` credential env-var); removed stale `file` source references.
+- **Full `SMARTPARK` → `BERTH` rename** — env vars (`SMARTPARK_*` → `BERTH_*`) across code, `backend/.env` (value preserved), Dockerfiles, and compose; logger channels `getLogger("smartpark.*")` → `"berth.*"`; DB filename `smartpark.db` → `berth.db`; Docker service/image names; brand strings. Logs and `README1.md` intentionally left as historical record. (~40 files)
+- **DB migrated to `berth.db`** — initial raw file-copy corrupted the DB (copied a live WAL); rebuilt cleanly via SQLite's online backup API. `berth.db` integrity ok, all 3,668 `occupancy_history` rows preserved; `smartpark.db` kept as backup.
+
 ---
 
 ## 2026-06-02 — Code Quality Audit Fixes

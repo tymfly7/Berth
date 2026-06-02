@@ -4,7 +4,7 @@ Edge → Hub Sync Worker
 Background thread that pushes buffered occupancy and alert rows from the
 edge node's local SQLite DB to the hub server every SYNC_INTERVAL_SECONDS.
 
-Only starts when SMARTPARK_EDGE_HUB_URL is set. Completely inert on the hub.
+Only starts when BERTH_EDGE_HUB_URL is set. Completely inert on the hub.
 
 Offline resilience: if the hub is unreachable, rows stay in the local DB
 (synced=0) and are retried on the next tick — no data is lost.
@@ -20,7 +20,7 @@ import json
 import config
 from src.db import database as db
 
-logger = logging.getLogger("smartpark.sync")
+logger = logging.getLogger("berth.sync")
 
 SYNC_INTERVAL_SECONDS = 60
 _BATCH_SIZE = 200
@@ -34,7 +34,7 @@ class SyncWorker:
 
     def start(self) -> None:
         if not config.EDGE_HUB_URL:
-            logger.info("SMARTPARK_EDGE_HUB_URL not set — sync worker inactive")
+            logger.info("BERTH_EDGE_HUB_URL not set — sync worker inactive")
             return
         self._thread = threading.Thread(target=self._loop, daemon=True, name="sync-worker")
         self._thread.start()

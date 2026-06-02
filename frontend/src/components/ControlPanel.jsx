@@ -10,7 +10,7 @@ const MODELS = [
   { id: 'yolo26',          label: 'YOLO26 Detect'    },
 ]
 
-const LOTS_KEY = 'smartpark_test_lots'
+const LOTS_KEY = 'berth_test_lots'
 
 const DEFAULT_LOTS = [
   { name: 'LotA', id: 'lot-lota' },
@@ -20,23 +20,34 @@ const DEFAULT_LOTS = [
 const slugify = (name) =>
   'lot-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
+// Downscale an uploaded image before POSTing — classification crops run at 64px,
+// so full-resolution photos only inflate upload + server decode. ROIs are stored
+// normalised (0–1), so resizing does not affect their mapping.
+async function downscaleForUpload(file, maxDim = 1600) {
+  try {
+    const bitmap = await createImageBitmap(file)
+    const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height))
+    if (scale === 1) { bitmap.close?.(); return file }  // already small enough
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.round(bitmap.width * scale)
+    canvas.height = Math.round(bitmap.height * scale)
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    bitmap.close?.()
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.9))
+    return blob || file
+  } catch {
+    return file  // any failure → fall back to the original file
+  }
+}
+
 const loadLots = () => {
   try {
-    let saved = JSON.parse(localStorage.getItem(LOTS_KEY) || '[]')
-    let changed = false
-    for (const def of DEFAULT_LOTS) {
-      const idx = saved.findIndex(l => l.id === def.id)
-      if (idx === -1) {
-        saved = [def, ...saved]
-        changed = true
-      } else if (saved[idx].name !== def.name) {
-        saved = [...saved]
-        saved[idx] = { ...saved[idx], name: def.name }
-        changed = true
-      }
+    const raw = localStorage.getItem(LOTS_KEY)
+    if (raw === null) {
+      localStorage.setItem(LOTS_KEY, JSON.stringify(DEFAULT_LOTS))
+      return [...DEFAULT_LOTS]
     }
-    if (changed) localStorage.setItem(LOTS_KEY, JSON.stringify(saved))
-    return saved
+    return JSON.parse(raw) || []
   } catch { return [...DEFAULT_LOTS] }
 }
 
@@ -98,6 +109,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   const [uploadedImage, setUploadedImage] = useState(null)
   const [rois, setRois]               = useState([])
   const [roiModalOpen, setRoiModalOpen] = useState(false)
+  const [modalLotName, setModalLotName] = useState('')
   const [roiMsg, setRoiMsg]           = useState(null)
   const [videoUploaded, setVideoUploaded] = useState(false)
   const [roiEditorBg, setRoiEditorBg] = useState(null)
@@ -138,16 +150,20 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     setTimeout(() => setRoiMsg(null), 3000)
   }
 
+  const saveRoisToLot = async (lotId, roiList) => {
+    const res = await apiFetch(`${apiBase}/api/roi/${lotId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rois: roiList }),
+    })
+    if (!res.ok) throw new Error('Save failed')
+    return res.json()
+  }
+
   const saveRois = async (roiList) => {
     if (!selectedLotId) return
     try {
-      const res = await apiFetch(`${apiBase}/api/roi/${selectedLotId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rois: roiList }),
-      })
-      if (!res.ok) throw new Error('Save failed')
-      const data = await res.json()
+      const data = await saveRoisToLot(selectedLotId, roiList)
       showRoiMsg(`Saved ${data.saved} ROIs`)
     } catch (e) {
       showRoiMsg(`Error: ${e.message}`)
@@ -187,6 +203,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   }
 
   const openLotRoiEditor = async (lotId) => {
+    setModalLotName(lots.find(l => l.id === lotId)?.name || '')
     try {
       const res = await apiFetch(`${apiBase}/api/roi/${lotId}`)
       const data = res.ok ? await res.json() : []
@@ -299,8 +316,9 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       // Fire save in the background for persistence; pass ROIs inline so the
       // analysis doesn't have to wait for the save round-trip to finish.
       saveRois(rois)
+      const uploadBlob = await downscaleForUpload(uploadedFileRef.current)
       const form = new FormData()
-      form.append('file', uploadedFileRef.current)
+      form.append('file', uploadBlob, 'upload.jpg')
       form.append('rois_json', JSON.stringify(rois))
       try {
         const res = await apiFetch(`${apiBase}/api/analyze-roi?camera_id=${selectedLotId}&model_name=${testModel}`, {
@@ -407,7 +425,22 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       {/* Raw uploaded image + lot selector + ROI controls */}
       {(uploadedImage || videoUploaded) && !resultImage && (
         <div style={{ marginTop: 12 }}>
-          {uploadedImage && <img src={uploadedImage} alt="Uploaded" style={style.resultImg} />}
+          {uploadedImage && (
+            <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+              <img src={uploadedImage} alt="Uploaded" style={style.resultImg} />
+              <button
+                onClick={handleClear}
+                title="Clear image"
+                style={{
+                  position: 'absolute', top: 6, right: 6,
+                  background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%',
+                  color: '#fff', width: 24, height: 24, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '0.75rem', lineHeight: 1,
+                }}
+              >✕</button>
+            </div>
+          )}
 
           {/* Lot selector — shown inline with Draw ROIs */}
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -443,24 +476,15 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               </button>
             </div>
 
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input
-                type="text"
-                placeholder="New lot name…"
-                value={newLotName}
-                onChange={e => setNewLotName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleCreateLot()}
-                style={{ ...inputStyle, fontSize: '0.75rem' }}
-              />
-              <button className="btn btn-ghost btn-sm" onClick={handleCreateLot}>+ New</button>
-            </div>
-
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 className="btn btn-ghost btn-sm"
-                onClick={() => { setRoiEditorBg(uploadedImage); setRoiModalOpen(true) }}
-                disabled={!selectedLotId}
-                title={!selectedLotId ? 'Select or create a lot first' : `Draw ROIs for ${lots.find(l => l.id === selectedLotId)?.name}`}
+                onClick={() => {
+                  setModalLotName(lots.find(l => l.id === selectedLotId)?.name || '')
+                  setRoiEditorBg(uploadedImage)
+                  setRoiModalOpen(true)
+                }}
+                title="Draw or edit ROIs — you can rename or save as a new set"
               >
                 ✏️ Draw ROIs
               </button>
@@ -469,13 +493,6 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                   {rois.length} ROI{rois.length !== 1 ? 's' : ''} defined
                 </span>
               )}
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{ marginLeft: 'auto', color: 'var(--color-occupied)' }}
-                onClick={handleClear}
-              >
-                ✕ Remove
-              </button>
             </div>
           </div>
 
@@ -494,11 +511,24 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       {/* Annotated result image */}
       {resultImage && (
         <div style={{ marginTop: 12 }}>
-          <img
-            src={`data:image/jpeg;base64,${resultImage}`}
-            alt="Analyzed"
-            style={style.resultImg}
-          />
+          <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+            <img
+              src={`data:image/jpeg;base64,${resultImage}`}
+              alt="Analyzed"
+              style={style.resultImg}
+            />
+            <button
+              onClick={handleClear}
+              title="Clear"
+              style={{
+                position: 'absolute', top: 6, right: 6,
+                background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%',
+                color: '#fff', width: 24, height: 24, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.75rem', lineHeight: 1,
+              }}
+            >✕</button>
+          </div>
           {resultData && (
             <div style={style.resultStats}>
               <span className="badge badge-vacant">🟢 {resultData.available} Available</span>
@@ -512,14 +542,18 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               style={{ flex: 1 }}
               onClick={() => { setResultImage(null); setResultData(null) }}
             >
-              ← Back to image
+              ← Back
             </button>
             <button
               className="btn btn-ghost btn-sm"
-              style={{ color: 'var(--color-occupied)' }}
-              onClick={handleClear}
+              onClick={() => {
+                const a = document.createElement('a')
+                a.href = `data:image/jpeg;base64,${resultImage}`
+                a.download = 'analyzed.jpg'
+                a.click()
+              }}
             >
-              ✕ Remove
+              ⬇ Save
             </button>
           </div>
         </div>
@@ -533,28 +567,68 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
           display: 'flex', flexDirection: 'column',
         }}>
           <div style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            padding: '10px 20px', borderBottom: '1px solid var(--border-color)',
-            background: 'var(--bg-card)', flexShrink: 0,
+            display: 'flex', alignItems: 'center',
+            padding: '10px 14px', borderBottom: '1px solid var(--border-color)',
+            background: 'var(--bg-card)', flexShrink: 0, gap: 8,
           }}>
-            <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>
-              {lots.find(l => l.id === selectedLotId)?.name || selectedLotId}
-            </span>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                className="btn btn-primary btn-sm"
-                onClick={async () => { await saveRois(rois); setRoiModalOpen(false) }}
-              >
-                Save & Close
-              </button>
-              <button className="btn btn-ghost btn-sm" onClick={() => setRoiModalOpen(false)}>
-                Cancel
-              </button>
-            </div>
+            <input
+              type="text"
+              value={modalLotName}
+              onChange={e => setModalLotName(e.target.value)}
+              placeholder="ROI set name…"
+              style={{
+                ...inputStyle,
+                flex: 1,
+                fontSize: '0.85rem',
+                fontWeight: 700,
+              }}
+            />
+            <button
+              className="btn btn-primary btn-sm"
+              style={{ flexShrink: 0 }}
+              onClick={async () => {
+                const name = modalLotName.trim()
+                if (!name) { showRoiMsg('Enter a name for this ROI set'); return }
+                const existing = lots.find(l => l.name === name)
+                let targetId
+                if (existing) {
+                  targetId = existing.id
+                } else {
+                  targetId = slugify(name)
+                  const updated = [...lots, { name, id: targetId }]
+                  setLots(updated)
+                  localStorage.setItem(LOTS_KEY, JSON.stringify(updated))
+                }
+                setSelectedLotId(targetId)
+                try {
+                  const data = await saveRoisToLot(targetId, rois)
+                  showRoiMsg(`Saved ${data.saved} ROIs to "${name}"`)
+                } catch (e) {
+                  showRoiMsg(`Error: ${e.message}`)
+                }
+                setRoiModalOpen(false)
+              }}
+            >
+              Save
+            </button>
+            <button
+              onClick={() => setRoiModalOpen(false)}
+              title="Cancel"
+              style={{
+                flexShrink: 0,
+                background: 'rgba(255,255,255,0.07)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--radius-sm)',
+                color: 'var(--text-secondary)',
+                width: 30, height: 30,
+                cursor: 'pointer',
+                fontSize: '1rem', lineHeight: 1,
+              }}
+            >✕</button>
           </div>
 
-          <div style={{ flex: 1, overflow: 'auto', padding: 8 }}>
-            <RoiEditor backgroundImage={roiEditorBg} rois={rois} onRoisChange={setRois} idPrefix="test" />
+          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+            <RoiEditor backgroundImage={roiEditorBg} rois={rois} onRoisChange={setRois} idPrefix="test" overlay />
           </div>
 
           {roiMsg && (

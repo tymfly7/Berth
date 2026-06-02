@@ -1,17 +1,17 @@
 version: '3.8'
 
 services:
-  smartpark:
+  berth:
     build: .
     ports:
       - "8000:8000"
     environment:
-      - SMARTPARK_HOST=0.0.0.0
-      - SMARTPARK_PORT=8000
-      - SMARTPARK_MODEL=demo
-      - SMARTPARK_API_KEY=${SMARTPARK_API_KEY:-}
-      - SMARTPARK_EPOCHS=30
-      - SMARTPARK_BATCH_SIZE=64
+      - BERTH_HOST=0.0.0.0
+      - BERTH_PORT=8000
+      - BERTH_MODEL=demo
+      - BERTH_API_KEY=${BERTH_API_KEY:-}
+      - BERTH_EPOCHS=30
+      - BERTH_BATCH_SIZE=64
     volumes:
       - ./backend/data:/app/data
       - ./backend/models:/app/models

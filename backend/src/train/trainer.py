@@ -25,7 +25,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import config
 
-logger = logging.getLogger("smartpark.trainer")
+logger = logging.getLogger("berth.trainer")
 
 
 class EarlyStopping:

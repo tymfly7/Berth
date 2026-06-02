@@ -86,7 +86,7 @@ export default function AdminView() {
     ws.onclose = () => {
       setConnected(false)
       if (!unloading.current)
-        reconnectTimer.current = setTimeout(connectWs, 3000)
+        reconnectTimer.current = setTimeout(connectWs, 500)
     }
 
     ws.onerror = () => ws.close()

@@ -9,9 +9,9 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import config
 
-logger = logging.getLogger("smartpark.db")
+logger = logging.getLogger("berth.db")
 
-DB_PATH = config.BASE_DIR / "smartpark.db"
+DB_PATH = config.BASE_DIR / "berth.db"
 
 _local = threading.local()
 

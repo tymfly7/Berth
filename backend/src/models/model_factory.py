@@ -63,7 +63,8 @@ def load_model(name, device=None, **kwargs):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    kwargs.setdefault("pretrained", False)
+    if name in ("resnet50", "mobilenetv4s"):
+        kwargs.setdefault("pretrained", False)
     model = create_model(name, **kwargs)
     model_path = get_model_path(name)
 

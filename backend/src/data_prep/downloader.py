@@ -22,7 +22,7 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import config
 
-logger = logging.getLogger("smartpark.downloader")
+logger = logging.getLogger("berth.downloader")
 
 
 def organize_pklot(source_root=None, target_root=None, max_per_class=0,):

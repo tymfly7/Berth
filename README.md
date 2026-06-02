@@ -1,4 +1,4 @@
-# Smart Parking Lot Detection System
+# Berth
 
 AI-powered real-time parking detection using Computer Vision and Deep Learning.
 Monitors parking occupancy via live camera or video, draws custom slot regions,
@@ -81,7 +81,7 @@ detects misparked vehicles, and surfaces everything through a two-view dashboard
 │  RoiStore                   │  Per-camera ROI JSON files
 │  ParkingClassifier          │  CNN / MobileNet / YOLO classify
 │  ParkingYOLO26              │  YOLO detect (anomaly)
-│  SQLite (smartpark.db)      │  Trends, alerts, training runs
+│  SQLite (berth.db)      │  Trends, alerts, training runs
 └─────────────────────────────┘
 ```
 
@@ -253,13 +253,13 @@ outputs/
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SMARTPARK_EPOCHS` | `30` | Max epochs for CNN models |
-| `SMARTPARK_YOLO_DETECT_EPOCHS` | `100` | Max epochs for YOLO detect |
-| `SMARTPARK_BATCH_SIZE` | `32` | Batch size |
-| `SMARTPARK_LR` | `0.001` | Learning rate |
-| `SMARTPARK_SUBSET` | `12000` | Subset size (0 = full dataset) |
-| `SMARTPARK_WORKERS` | `2` | DataLoader workers |
-| `SMARTPARK_YOLO_CLASSIFY_IMGSZ` | `64` | Input size for YOLO classify |
+| `BERTH_EPOCHS` | `30` | Max epochs for CNN models |
+| `BERTH_YOLO_DETECT_EPOCHS` | `100` | Max epochs for YOLO detect |
+| `BERTH_BATCH_SIZE` | `32` | Batch size |
+| `BERTH_LR` | `0.001` | Learning rate |
+| `BERTH_SUBSET` | `12000` | Subset size (0 = full dataset) |
+| `BERTH_WORKERS` | `2` | DataLoader workers |
+| `BERTH_YOLO_CLASSIFY_IMGSZ` | `64` | Input size for YOLO classify |
 
 ---
 
@@ -339,15 +339,15 @@ rtsp://user:pass@<camera-ip>:554/<stream-path>
 
 **YouTube Live — public live feed**
 
-Paste a YouTube live URL; the backend resolves it to an HLS stream (cached for `SMARTPARK_YT_CACHE_TTL` seconds).
+Paste a YouTube live URL; the backend resolves it to an HLS stream (cached for `BERTH_YT_CACHE_TTL` seconds).
 
 **Keeping RTSP credentials out of `cameras.json`**
 
-Instead of saving the password in the stored source, set it as an environment variable named `SMARTPARK_CAM_SOURCE_<CAMERA_ID>` (uppercase, hyphens → underscores). If present, the registry uses it at runtime and the on-disk config stays credential-free.
+Instead of saving the password in the stored source, set it as an environment variable named `BERTH_CAM_SOURCE_<CAMERA_ID>` (uppercase, hyphens → underscores). If present, the registry uses it at runtime and the on-disk config stays credential-free.
 
 ```
 # camera id "lot-a-1f3c2d" →
-SMARTPARK_CAM_SOURCE_LOT_A_1F3C2D=rtsp://user:pass@192.168.1.10:554/Streaming/Channels/102
+BERTH_CAM_SOURCE_LOT_A_1F3C2D=rtsp://user:pass@192.168.1.10:554/Streaming/Channels/102
 ```
 
 ### Manage cameras via API
@@ -498,7 +498,7 @@ School Project/
 │   ├── requirements.txt
 │   ├── train_all.py                     # CLI: train all models in sequence
 │   ├── spots_config.json                # Legacy slot coordinates (superseded by ROI store)
-│   ├── smartpark.db                     # SQLite — trends, alerts, training runs
+│   ├── berth.db                     # SQLite — trends, alerts, training runs
 │   ├── models/
 │   │   ├── best_cnn_scratch.pth
 │   │   ├── best_resnet50.pth
@@ -582,19 +582,19 @@ All settings are centralized in `backend/config.py` and can be overridden via en
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SMARTPARK_HOST` | `0.0.0.0` | Backend bind host |
-| `SMARTPARK_PORT` | `8000` | Backend port |
-| `SMARTPARK_API_KEY` | _(empty — auth off)_ | API key for protected endpoints |
-| `SMARTPARK_UPLOAD_RATE_LIMIT` | `10/minute` | Rate limit on upload endpoints |
-| `SMARTPARK_MODEL` | `yolo26_classify` | Default active model on startup |
+| `BERTH_HOST` | `0.0.0.0` | Backend bind host |
+| `BERTH_PORT` | `8000` | Backend port |
+| `BERTH_API_KEY` | _(empty — auth off)_ | API key for protected endpoints |
+| `BERTH_UPLOAD_RATE_LIMIT` | `10/minute` | Rate limit on upload endpoints |
+| `BERTH_MODEL` | `yolo26_classify` | Default active model on startup |
 | `PKLOT_ROOT` | _(empty)_ | Path to downloaded PKLot dataset |
-| `SMARTPARK_EPOCHS` | `30` | CNN training epochs |
-| `SMARTPARK_YOLO_DETECT_EPOCHS` | `100` | YOLO detect training epochs |
-| `SMARTPARK_BATCH_SIZE` | `32` | Training batch size |
-| `SMARTPARK_LR` | `0.001` | Learning rate |
-| `SMARTPARK_SUBSET` | `12000` | Training subset size (0 = all) |
-| `SMARTPARK_WORKERS` | `2` | DataLoader worker threads |
-| `SMARTPARK_YT_CACHE_TTL` | `240` | YouTube HLS URL cache lifetime (seconds) |
+| `BERTH_EPOCHS` | `30` | CNN training epochs |
+| `BERTH_YOLO_DETECT_EPOCHS` | `100` | YOLO detect training epochs |
+| `BERTH_BATCH_SIZE` | `32` | Training batch size |
+| `BERTH_LR` | `0.001` | Learning rate |
+| `BERTH_SUBSET` | `12000` | Training subset size (0 = all) |
+| `BERTH_WORKERS` | `2` | DataLoader worker threads |
+| `BERTH_YT_CACHE_TTL` | `240` | YouTube HLS URL cache lifetime (seconds) |
 
 ### Alert thresholds
 
@@ -627,13 +627,13 @@ Run `POST /api/evaluate/all` from the Admin UI or API to compare all trained cla
 | `torch` import error | Ensure Python 3.10+ is active in the venv |
 | `cv2` import error | `pip install opencv-python` |
 | `ultralytics` import error | `pip install ultralytics` |
-| CUDA out of memory | Reduce `SMARTPARK_BATCH_SIZE` or set CPU-only PyTorch |
+| CUDA out of memory | Reduce `BERTH_BATCH_SIZE` or set CPU-only PyTorch |
 | No images found | Run dataset preparation first |
 | WebSocket won't connect | Start the backend before the frontend |
 | YOLO26 weights not found | Train `yolo26_detect` or `yolo26_classify` via the Training panel first |
 | Anomaly detection 400 error | YOLO26 Detect model weights are missing — train it first |
-| YouTube stream errors | URL may have expired; HLS URLs are cached for `SMARTPARK_YT_CACHE_TTL` seconds |
-| Rate limit exceeded | Wait 1 minute or increase `SMARTPARK_UPLOAD_RATE_LIMIT` |
+| YouTube stream errors | URL may have expired; HLS URLs are cached for `BERTH_YT_CACHE_TTL` seconds |
+| Rate limit exceeded | Wait 1 minute or increase `BERTH_UPLOAD_RATE_LIMIT` |
 
 ---
 
@@ -641,16 +641,16 @@ Run `POST /api/evaluate/all` from the Admin UI or API to compare all trained cla
 
 ```bash
 # Build image
-docker build -t smartpark-ai .
+docker build -t berth-ai .
 
 # Run
-docker run -p 8000:8000 smartpark-ai
+docker run -p 8000:8000 berth-ai
 
 # With docker-compose (backend + frontend)
 docker-compose up -d
 
 # With API key
-docker run -p 8000:8000 -e SMARTPARK_API_KEY=your-secret smartpark-ai
+docker run -p 8000:8000 -e BERTH_API_KEY=your-secret berth-ai
 ```
 
 ---
