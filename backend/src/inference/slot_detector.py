@@ -138,7 +138,19 @@ class SlotDetector:
             x2 = min(fw, int(max(xs) * fw))
             y2 = min(fh, int(max(ys) * fh))
             bw, bh = x2 - x1, y2 - y1
-            crop = frame[y1:y2, x1:x2] if bw > 5 and bh > 5 else None
+            if bw > 5 and bh > 5:
+                crop = frame[y1:y2, x1:x2].copy()
+                # Mask pixels outside the exact polygon so diagonal slots don't
+                # bleed adjacent-slot content into this crop.
+                poly_pts = np.array(
+                    [[int(p[0] * fw) - x1, int(p[1] * fh) - y1] for p in polygon],
+                    dtype=np.int32,
+                )
+                mask = np.zeros(crop.shape[:2], dtype=np.uint8)
+                cv2.fillPoly(mask, [poly_pts], 255)
+                crop[mask == 0] = 128  # neutral gray — minimises model bias
+            else:
+                crop = None
             crops.append((roi, crop, x1, y1, bw, bh))
 
         valid_crops = [c for _, c, *_ in crops if c is not None]

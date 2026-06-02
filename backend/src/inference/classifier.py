@@ -51,6 +51,7 @@ class ParkingClassifier:
         self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.threshold = confidence_threshold or config.CNN_CONFIDENCE_THRESHOLD
         self.model = None
+        self._loaded = False
 
         # Preprocessing transform (no augmentation — inference only)
         self.transform = transforms.Compose([
@@ -70,11 +71,12 @@ class ParkingClassifier:
             self._load_yolo_classify()
             return
         if self.model_name == "yolo26":
-            self._load_yolo_detect()
+            self._load_yolo_classify()
             return
         from src.models.model_factory import load_model
         try:
             self.model = load_model(self.model_name, device=self.device)
+            self._loaded = True
             logger.info(f"✅ Loaded model: {self.model_name} on {self.device}")
         except (FileNotFoundError, ValueError) as e:
             logger.warning(f"⚠️  {e}")
@@ -92,10 +94,10 @@ class ParkingClassifier:
                     f"YOLO26 classify weights not found at '{model_path}'. Train it first."
                 )
             self._yolo_classify = YOLO(str(model_path))
-            self.model = True  # sentinel so is_loaded() returns True
+            self._loaded = True
             logger.info(f"✅ Loaded YOLO26 classify model on {self.device}")
-        except FileNotFoundError as e:
-            logger.warning(f"⚠️  {e}")
+        except Exception as e:
+            logger.warning(f"⚠️  YOLO26 classify failed to load: {e}")
             self.model = None
             self._yolo_classify = None
 
@@ -109,15 +111,15 @@ class ParkingClassifier:
                     f"YOLO26 detect weights not found at '{model_path}'. Train it first."
                 )
             self._yolo_detect = YOLO(str(model_path))
-            self.model = True
+            self._loaded = True
             logger.info(f"✅ Loaded YOLO26 detect model on {self.device}")
-        except FileNotFoundError as e:
-            logger.warning(f"⚠️  {e}")
+        except Exception as e:
+            logger.warning(f"⚠️  YOLO26 detect failed to load: {e}")
             self.model = None
             self._yolo_detect = None
 
     def is_loaded(self):
-        return self.model is not None
+        return self._loaded
 
     def _to_pil(self, image):
         """Convert any image input to a RGB PIL Image."""
@@ -144,24 +146,12 @@ class ParkingClassifier:
         if boxes is not None and len(boxes) > 0:
             conf = float(boxes.conf.max().cpu().numpy())
             return {"status": "occupied", "confidence": round(conf, 4), "probability": round(conf, 4)}
-        return {"status": "vacant", "confidence": 0.9, "probability": 0.1}
+        return {"status": "vacant", "confidence": 1.0, "probability": 0.0}
 
     @torch.no_grad()
     def predict(self, image):
-        """
-        Classify a single parking space image.
-
-        Args:
-            image: PIL Image, numpy array (HWC, BGR or RGB), or file path string
-
-        Returns:
-            dict: {
-                "status": "occupied" | "vacant",
-                "confidence": float (0-1),
-                "probability": float (0-1, raw model output)
-            }
-        """
-        if self.model is None:
+        """Classify a parking space image. Returns {status, confidence, probability}."""
+        if not self.is_loaded():
             return {"status": "unknown", "confidence": 0.0, "probability": 0.5}
 
         if getattr(self, "_yolo_classify", None) is not None:
@@ -174,13 +164,9 @@ class ParkingClassifier:
             results = self._yolo_detect.predict(pil_img, verbose=False, conf=0.3, classes=[1])
             return self._yolo_detect_to_dict(results[0])
 
-        # Convert input to PIL Image
         pil_img = self._to_pil(image)
-
-        # Preprocess
         tensor = self.transform(pil_img).unsqueeze(0).to(self.device)
-
-        # Inference — model outputs raw logit; apply sigmoid to get probability
+        # model outputs raw logit; apply sigmoid to get probability
         output = self.model(tensor)
         prob = torch.sigmoid(output).squeeze().item()
 
@@ -202,16 +188,8 @@ class ParkingClassifier:
 
     @torch.no_grad()
     def predict_batch(self, images):
-        """
-        Classify multiple parking space images in a single batch.
-
-        Args:
-            images: List of PIL Images or numpy arrays
-
-        Returns:
-            list[dict]: List of prediction dicts
-        """
-        if self.model is None:
+        """Classify a batch of parking space images. Returns list of prediction dicts."""
+        if not self.is_loaded():
             return [{"status": "unknown", "confidence": 0.0, "probability": 0.5}
                     for _ in images]
 

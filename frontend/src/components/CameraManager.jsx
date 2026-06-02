@@ -140,6 +140,52 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
   const [error, setError] = useState(null)
   const [form, setForm] = useState({ name: '', source: '', type: 'usb', roi_camera_id: '' })
 
+  const [editingCamId, setEditingCamId] = useState(null)
+  const [editCamForm, setEditCamForm] = useState({ name: '', source: '', type: 'usb', roi_camera_id: '' })
+  const [editCamError, setEditCamError] = useState(null)
+
+  const startCamEdit = (cam) => {
+    setEditingCamId(cam.id)
+    setEditCamForm({
+      name: cam.name,
+      source: cam.source,
+      type: cam.type,
+      roi_camera_id: cam.roi_camera_id === cam.id ? '' : (cam.roi_camera_id || ''),
+    })
+    setEditCamError(null)
+  }
+
+  const cancelCamEdit = () => { setEditingCamId(null); setEditCamError(null) }
+
+  const handleCamUpdate = async () => {
+    setEditCamError(null)
+    if (!editCamForm.name.trim() || !editCamForm.source.trim()) {
+      setEditCamError('Name and Source are required.')
+      return
+    }
+    try {
+      const res = await apiFetch(`${API_BASE}/api/cameras/${editingCamId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editCamForm.name.trim(),
+          source: editCamForm.source.trim(),
+          type: editCamForm.type,
+          roi_camera_id: editCamForm.roi_camera_id.trim() || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const d = await res.json()
+        setEditCamError(d.detail || 'Failed to update camera.')
+        return
+      }
+      setEditingCamId(null)
+      await fetchCameras()
+    } catch { setEditCamError('Network error.') }
+  }
+
+  const setEditCamField = (field) => (e) => setEditCamForm(prev => ({ ...prev, [field]: e.target.value }))
+
   const [roiEditCam, setRoiEditCam] = useState(null)
   const [editRois, setEditRois] = useState([])
   const [editBg, setEditBg] = useState(null)
@@ -218,27 +264,33 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
 
   const openRoiEdit = async (cam) => {
     const cameraId = cam.roi_camera_id || cam.id
-    let rois = []
-    try {
-      const res = await apiFetch(`${API_BASE}/api/roi/${cameraId}`)
-      if (res.ok) { const data = await res.json(); rois = Array.isArray(data) ? data : [] }
-    } catch { /* silent */ }
 
-    let bg = null
-    try {
-      const res = await apiFetch(`${API_BASE}/api/roi/${cameraId}/snapshot`)
-      if (res.ok) {
-        const blob = await res.blob()
-        bg = await new Promise(resolve => {
-          const reader = new FileReader()
-          reader.onload = e => resolve(e.target.result)
-          reader.readAsDataURL(blob)
-        })
-      }
-    } catch { /* no snapshot */ }
+    const blobToDataUrl = (blob) => new Promise(resolve => {
+      const reader = new FileReader()
+      reader.onload = e => resolve(e.target.result)
+      reader.readAsDataURL(blob)
+    })
 
+    // Fetch ROIs and snapshot in parallel
+    const [rois, bg] = await Promise.all([
+      apiFetch(`${API_BASE}/api/roi/${cameraId}`)
+        .then(res => res.ok ? res.json() : [])
+        .then(data => Array.isArray(data) ? data : [])
+        .catch(() => []),
+      apiFetch(`${API_BASE}/api/roi/${cameraId}/snapshot`)
+        .then(res => res.ok ? res.blob() : null)
+        .then(blob => blob ? blobToDataUrl(blob) : null)
+        .catch(() => null),
+    ])
+
+    setEditRois(rois)
+    setEditBg(bg)
+    setEditProposals([])
+    setRoiEditCam(cam)
+
+    // WebSocket fallback only if no snapshot — loads in async after editor is open
     if (!bg && cam.active) {
-      bg = await new Promise(resolve => {
+      new Promise(resolve => {
         const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.id}`)
         editWsRef.current = ws
         const timeout = setTimeout(() => { ws.close(); resolve(null) }, 5000)
@@ -249,13 +301,8 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
           } catch { /* ignore */ }
         }
         ws.onerror = () => { clearTimeout(timeout); resolve(null) }
-      })
+      }).then(wsBg => { if (wsBg) setEditBg(wsBg) })
     }
-
-    setEditRois(rois)
-    setEditBg(bg)
-    setEditProposals([])
-    setRoiEditCam(cam)
   }
 
   const closeRoiEdit = () => {
@@ -348,21 +395,73 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
                   </td>
                 )}
                 <td style={compactTd}>
-                  <span style={{ ...s.badge(cam.active), fontSize: '0.68rem', padding: compact ? '1px 6px' : '2px 8px' }}>
-                    {cam.active ? 'Active' : 'Idle'}
-                  </span>
+                  <button
+                    onClick={() => handleToggle(cam)}
+                    style={{
+                      padding: compact ? '1px 10px' : '3px 14px',
+                      borderRadius: 99,
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      background: cam.active ? 'rgba(46,204,113,0.18)' : 'rgba(244,63,94,0.18)',
+                      color: cam.active ? '#2ecc71' : '#f43f5e',
+                    }}
+                  >
+                    {cam.active ? 'On' : 'Off'}
+                  </button>
                 </td>
                 <td style={compactTd}>
-                  <button style={{ ...s.btn(), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px', marginRight: 4 }} onClick={() => handleToggle(cam)}>
-                    {cam.active ? 'Off' : 'On'}
+                  <button
+                    style={{ ...s.btn(editingCamId === cam.id ? 'primary' : 'default'), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px', marginRight: 4 }}
+                    onClick={() => editingCamId === cam.id ? cancelCamEdit() : startCamEdit(cam)}
+                  >
+                    ⚙
                   </button>
                   <button style={{ ...s.btn(), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px', marginRight: 4 }} onClick={() => openRoiEdit(cam)}>
-                    ✎ ROIs
+                    ✎
                   </button>
                   <button style={{ ...s.btn('danger'), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px' }} onClick={() => handleDelete(cam.id)}>✕</button>
                 </td>
               </tr>
             ))}
+            {editingCamId && (() => {
+              const colSpan = compact ? 4 : 5
+              return (
+                <tr key={`${editingCamId}-edit`}>
+                  <td colSpan={colSpan} style={{ ...compactTd, background: 'rgba(0,0,0,0.25)', borderTop: '1px solid var(--border-color)' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                      <div>
+                        <label style={{ ...s.label, fontSize: '0.7rem' }}>Name *</label>
+                        <input style={{ ...compactInput }} value={editCamForm.name} onChange={setEditCamField('name')} />
+                      </div>
+                      <div>
+                        <label style={{ ...s.label, fontSize: '0.7rem' }}>Type</label>
+                        <select style={{ ...compactSelect }} value={editCamForm.type} onChange={setEditCamField('type')}>
+                          <option value="usb">USB</option>
+                          <option value="rtsp">RTSP</option>
+                          <option value="file">File</option>
+                          <option value="youtube">YouTube Live</option>
+                        </select>
+                      </div>
+                      <div style={{ gridColumn: 'span 2' }}>
+                        <label style={{ ...s.label, fontSize: '0.7rem' }}>Source *</label>
+                        <input style={{ ...compactInput }} value={editCamForm.source} onChange={setEditCamField('source')} />
+                      </div>
+                      <div style={{ gridColumn: 'span 2' }}>
+                        <label style={{ ...s.label, fontSize: '0.7rem' }}>ROI Config ID (optional)</label>
+                        <input style={{ ...compactInput }} value={editCamForm.roi_camera_id} onChange={setEditCamField('roi_camera_id')} placeholder="Defaults to camera id" />
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <button style={{ ...s.btn('primary'), fontSize: '0.75rem' }} onClick={handleCamUpdate}>Save</button>
+                      <button style={{ ...s.btn(), fontSize: '0.75rem' }} onClick={cancelCamEdit}>Cancel</button>
+                      {editCamError && <span style={{ ...s.error, marginTop: 0, fontSize: '0.73rem' }}>{editCamError}</span>}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })()}
           </tbody>
         </table>
       )}

@@ -101,7 +101,7 @@ EDGE_HUB_URL = os.getenv("SMARTPARK_EDGE_HUB_URL", "")
 FRAME_WIDTH   = 640  if DEPLOYMENT_PROFILE == "edge" else 1280
 FRAME_HEIGHT  = 480  if DEPLOYMENT_PROFILE == "edge" else 720
 STREAM_FPS    = 6    if DEPLOYMENT_PROFILE == "edge" else 20
-JPEG_QUALITY  = 85
+JPEG_QUALITY  = 92
 
 # Live YouTube HLS URLs expire; cache resolved stream URLs for this long.
 YOUTUBE_STREAM_CACHE_TTL = int(os.getenv("SMARTPARK_YT_CACHE_TTL", "240"))  # seconds

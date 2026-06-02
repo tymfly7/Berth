@@ -124,8 +124,10 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
     window.open(`${apiBase}/api/evaluate/excel`, '_blank')
   }
 
-  const isEvaluating = evalStatus?.status === 'training'
+  const isEvaluating  = evalStatus?.status === 'training'
   const hasComparison = modelInfo.comparison && modelInfo.comparison.length > 0
+  const classRows     = modelInfo.comparison?.filter(r => r.type !== 'detection') ?? []
+  const detectRows    = modelInfo.comparison?.filter(r => r.type === 'detection')  ?? []
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -203,7 +205,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                     <DetailRow label="Recall"        value={details?.recall     != null ? `${details.recall.toFixed(1)}%`     : null} />
                     <DetailRow label="Train Time"    value={details?.total_time_s != null ? `${Math.round(details.total_time_s)}s` : null} />
                     {/* From comparison evaluation */}
-                    <DetailRow label="Test Acc"      value={compResult?.test_accuracy  != null ? `${compResult.test_accuracy.toFixed(1)}%`  : null} highlight />
+                    <DetailRow label={compResult?.type === 'detection' ? 'mAP@50' : 'Test Acc'} value={compResult?.test_accuracy  != null ? `${compResult.test_accuracy.toFixed(1)}%`  : null} highlight />
                     <DetailRow label="Precision"     value={compResult?.test_precision != null ? `${compResult.test_precision.toFixed(1)}%` : null} />
                     <DetailRow label="Recall"        value={compResult?.test_recall    != null ? `${compResult.test_recall.toFixed(1)}%`    : null} />
                     <DetailRow label="F1 Score"      value={compResult?.test_f1        != null ? `${compResult.test_f1.toFixed(1)}%`        : null} />
@@ -275,8 +277,9 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
               </tr>
             </thead>
             <tbody>
-              {modelInfo.comparison.map((r) => {
-                const isActive = modelInfo.active_model === r.model
+              {classRows.map((r) => {
+                const isActive  = modelInfo.active_model === r.model
+                const hasPRF    = r.test_precision != null || r.test_recall != null || r.test_f1 != null
                 return (
                   <tr
                     key={r.model}
@@ -292,15 +295,23 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                     <td style={{ padding: '4px', textAlign: 'right', color: 'var(--color-vacant)', fontWeight: 600 }}>
                       {r.test_accuracy != null ? `${r.test_accuracy.toFixed(1)}%` : '—'}
                     </td>
-                    <td style={{ padding: '4px', textAlign: 'right' }}>
-                      {r.test_precision != null ? `${r.test_precision.toFixed(1)}%` : '—'}
-                    </td>
-                    <td style={{ padding: '4px', textAlign: 'right' }}>
-                      {r.test_recall != null ? `${r.test_recall.toFixed(1)}%` : '—'}
-                    </td>
-                    <td style={{ padding: '4px', textAlign: 'right' }}>
-                      {r.test_f1 != null ? `${r.test_f1.toFixed(1)}%` : '—'}
-                    </td>
+                    {hasPRF ? (
+                      <>
+                        <td style={{ padding: '4px', textAlign: 'right' }}>
+                          {r.test_precision != null ? `${r.test_precision.toFixed(1)}%` : '—'}
+                        </td>
+                        <td style={{ padding: '4px', textAlign: 'right' }}>
+                          {r.test_recall != null ? `${r.test_recall.toFixed(1)}%` : '—'}
+                        </td>
+                        <td style={{ padding: '4px', textAlign: 'right' }}>
+                          {r.test_f1 != null ? `${r.test_f1.toFixed(1)}%` : '—'}
+                        </td>
+                      </>
+                    ) : (
+                      <td colSpan={3} style={{ padding: '4px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.65rem', fontStyle: 'italic' }}>
+                        top-1 accuracy{r.epochs != null ? ` · ${r.epochs} ep` : ''}
+                      </td>
+                    )}
                     <td style={{ padding: '4px', textAlign: 'right', color: 'var(--text-muted)' }}>
                       {r.train_time != null ? `${Math.round(r.train_time)}s` : '—'}
                     </td>
@@ -309,8 +320,43 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
               })}
             </tbody>
           </table>
+
+          {/* ── YOLO26 Detect — separate section (uses mAP@50, not classification accuracy) */}
+          {detectRows.map(r => (
+            <div key={r.model} style={{
+              marginTop: 8,
+              padding: '6px 8px',
+              background: 'rgba(99,102,241,0.05)',
+              borderRadius: 4,
+              fontSize: '0.72rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              flexWrap: 'wrap',
+            }}>
+              <span style={{ fontWeight: 600 }}>YOLO26 Detect</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>object detection model</span>
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
+                <span><span style={{ color: 'var(--text-muted)' }}>mAP@50 </span>
+                  <span style={{ color: 'var(--color-vacant)', fontWeight: 600 }}>
+                    {r.test_accuracy != null ? `${r.test_accuracy.toFixed(1)}%` : '—'}
+                  </span>
+                </span>
+                <span><span style={{ color: 'var(--text-muted)' }}>P </span>
+                  {r.test_precision != null ? `${r.test_precision.toFixed(1)}%` : '—'}
+                </span>
+                <span><span style={{ color: 'var(--text-muted)' }}>R </span>
+                  {r.test_recall != null ? `${r.test_recall.toFixed(1)}%` : '—'}
+                </span>
+                {r.train_time != null && (
+                  <span style={{ color: 'var(--text-muted)' }}>{Math.round(r.train_time)}s</span>
+                )}
+              </span>
+            </div>
+          ))}
+
           <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
-            All models: held-out test set (CNN/ResNet/MobileNet: PKLot · YOLO: gopro val/test split)
+            Classifiers: PKLot test set accuracy · YOLO26 Detect: mAP@50 on parking detection test split
           </div>
         </div>
       )}

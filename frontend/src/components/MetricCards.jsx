@@ -74,16 +74,16 @@ const CARDS = [
     getValue: (m) => `${Math.round(m.occupancy_percent ?? 0)}%`,
   },
   {
-    key: 'fps',
-    label: 'Stream FPS',
-    icon: '⚡',
+    key: 'streams',
+    label: 'Streams',
+    icon: '📡',
     iconBg: 'rgba(16,185,129,0.15)',
     color: 'var(--color-vacant)',
-    getValue: (m) => (m.fps > 0 ? m.fps : '–'),
+    getValue: (_, s) => s?.total > 0 ? `${s.connected} / ${s.total}` : '–',
   },
 ]
 
-export default function MetricCards({ metrics }) {
+export default function MetricCards({ metrics, streams }) {
   return (
     <>
       {CARDS.map((card, i) => (
@@ -97,7 +97,7 @@ export default function MetricCards({ metrics }) {
             <div style={{ ...iconWrap, background: card.iconBg }}>{card.icon}</div>
           </div>
           <div className="count-animate" style={{ ...bigNum, color: card.color }}>
-            {card.getValue(metrics)}
+            {card.getValue(metrics, streams)}
           </div>
           {card.key === 'occupancy' && (
             <div className="progress-bar" style={{ marginTop: 4 }}>
@@ -106,6 +106,17 @@ export default function MetricCards({ metrics }) {
                 style={{
                   width: `${metrics.occupancy_percent}%`,
                   background: occupancyColor(metrics.occupancy_percent),
+                }}
+              />
+            </div>
+          )}
+          {card.key === 'streams' && (
+            <div className="progress-bar" style={{ marginTop: 4 }}>
+              <div
+                className="progress-bar-fill"
+                style={{
+                  width: `${streams?.total > 0 ? (streams.connected / streams.total) * 100 : 0}%`,
+                  background: 'var(--color-vacant)',
                 }}
               />
             </div>

@@ -653,7 +653,11 @@ class TrainManager:
                 # Ultralytics classify: cm.matrix shape (nc, nc), cm[actual][predicted].
                 # Class 0 = occupied (alphabetical), treated as positive.
                 try:
-                    cm = val_res.confusion_matrix.matrix  # (2, 2)
+                    # Ultralytics classify ConfusionMatrix: try .matrix, fall back to .data
+                    raw_cm = val_res.confusion_matrix
+                    cm = getattr(raw_cm, "matrix", None) or getattr(raw_cm, "data", None)
+                    if cm is None:
+                        raise AttributeError(f"Cannot read confusion matrix from {type(raw_cm)}")
                     tp = float(cm[0][0])
                     fp = float(cm[1][0])
                     fn = float(cm[0][1])
@@ -665,8 +669,8 @@ class TrainManager:
                         "test_recall":    round(rec * 100, 2),
                         "test_f1":        round(f1 * 100, 2),
                     })
-                except Exception:
-                    pass
+                except Exception as _cm_err:
+                    logger.warning(f"yolo26_classify: could not compute P/R/F1 from confusion matrix — {_cm_err}")
 
                 results.append(entry)
 

@@ -54,7 +54,7 @@ class ParkingYOLO26:
                 'confidence': float detection score
                 'class_id':   int class index
         """
-        results = self.model(frame_bgr, verbose=False, conf=self._conf, iou=self._iou, classes=[1])
+        results = self.model(frame_bgr, verbose=False, conf=self._conf, iou=self._iou)
         detections = []
         for r in results:
             for box in r.boxes:

@@ -3,12 +3,16 @@ Video Processor — Real-Time Parking Detection from Camera or Video File
 ========================================================================
 Reads frames from a webcam or video file, classifies each parking slot
 using a trained CNN model, and streams annotated frames + metrics.
+
+Display and inference run on independent threads so live video is never
+blocked by model inference. The source thread feeds raw frames to both;
+the display thread encodes JPEGs immediately using cached slot statuses;
+the inference thread runs the model in the background and updates the cache.
 """
 
 import os
 import sys
 import base64
-import queue
 import threading
 import time
 import logging
@@ -21,21 +25,11 @@ import config
 from src.roi.roi_store import RoiStore
 from src.db import database as db
 
-# FFMPEG capture options applied to all VideoCapture instances:
-#
-# multiple_requests;0  — disable persistent HTTP connections.  YouTube HLS
-#   segments are served from different CDN hosts; ffmpeg's reconnect logic hits
-#   a host-mismatch check on every segment, logs "Cannot reuse HTTP connection
-#   for different host", and adds a full TCP+TLS handshake per segment.
-#   Disabling persistent connections avoids that code path entirely.
-#
-# fflags;nobuffer  — return packets immediately without input-level buffering,
-#   reducing the lag between the live edge and the first decoded frame.
-#
-# live_start_index;-3  — tell ffmpeg's HLS parser to start 3 segments from the
-#   end of the live manifest (near the live edge) instead of the beginning of
-#   YouTube's DVR window, which would add 30–60 s of initial latency.
-#   Ignored by non-HLS sources (USB cameras, files, RTSP).
+# FFMPEG capture options applied to all VideoCapture instances.
+# multiple_requests;0  — disable persistent HTTP connections so YouTube CDN
+#   host changes between HLS segments don't cause reconnect warnings.
+# fflags;nobuffer  — return packets immediately without input buffering.
+# live_start_index;-3  — start near the live edge of the HLS manifest.
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
     "multiple_requests;0|fflags;nobuffer|live_start_index;-3"
@@ -49,22 +43,55 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 class VideoProcessor:
     """
-    Reads video frames, classifies parking slots, and streams results.
-
-    Args:
-        model_name (str): Model architecture to use for inference.
+    Three-thread pipeline per camera:
+      source thread  — reads frames from the capture device / stream.
+      display thread — resizes + encodes JPEG immediately using cached results.
+      inference thread — runs ML model, updates metrics and overlay cache.
     """
+
+    _STATUS_COLOR = {
+        "vacant":   (80, 200, 80),
+        "occupied": (60,  60, 220),
+        "unknown":  (180, 180, 180),
+    }
 
     def __init__(self, model_name=None, camera_id: str = "default"):
         self.model_name = model_name or config.ACTIVE_MODEL
         self.camera_id = camera_id
-        self._source = 0          # 0 = first webcam; str = video file path
-        self._source_type = "auto"  # auto | usb | rtsp | file | youtube
+        self._source = 0
+        self._source_type = "auto"
 
         self.running = False
-        self._thread = None
+        self._thread = None          # source thread
+        self._display_thread = None
+        self._infer_thread = None
         self._lock = threading.Lock()
+
+        # Latest raw frame for the inference thread (always the newest).
+        self._latest_raw: np.ndarray | None = None
+        self._latest_raw_lock = threading.Lock()
+        self._infer_event = threading.Event()
+
+        # Jitter buffer: source pushes every raw frame here; display pops at
+        # STREAM_FPS. Absorbs bursty HLS segment delivery so the display
+        # thread drains the buffer smoothly during the inter-segment gap
+        # instead of freezing. maxlen caps memory and prevents unbounded
+        # latency on sources faster than STREAM_FPS.
+        _jitter_secs = 2
+        self._jitter_buffer: deque = deque(maxlen=config.STREAM_FPS * _jitter_secs)
+        self._jitter_lock = threading.Lock()
+        self._last_display_raw: np.ndarray | None = None
+
+        # Increments each time the display loop encodes a genuinely new JPEG.
+        self._frame_seq: int = 0
+
+        # Inference results shared with the display thread (overlays).
+        self._cached_status_map: dict = {}
+        self._cached_anomalies: list = []   # [{"bbox": (x1,y1,x2,y2), "label": str}]
+        self._cached_status_lock = threading.Lock()
+
         self._frame = None
+        self._frame_b64 = None
         self._metrics = self._default_metrics()
         self._history = deque(maxlen=100)
         self._last_db_write: float = 0.0
@@ -106,17 +133,29 @@ class VideoProcessor:
         if self.running:
             return
         self.running = True
-        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._display_thread = threading.Thread(
+            target=self._display_loop, daemon=True, name="sp-display"
+        )
+        self._display_thread.start()
+        self._infer_thread = threading.Thread(
+            target=self._inference_loop, daemon=True, name="sp-infer"
+        )
+        self._infer_thread.start()
+        self._thread = threading.Thread(
+            target=self._loop, daemon=True, name="sp-source"
+        )
         self._thread.start()
         logger.info(f"VideoProcessor started (source: {self._source})")
 
     def stop_processing(self):
         self.running = False
-        if self._thread:
-            self._thread.join(timeout=3)
+        self._infer_event.set()  # unblock inference thread so it can exit
+        for t in (self._thread, self._display_thread, self._infer_thread):
+            if t:
+                t.join(timeout=3)
 
     def set_anomaly_detection(self, enabled: bool) -> None:
-        """Enable/disable wrong-parking anomaly detection. Raises if YOLO26 detect model missing."""
+        """Enable/disable wrong-parking anomaly detection."""
         if enabled and self._yolo_detector is None:
             self._load_yolo_detector()
         self._anomaly_enabled = enabled
@@ -136,7 +175,7 @@ class VideoProcessor:
             self.start_processing()
         logger.info(f"Video source: {source} (type={self._source_type})")
 
-    # ── Background loop ────────────────────────────────────────────────────
+    # ── Source routing ─────────────────────────────────────────────────────
 
     def _is_youtube(self):
         return self._source_type == "youtube"
@@ -147,13 +186,6 @@ class VideoProcessor:
         )
 
     def _open_capture(self, force_refresh=False):
-        """
-        Open a cv2.VideoCapture for the current source.
-
-        For YouTube sources the watch URL is resolved to a live HLS stream URL
-        first. Sets a minimal buffer size for YouTube to reduce lag.
-        Returns an opened VideoCapture, or None on failure.
-        """
         if self._is_youtube():
             from src.cameras.youtube_resolver import (
                 resolve_stream_url, YouTubeResolveError,
@@ -172,26 +204,43 @@ class VideoProcessor:
             return None
 
         if self._is_youtube():
-            # Keep only 1 frame in the internal queue so we always get the
-            # freshest available frame rather than a buffered stale one.
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         return cap
 
     def _loop(self):
         if self._is_youtube():
-            self._youtube_loop()
+            self._youtube_source_loop()
         else:
-            self._regular_loop()
+            self._regular_source_loop()
 
-    # ── Regular (USB / RTSP / file) loop ──────────────────────────────────
+    # ── Frame ingestion (called by source thread) ──────────────────────────
 
-    def _regular_loop(self):
+    def _ingest_raw_frame(self, frame: np.ndarray):
+        """Push frame into the jitter buffer (display) and update latest_raw (inference)."""
+        with self._latest_raw_lock:
+            self._latest_raw = frame
+        with self._jitter_lock:
+            self._jitter_buffer.append(frame)
+        self._infer_event.set()
+
+    # ── Regular (USB / RTSP / file) source loop ───────────────────────────
+
+    def _regular_source_loop(self):
         cap = self._open_capture()
         if cap is None:
             logger.error(f"Cannot open video source: {self._source}")
             self.running = False
             return
+
+        # For file sources, read at the video's own FPS so playback is real-speed.
+        # Falling back to STREAM_FPS would make low-FPS videos play too fast
+        # (e.g. a 13 fps file read at 20 fps plays at 1.5×).
+        if self._is_file():
+            native_fps = cap.get(cv2.CAP_PROP_FPS)
+            file_frame_interval = 1.0 / (native_fps if 1 <= native_fps <= 120 else config.STREAM_FPS)
+        else:
+            file_frame_interval = 0.0
 
         try:
             while self.running:
@@ -204,38 +253,29 @@ class VideoProcessor:
                         logger.warning("Camera frame grab failed, retrying...")
                         time.sleep(0.1)
                         continue
-
-                self._process_frame(raw_frame)
-                time.sleep(1.0 / config.STREAM_FPS)
+                self._ingest_raw_frame(raw_frame)
+                # Live sources (USB/RTSP) block naturally inside cap.read().
+                if file_frame_interval:
+                    time.sleep(file_frame_interval)
         finally:
             cap.release()
 
-    # ── YouTube loop with background grab thread ───────────────────────────
+    # ── YouTube source loop ────────────────────────────────────────────────
 
-    def _youtube_loop(self):
+    def _youtube_source_loop(self):
         """
-        YouTube HLS streams have 2–8 s segment boundaries; a blocking cap.read()
-        call stalls the inference loop for that entire duration. This loop
-        separates concerns:
-
-          - grab thread  : owns cap, calls cap.read() as fast as possible,
-                           always keeps the single freshest frame in frame_q.
-          - inference loop: pulls from frame_q (non-blocking with timeout),
-                           runs detection, updates shared state.
-
-        Because the grab thread drains the HLS buffer continuously, the
-        inference loop sees new frames immediately after they are decoded
-        rather than waiting for a full segment boundary.
+        Owns the VideoCapture for YouTube HLS streams. Reads frames as fast
+        as the stream delivers them, feeds each to _ingest_raw_frame, and
+        auto-reconnects when the stream stalls or the HLS URL expires.
         """
-        frame_q: queue.Queue = queue.Queue(maxsize=2)
-        stop_grab = threading.Event()
         cap_holder = [self._open_capture()]
-
         if cap_holder[0] is None:
             logger.warning(
                 f"YouTube initial connect failed for '{self._source}', "
-                "grab thread will retry..."
+                "will retry..."
             )
+
+        stop_grab = threading.Event()
 
         def _grab():
             fails = 0
@@ -246,7 +286,7 @@ class VideoProcessor:
                     if new:
                         cap_holder[0] = new
                         fails = 0
-                        logger.info(f"YouTube grab thread connected: {self._source}")
+                        logger.info(f"YouTube stream connected: {self._source}")
                     else:
                         stop_grab.wait(2.0)
                     continue
@@ -254,21 +294,12 @@ class VideoProcessor:
                 ret, frame = cap.read()
                 if ret:
                     fails = 0
-                    # Discard any stale buffered frame; keep only the freshest.
-                    while not frame_q.empty():
-                        try:
-                            frame_q.get_nowait()
-                        except queue.Empty:
-                            break
-                    try:
-                        frame_q.put_nowait(frame)
-                    except queue.Full:
-                        pass
+                    self._ingest_raw_frame(frame)
                 else:
                     fails += 1
                     if fails >= 3:
                         logger.warning(
-                            f"YouTube grab failing — re-resolving stream for '{self._source}'"
+                            f"YouTube stream stalling — re-resolving for '{self._source}'"
                         )
                         try:
                             cap.release()
@@ -288,107 +319,173 @@ class VideoProcessor:
 
         grab_t = threading.Thread(target=_grab, daemon=True, name="yt-grab")
         grab_t.start()
-
         try:
             while self.running:
-                try:
-                    raw_frame = frame_q.get(timeout=5.0)
-                except queue.Empty:
-                    # No frame yet (still connecting or stream hiccup); keep waiting.
-                    continue
-
-                self._process_frame(raw_frame)
-                # No sleep here — frame_q.get() is the natural throttle.
-                # New frames only arrive as fast as the HLS stream delivers them.
+                time.sleep(0.5)
         finally:
             stop_grab.set()
             grab_t.join(timeout=5)
 
-    # ── Shared frame processing ────────────────────────────────────────────
+    # ── Display loop (fast path) ───────────────────────────────────────────
 
-    def _process_frame(self, raw_frame):
-        frame = cv2.resize(raw_frame, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
-        result = self._detector.detect(frame, camera_id=self.camera_id)
+    def _display_loop(self):
+        """
+        Timer-driven at STREAM_FPS. For YouTube HLS sources the jitter buffer
+        absorbs burst segment delivery. For all other sources the latest raw
+        frame is used directly so live feeds have no buffering lag.
+        """
+        frame_interval = 1.0 / config.STREAM_FPS
 
-        now = time.time()
-        self._fps_frames += 1
-        _fps_elapsed = now - self._fps_ts
-        if _fps_elapsed >= 1.0:
-            self._fps = round(self._fps_frames / _fps_elapsed, 1)
-            self._fps_frames = 0
-            self._fps_ts = now
-        if now - self._roi_cache_ts > 1.0:
-            self._roi_cache = RoiStore.get_rois(self.camera_id)
-            self._roi_cache_ts = now
+        while self.running:
+            t0 = time.time()
 
-        # BGR colors keyed by slot status
-        _STATUS_COLOR = {
-            "vacant":   (80, 200, 80),
-            "occupied": (60,  60, 220),
-            "unknown":  (180, 180, 180),
-        }
+            if self._is_youtube():
+                # YouTube HLS: drain jitter buffer to smooth inter-segment gaps.
+                with self._jitter_lock:
+                    has_new = bool(self._jitter_buffer)
+                    if has_new:
+                        raw = self._jitter_buffer.popleft()
+                        self._last_display_raw = raw
+                    else:
+                        raw = self._last_display_raw
+            else:
+                # Live USB/RTSP/file: always show the newest available frame.
+                with self._latest_raw_lock:
+                    latest = self._latest_raw
+                has_new = latest is not self._last_display_raw
+                if has_new:
+                    self._last_display_raw = latest
+                raw = self._last_display_raw
 
-        status_map = {s["id"]: s["status"] for s in result.get("slots", [])}
+            if raw is not None:
+                frame = cv2.resize(raw, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
 
-        display = frame.copy()
-        if self._roi_cache:
-            h, w = display.shape[:2]
-            for roi in self._roi_cache:
-                pts = np.array(
-                    [[int(p[0] * w), int(p[1] * h)] for p in roi.get("polygon", [])],
-                    np.int32,
-                )
-                if len(pts) >= 3:
-                    status = status_map.get(roi.get("id"), "unknown")
-                    color = _STATUS_COLOR.get(status, _STATUS_COLOR["unknown"])
-                    cv2.polylines(display, [pts], True, color, 2)
+                # Refresh ROI cache at most once per second.
+                if t0 - self._roi_cache_ts > 1.0:
+                    self._roi_cache = RoiStore.get_rois(self.camera_id)
+                    self._roi_cache_ts = t0
 
-        misparked_count = 0
-        if self._anomaly_enabled and self._yolo_detector is not None and self._roi_cache:
-            h, w = frame.shape[:2]
-            try:
-                from src.inference.parking_geometry import classify_vehicle_parking
-                cars = self._yolo_detector.predict_frame(frame)
-                for car in cars:
-                    clf = classify_vehicle_parking(car["bbox"], self._roi_cache, w, h)
-                    if clf["status"] == "misparked":
-                        misparked_count += 1
-                        x1, y1, x2, y2 = (int(v) for v in car["bbox"])
-                        cv2.rectangle(display, (x1, y1), (x2, y2), (0, 165, 255), 2)
-                        reason = "STRADDLE" if clf["reason"] == "straddling" else "OUTSIDE"
-                        cv2.putText(display, reason, (x1 + 2, max(y1 - 4, 14)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 1)
-            except Exception as e:
-                logger.warning(f"Anomaly detection error: {e}")
+                # Draw slot overlays using the last inference result.
+                display = frame.copy()
+                if self._roi_cache:
+                    h, w = display.shape[:2]
+                    with self._cached_status_lock:
+                        status_map = dict(self._cached_status_map)
+                    for roi in self._roi_cache:
+                        pts = np.array(
+                            [[int(p[0] * w), int(p[1] * h)] for p in roi.get("polygon", [])],
+                            np.int32,
+                        )
+                        if len(pts) >= 3:
+                            status = status_map.get(roi.get("id"), "unknown")
+                            color = self._STATUS_COLOR.get(status, self._STATUS_COLOR["unknown"])
+                            cv2.polylines(display, [pts], True, color, 2)
 
-        metrics = self._result_to_metrics(result)
-        metrics["misparked_count"] = misparked_count
-        metrics["anomaly_enabled"] = self._anomaly_enabled
-        ts = datetime.now(timezone.utc).isoformat()
+                # Draw cached anomaly bounding boxes.
+                with self._cached_status_lock:
+                    anomalies = list(self._cached_anomalies)
+                for a in anomalies:
+                    x1, y1, x2, y2 = a["bbox"]
+                    cv2.rectangle(display, (x1, y1), (x2, y2), (0, 165, 255), 2)
+                    cv2.putText(display, a["label"], (x1 + 2, max(y1 - 4, 14)),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 1)
 
-        with self._lock:
-            self._frame = display
-            self._metrics = metrics
-            self._history.append({
-                "timestamp": ts,
-                "available": metrics["available"],
-                "occupied": metrics["occupied"],
-                "occupancy_percent": metrics["occupancy_percent"],
-            })
-            self._update_heatmap(result["slots"])
-            now_t = time.time()
-            if now_t - self._last_db_write >= 60:
-                self._last_db_write = now_t
+                # Track display-side FPS (only count new frames, not repeats).
+                if has_new:
+                    self._fps_frames += 1
+                fps_elapsed = t0 - self._fps_ts
+                if fps_elapsed >= 1.0:
+                    self._fps = round(self._fps_frames / fps_elapsed, 1)
+                    self._fps_frames = 0
+                    self._fps_ts = t0
+
+                _, buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, config.JPEG_QUALITY])
+                frame_b64 = base64.b64encode(buf).decode("utf-8")
+
+                with self._lock:
+                    self._frame = display
+                    self._frame_b64 = frame_b64
+                    # Only advance seq for genuinely new frames so the WS
+                    # knows not to resend a repeated still.
+                    if has_new:
+                        self._frame_seq += 1
+
+            sleep_time = frame_interval - (time.time() - t0)
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
+    # ── Inference loop (background) ────────────────────────────────────────
+
+    def _inference_loop(self):
+        """
+        Wakes on every new raw frame and runs the slot detector. Updates
+        metrics, heatmap, DB, and the overlay cache used by the display loop.
+        Runs as fast as the model allows without blocking video display.
+        """
+        while self.running:
+            if not self._infer_event.wait(timeout=2.0):
+                continue
+            self._infer_event.clear()
+            if not self.running:
+                break
+
+            with self._latest_raw_lock:
+                raw = self._latest_raw
+            if raw is None:
+                continue
+
+            frame = cv2.resize(raw, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
+            result = self._detector.detect(frame, camera_id=self.camera_id)
+
+            new_status_map = {s["id"]: s["status"] for s in result.get("slots", [])}
+
+            # Anomaly detection (optional YOLO26 detect pass).
+            new_anomalies = []
+            if self._anomaly_enabled and self._yolo_detector is not None and self._roi_cache:
+                h, w = frame.shape[:2]
                 try:
-                    db.record_occupancy(
-                        self.camera_id,
-                        metrics["available"],
-                        metrics["occupied"],
-                        metrics["occupancy_percent"],
-                    )
-                    db.maybe_record_alert(self.camera_id, metrics["occupancy_percent"])
-                except Exception as _db_err:
-                    logger.warning(f"DB write failed: {_db_err}")
+                    from src.inference.parking_geometry import classify_vehicle_parking
+                    cars = self._yolo_detector.predict_frame(frame)
+                    for car in cars:
+                        clf = classify_vehicle_parking(car["bbox"], self._roi_cache, w, h)
+                        if clf["status"] == "misparked":
+                            x1, y1, x2, y2 = (int(v) for v in car["bbox"])
+                            label = "STRADDLE" if clf["reason"] == "straddling" else "OUTSIDE"
+                            new_anomalies.append({"bbox": (x1, y1, x2, y2), "label": label})
+                except Exception as e:
+                    logger.warning(f"Anomaly detection error: {e}")
+
+            with self._cached_status_lock:
+                self._cached_status_map = new_status_map
+                self._cached_anomalies = new_anomalies
+
+            metrics = self._result_to_metrics(result)
+            metrics["misparked_count"] = len(new_anomalies)
+            metrics["anomaly_enabled"] = self._anomaly_enabled
+            ts = datetime.now(timezone.utc).isoformat()
+
+            with self._lock:
+                self._metrics = metrics
+                self._history.append({
+                    "timestamp": ts,
+                    "available": metrics["available"],
+                    "occupied": metrics["occupied"],
+                    "occupancy_percent": metrics["occupancy_percent"],
+                })
+                self._update_heatmap(result["slots"])
+                now_t = time.time()
+                if now_t - self._last_db_write >= 60:
+                    self._last_db_write = now_t
+                    try:
+                        db.record_occupancy(
+                            self.camera_id,
+                            metrics["available"],
+                            metrics["occupied"],
+                            metrics["occupancy_percent"],
+                        )
+                        db.maybe_record_alert(self.camera_id, metrics["occupancy_percent"])
+                    except Exception as _db_err:
+                        logger.warning(f"DB write failed: {_db_err}")
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -430,13 +527,17 @@ class VideoProcessor:
 
     def get_latest_frame_base64(self):
         with self._lock:
-            if self._frame is None:
-                return None
-            _, buf = cv2.imencode(
-                ".jpg", self._frame,
-                [cv2.IMWRITE_JPEG_QUALITY, config.JPEG_QUALITY],
-            )
-            return base64.b64encode(buf).decode("utf-8")
+            return self._frame_b64
+
+    def get_frame_seq(self) -> int:
+        """Increments each time a new JPEG is encoded. Use to detect new frames."""
+        with self._lock:
+            return self._frame_seq
+
+    def get_frame_and_seq(self) -> tuple:
+        """Atomically returns (frame_b64, frame_seq) under a single lock."""
+        with self._lock:
+            return self._frame_b64, self._frame_seq
 
     def get_metrics(self):
         with self._lock:

@@ -1,28 +1,30 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, memo } from 'react'
 import CameraFeedCell from './CameraFeedCell'
 
 const WS_BASE = `ws://${window.location.hostname}:8000`
 const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
 
-// Manages a single camera's WebSocket. Renders nothing — purely keeps the
-// connection alive regardless of where CameraFeedCell appears in the tree.
-function CameraConnection({ cameraId, onData }) {
-  const wsRef = useRef(null)
-  const reconnectTimer = useRef(null)
-  const stopReconnect = useRef(false)
-  const onDataRef = useRef(onData)
-  onDataRef.current = onData
+// Owns one camera's WebSocket + state. Re-renders only when its own data changes.
+const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onClick, mini }) {
+  const [frame, setFrame]           = useState(null)
+  const [metrics, setMetrics]       = useState({ available: 0, occupied: 0 })
+  const [connected, setConnected]   = useState(false)
+  const [unavailable, setUnavailable] = useState(null)
+
+  const wsRef              = useRef(null)
+  const reconnectTimer     = useRef(null)
+  const stopReconnect      = useRef(false)
+  const onMetricsRef       = useRef(onMetrics)
+  onMetricsRef.current     = onMetrics
+  const metricsThrottleRef = useRef(0)
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
     const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-    const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cameraId}${wsToken}`)
+    const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cam.id}${wsToken}`)
     wsRef.current = ws
 
-    ws.onopen = () => {
-      stopReconnect.current = false
-      onDataRef.current({ connected: true, unavailable: null })
-    }
+    ws.onopen = () => { stopReconnect.current = false; setConnected(true); setUnavailable(null) }
 
     ws.onmessage = (event) => {
       try {
@@ -30,38 +32,49 @@ function CameraConnection({ cameraId, onData }) {
         if (data.type === 'feed_unavailable') {
           stopReconnect.current = true
           clearTimeout(reconnectTimer.current)
-          onDataRef.current({ connected: false, unavailable: data.reason ?? 'Feed unavailable' })
+          setConnected(false)
+          setUnavailable(data.reason ?? 'Feed unavailable')
           ws.close()
           return
         }
         if (data.error) { ws.close(); return }
-        const update = {}
-        if (data.frame)   update.frame   = data.frame
-        if (data.metrics) update.metrics = data.metrics
-        if (Object.keys(update).length) onDataRef.current(update)
-      } catch { /* ignore parse errors */ }
+        if (data.frame) setFrame(data.frame)
+        if (data.metrics) {
+          const now = Date.now()
+          if (now - metricsThrottleRef.current >= 500) {
+            metricsThrottleRef.current = now
+            setMetrics(data.metrics)
+            onMetricsRef.current?.(cam.id, data.metrics)
+          }
+        }
+      } catch { /* ignore */ }
     }
 
     ws.onclose = () => {
-      onDataRef.current({ connected: false })
-      if (!stopReconnect.current) {
-        reconnectTimer.current = setTimeout(connect, 3000)
-      }
+      setConnected(false)
+      if (!stopReconnect.current) reconnectTimer.current = setTimeout(connect, 3000)
     }
 
     ws.onerror = () => ws.close()
-  }, [cameraId])
+  }, [cam.id])
 
   useEffect(() => {
     connect()
-    return () => {
-      clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
-    }
+    return () => { clearTimeout(reconnectTimer.current); wsRef.current?.close() }
   }, [connect])
 
-  return null
-}
+  return (
+    <CameraFeedCell
+      name={cam.name}
+      frame={frame}
+      metrics={metrics}
+      connected={connected}
+      unavailable={unavailable}
+      onClick={onClick}
+      mini={mini}
+    />
+  )
+})
 
 const s = {
   card: {
@@ -158,18 +171,11 @@ export default function MultiCameraGrid({ cameras, bare = false, onFocusChange }
     setFocusedId(id)
     onFocusChange?.(id)
   }, [onFocusChange])
-  const [feedData, setFeedData] = useState({})
 
   const active = cameras.filter(c => c.active)
 
-  const handleCameraData = useCallback((cameraId, data) => {
-    setFeedData(prev => ({
-      ...prev,
-      [cameraId]: { ...(prev[cameraId] || {}), ...data },
-    }))
-    if (data.metrics) {
-      setMetricsMap(prev => ({ ...prev, [cameraId]: data.metrics }))
-    }
+  const handleMetrics = useCallback((cameraId, metrics) => {
+    setMetricsMap(prev => ({ ...prev, [cameraId]: metrics }))
   }, [])
 
   // Clear focus if the focused camera is deactivated
@@ -204,22 +210,14 @@ export default function MultiCameraGrid({ cameras, bare = false, onFocusChange }
       <>
         <div style={s.focusedWrap}>
           <button style={s.exitBtn} onClick={() => setFocus(null)}>← All Feeds</button>
-          <CameraFeedCell
-            name={focusedCam.name}
-            {...(feedData[focusedCam.id] || {})}
-          />
+          <CameraFeed cam={focusedCam} onMetrics={handleMetrics} />
         </div>
 
         {others.length > 0 && (
           <div style={s.strip}>
             {others.map(cam => (
               <div key={cam.id} style={s.stripItem} onClick={() => setFocus(cam.id)}>
-                <CameraFeedCell
-                  name={cam.name}
-                  mini
-                  onClick={() => setFocus(cam.id)}
-                  {...(feedData[cam.id] || {})}
-                />
+                <CameraFeed cam={cam} onMetrics={handleMetrics} mini onClick={() => setFocus(cam.id)} />
               </div>
             ))}
           </div>
@@ -233,12 +231,7 @@ export default function MultiCameraGrid({ cameras, bare = false, onFocusChange }
       <>
         <div style={{ display: 'grid', gridTemplateColumns: gridColumns(active.length), gap: 12 }}>
           {active.map(cam => (
-            <CameraFeedCell
-              key={cam.id}
-              name={cam.name}
-              onClick={() => setFocus(cam.id)}
-              {...(feedData[cam.id] || {})}
-            />
+            <CameraFeed key={cam.id} cam={cam} onMetrics={handleMetrics} onClick={() => setFocus(cam.id)} />
           ))}
         </div>
         {totalsRow}
@@ -249,16 +242,6 @@ export default function MultiCameraGrid({ cameras, bare = false, onFocusChange }
   const content = (
     <>
       <div style={s.title}>Live Camera Feeds</div>
-
-      {/* Connection keepers — always mounted at this level, never affected by layout changes */}
-      {active.map(cam => (
-        <CameraConnection
-          key={cam.id}
-          cameraId={cam.id}
-          onData={(data) => handleCameraData(cam.id, data)}
-        />
-      ))}
-
       {layout}
     </>
   )
