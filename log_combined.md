@@ -282,3 +282,72 @@ Replaced hardcoded 18-slot grid with polygon/rectangle ROI editor. `RoiStore` pe
 ### Frontend (`frontend/src/components/MultiCameraGrid.jsx`)
 
 - **Transient vs permanent `feed_unavailable`** — `"Camera is not active"` is now treated as transient: `stopReconnect.current` stays `false`, `onclose` schedules a 3-second retry, and the cell shows "Connecting…" instead of an error. All other reasons (stream timeout, camera removed) remain permanent and stop retrying. When the background warmup thread finishes and the processor is ready, the retry succeeds and the feed appears automatically.
+
+---
+
+## 2026-06-03 — Testing-Mode Analyze Latency (~4.5s→~1s, varying spikes to 20s)
+
+### Diagnosis (measured, not assumed)
+
+- Added temporary stage timing to `analyze_roi` (backend) and `handleTest` (frontend), then removed it. Proved the bottleneck was **not** inference (≤0.8s), JSON parse (~10ms), or image render (~20ms). Cost lived in: (1) a one-time ~2s model **load** on each model's first click, and (2) moving a full-res **3200×1800 image** around — upload + server decode + the ~1.4MB base64 response. `camera_id` confirmed to be only an ROI namespace (ROIs are sent inline via `rois_json`), not a compute factor.
+
+### Backend (`backend/main.py`)
+
+- **Pre-warm all classifiers at startup** — Extended the `startup-warmup` daemon thread to call `_get_classifier()` for all five models after the processor warm-up. First analyze of each model is now hot (~0ms load) instead of paying ~2s cold load when switching models to compare them.
+- **Cap annotated output to ≤1280px** — `analyze_roi` now `cv2.resize`s the annotated frame down before base64 encoding (result is shown in a narrow side panel). Shrinks the response payload.
+
+### Frontend (`frontend/src/components/ControlPanel.jsx`)
+
+- **Downscale upload to ≤1600px** — Added `downscaleForUpload()` (createImageBitmap → canvas → JPEG blob) used in `handleTest` before POST. Crops classify at 64px and ROIs are normalised (0–1), so resizing is lossless for accuracy; upload drops ~1.1MB → ~0.2–0.4MB. Falls back to the original file on any failure.
+
+### Frontend (`frontend/src/config.js`)
+
+- **`localhost` → `127.0.0.1`** — `API_BASE` now uses `127.0.0.1` when hostname is `localhost`, avoiding the Windows IPv6 (`::1`) connect stall (~1–2s/request); real hostnames preserved for remote access.
+
+### Follow-up minor touches
+
+- **Fixed latent crash** (`ControlPanel.jsx`) — `selectedLotId` init referenced undefined `DEFAULT_LOT.id`; would `ReferenceError` and crash the panel whenever `loadLots()` returned `[]`. Changed to `DEFAULT_LOTS[0]?.id || null`.
+- **Deduped YOLO classifier in RAM** (`main.py`) — `_get_classifier` now maps both `yolo26` and `yolo26_classify` to one shared cache key, so the identical weights aren't held in memory twice (also means the startup pre-warm loads YOLO once).
+- ResNet-50 left in the startup pre-warm set (in active use).
+- **Public View layout** (`PublicView.jsx`) — moved the metric cards above the lot map so headline occupancy numbers read before the per-slot map.
+
+---
+
+## 2026-06-03 — Docs, 404, Controls UX & ROI Editor Overhaul
+
+### Docs Page (`frontend/src/pages/DocsPage.jsx`, `App.jsx`, `Header.jsx`)
+
+- **`/admin/docs` Getting Started guide** — 8-section operator reference: System Overview, Admin Login, Connecting a Camera (USB / RTSP / YouTube, credential env-var pattern sourced from README), Drawing ROIs, Choosing a Model, Dashboard Walkthrough, Anomaly Detection, Training. PIN-gated same as `/admin`. "Docs" nav link added to Header, highlights when active.
+
+### 404 Handling
+
+- **Frontend 404 page** (`NotFoundPage.jsx`) — Catch-all `path="*"` route; "Go Home" routes to `/admin` when `sessionStorage` shows admin auth, otherwise `/`.
+- **Backend 404 handler** (`main.py`) — `@app.exception_handler(404)` returns `{"detail": "We looked everywhere and we couldn't find that!"}`.
+
+### Backend Bug Fix (`backend/src/models/model_factory.py`)
+
+- **`pretrained` kwarg crash** — `load_model()` was injecting `pretrained=False` into kwargs for all models including `ParkingCNN`, which has no such parameter. Scoped the injection to `resnet50` and `mobilenetv4s` only.
+
+### Controls — Testing Panel UX (`frontend/src/components/ControlPanel.jsx`)
+
+- **Removed** "New lot name…" input and "+ New" button from the testing area.
+- **Removed** both "✕ Remove" buttons (uploaded image row and result image row).
+- **Added** ✕ circle overlay (top-right) on uploaded image and result image to clear state.
+- **Added** "⬇ Save" button on result image — triggers browser download of the annotated JPEG.
+- **"✏️ ROI" button** (renamed from "Draw ROIs") opens a blank canvas with no pre-loaded ROIs; ✎ button still loads and edits existing ROIs.
+- **ROI name input in modal** — user can type a name before saving; creates a new named lot if the name is new, overwrites if it matches an existing one.
+- **Fixed ghost lot reappearance** — `loadLots()` now only seeds `DEFAULT_LOTS` when the `localStorage` key is absent (first run). Previously re-inserted deleted lots on every call, causing repeated `DELETE /api/roi/…` 404s.
+- **ROI save success notifications removed** — silent on success; errors and validation messages retained.
+- **Brighter placeholder** on ROI name input (`.roi-name-input::placeholder` injected style).
+
+### ROI Editor Modal (`ControlPanel.jsx`, `RoiEditor.jsx`)
+
+- **React portal** — modal rendered via `createPortal(…, document.body)` with `zIndex: 9999`; escapes sidebar stacking context and covers the full viewport.
+- **Image-behind-canvas** — uploaded image rendered as a real `<img>` (max-height `calc(100vh - 60px)`, `object-fit: contain`) with the RoiEditor canvas in `overlay` mode sitting `position: absolute, inset: 0` on top. Canvas is transparent; photo shows through.
+- **Canvas repaint fix** (`RoiEditor.jsx`) — added `requestAnimationFrame(() => { syncSize(); redraw() })` on mount so the canvas repaints after the flex layout settles; previously the image loaded onto a zero-height canvas and never re-rendered.
+- **Background image in overlay mode** (`RoiEditor.jsx`) — removed the `overlay ||` short-circuit in the background-image `useEffect` so `backgroundImage` prop is honoured regardless of overlay flag.
+- **✕ cancel button** — fixed 30×30 icon button always visible in modal header; compact "Save" replaces "Save & Close".
+
+### ROI Editor Colors (`RoiEditor.jsx`)
+
+- **All ROIs now green** — replaced the 5-color `COLORS` array with a single `ROI_COLOR = '#10b981'`; applied to all new ROI creation paths and the redraw `baseColor` fallback. Spot-type colors (reserved amber, handicap blue) unchanged.

@@ -197,15 +197,18 @@ _clf_cache: dict = {}
 _clf_lock = threading.Lock()
 
 def _get_classifier(model_name: str):
+    # 'yolo26' and 'yolo26_classify' load the same weights — share one cached
+    # instance so the model isn't held in memory twice.
+    cache_key = "yolo26_classify" if model_name in ("yolo26", "yolo26_classify") else model_name
     with _clf_lock:
-        if model_name not in _clf_cache:
+        if cache_key not in _clf_cache:
             from src.inference.classifier import get_classifier
-            clf = get_classifier(model_name=model_name)
+            clf = get_classifier(model_name=cache_key)
             clf.load()
             if not clf.is_loaded():
                 raise Exception(f"Model '{model_name}' failed to load")
-            _clf_cache[model_name] = clf
-        return _clf_cache[model_name]
+            _clf_cache[cache_key] = clf
+        return _clf_cache[cache_key]
 
 def _clear_clf_cache():
     with _clf_lock:

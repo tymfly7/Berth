@@ -268,6 +268,18 @@ export default function PublicView() {
         </div>
       )}
 
+      {/* Metric cards */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gap: 16,
+        width: '100%',
+        maxWidth: 800,
+        marginBottom: 32,
+      }}>
+        <MetricCards metrics={displayMetrics} />
+      </div>
+
       {/* Lot map */}
       {allCameraSlots.length > 0 && (() => {
         const safeIdx = Math.min(lotMapIdx, allCameraSlots.length - 1)
@@ -306,18 +318,6 @@ export default function PublicView() {
           </div>
         )
       })()}
-
-      {/* Metric cards */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: 16,
-        width: '100%',
-        maxWidth: 800,
-        marginBottom: 32,
-      }}>
-        <MetricCards metrics={displayMetrics} />
-      </div>
 
       {/* Trends chart */}
       <div style={{ width: '100%', maxWidth: 800, marginBottom: 32 }}>
