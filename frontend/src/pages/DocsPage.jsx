@@ -565,44 +565,185 @@ export default function DocsPage() {
         <p style={s.body}>
           If the default pre-trained weights produce low confidence on your
           lot, you can train a new model on images captured from your own
-          cameras.
+          cameras. Open <span style={s.label}>Settings → Model Training</span>{' '}
+          to access all training tools. Each sub-section is collapsed by
+          default — click the header to expand it.
         </p>
-        <ol style={s.steps}>
+
+        {/* ── Training Data Browser ── */}
+        <p style={{ ...s.body, marginBottom: 8 }}>
+          <span style={s.label}>Inspecting what data is already on the server</span>
+        </p>
+        <p style={s.body}>
+          Open <span style={s.label}>Settings → Training Data</span> to see a
+          live count of images in every dataset folder. Use the{' '}
+          <span style={s.label}>↻ Refresh</span> button to re-poll after an
+          upload. The table shows:
+        </p>
+        <ul style={{ ...s.steps, listStyleType: 'disc' }}>
           <li style={s.step}>
-            Open <span style={s.label}>Settings → Model Training</span>.
+            <Code>occupied</Code> / <Code>vacant</Code> — cropped spot images
+            used by the classifier models.
           </li>
           <li style={s.step}>
-            Use the <span style={s.label}>Data Augmentation</span> tools to
-            prepare your training images. Augmentation applies crops,
-            brightness shifts, and flips to expand the dataset.
+            <Code>yolo_data/parking_rois_gopro</Code> — full-scene frames and
+            annotations used by YOLO26 Detect.
           </li>
           <li style={s.step}>
-            Review the augmented sample previews. Adjust intensity if the
-            transformations look too aggressive for your lighting conditions.
+            <Code>yolo_detect_dataset</Code> — the converted YOLO dataset
+            (train / val / test split counts shown inline).
+          </li>
+        </ul>
+
+        <hr style={s.divider} />
+
+        {/* ── Classifier Images ── */}
+        <p style={{ ...s.body, marginBottom: 8 }}>
+          <span style={s.label}>Uploading classifier images</span>
+        </p>
+        <p style={s.body}>
+          Open <span style={s.label}>Model Training → Classifier Images</span>{' '}
+          (hover the <Code>?</Code> badge for a quick reminder). This upload
+          path feeds the four classifier models:
+        </p>
+        <div style={s.chipRow}>
+          {['CNN Scratch', 'ResNet-50', 'MobileNetV4', 'YOLO26 Classify'].map(m => (
+            <span key={m} style={s.chip}>{m}</span>
+          ))}
+        </div>
+        <ol style={{ ...s.steps, marginTop: 12 }}>
+          <li style={s.step}>
+            Prepare <span style={s.label}>cropped images of individual parking
+            spots</span> — one image per slot per frame. Any common format is
+            accepted (jpg, png, bmp). The model resizes everything to 224 × 224
+            automatically.
           </li>
           <li style={s.step}>
-            Click <span style={s.label}>Start Training</span>. A progress bar
-            and epoch counter track the job.
+            Drop or click the <span style={s.label}>🚗 Occupied</span> zone to
+            add images of occupied spots, and the{' '}
+            <span style={s.label}>🟢 Vacant</span> zone for empty spots.
           </li>
           <li style={s.step}>
-            When training completes, the new model appears in the model
-            dropdown under <span style={s.label}>Controls</span>. Select it to
-            switch inference to your custom weights.
+            Click <span style={s.label}>⬆️ Upload</span>. Images are saved to{' '}
+            <Code>data/occupied/</Code> and <Code>data/vacant/</Code> on the
+            server. The dataset counter below the zones updates immediately.
           </li>
         </ol>
         <div style={s.callout}>
           <span style={s.label}>Recommended dataset size:</span> At least 200
-          images per class (vacant / occupied) for reliable results. Capture
-          images across different times of day and weather conditions.
+          images per class for reliable results. Capture across different times
+          of day and weather conditions. The upload limit is 50 files per
+          request — split large batches into multiple uploads.
         </div>
+
         <hr style={s.divider} />
-        <p style={{ ...s.body, marginBottom: 0 }}>
-          After switching to a newly trained model, monitor the{' '}
-          <span style={s.label}>Confidence Gauge</span> over the next 30 minutes
-          to confirm the model is performing as expected on live frames. If
-          confidence drops, collect more training data under the failing
-          conditions and retrain.
+
+        {/* ── YOLO Detect Dataset ── */}
+        <p style={{ ...s.body, marginBottom: 8 }}>
+          <span style={s.label}>Uploading a YOLO Detect dataset</span>
         </p>
+        <p style={s.body}>
+          Open <span style={s.label}>Model Training → YOLO Detect Dataset</span>{' '}
+          (hover the <Code>?</Code> badge for the full schema). This upload
+          path is only used by:
+        </p>
+        <div style={s.chipRow}>
+          <span style={s.chip}>YOLO26 Detect</span>
+        </div>
+        <p style={{ ...s.body, marginTop: 12 }}>
+          It requires two inputs uploaded together:
+        </p>
+        <ul style={{ ...s.steps, listStyleType: 'disc' }}>
+          <li style={s.step}>
+            <span style={s.label}>🖼️ Parking Images</span> — full parking lot
+            frames (not crops). Drop as many as needed; each must be a jpg or
+            png of the entire camera view.
+          </li>
+          <li style={s.step}>
+            <span style={s.label}>📋 annotations.json</span> — a single JSON
+            file with <Code>train</Code>, <Code>valid</Code>, and{' '}
+            <Code>test</Code> top-level keys. Each split must contain:
+            <ul style={{ paddingLeft: 18, marginTop: 6 }}>
+              <li style={{ ...s.step, marginBottom: 2 }}>
+                <Code>file_names</Code> — list of image filenames matching the
+                uploaded frames.
+              </li>
+              <li style={{ ...s.step, marginBottom: 2 }}>
+                <Code>rois_list</Code> — per-image list of quad polygons, each
+                polygon being four <Code>[x, y]</Code> pairs in normalised
+                (0–1) coordinates.
+              </li>
+              <li style={{ ...s.step }}>
+                <Code>occupancy_list</Code> — per-image list of booleans, one
+                per ROI, indicating whether the spot is occupied.
+              </li>
+            </ul>
+          </li>
+        </ul>
+        <p style={s.body}>
+          The Upload button stays disabled until both a set of images and an{' '}
+          <Code>annotations.json</Code> are staged. On success, files are saved
+          to:
+        </p>
+        <ul style={{ ...s.steps, listStyleType: 'disc' }}>
+          <li style={s.step}>
+            Images → <Code>data/yolo_data/parking_rois_gopro/images/</Code>
+          </li>
+          <li style={s.step}>
+            Annotations → <Code>data/yolo_data/parking_rois_gopro/annotations.json</Code>
+          </li>
+        </ul>
+        <div style={s.calloutWarn}>
+          <span style={s.label}>Note:</span> Uploading a new{' '}
+          <Code>annotations.json</Code> overwrites the existing one. The
+          converted YOLO detection dataset (<Code>yolo_detect_dataset/</Code>)
+          is rebuilt automatically the next time YOLO26 Detect training starts.
+        </div>
+
+        <hr style={s.divider} />
+
+        {/* ── Data Augmentation + Training ── */}
+        <p style={{ ...s.body, marginBottom: 8 }}>
+          <span style={s.label}>Data Augmentation</span>
+        </p>
+        <p style={s.body}>
+          Expand <span style={s.label}>Data Augmentation</span> to preview
+          transforms (shadow overlay, rotation, colour jitter, night-mode
+          simulation) before committing them to a training run. Adjust
+          intensity sliders and click <span style={s.label}>Preview</span> to
+          see a sample result. These augmentations apply at train time — no
+          extra images need to be uploaded.
+        </p>
+
+        <hr style={s.divider} />
+
+        <p style={{ ...s.body, marginBottom: 8 }}>
+          <span style={s.label}>Starting a training run</span>
+        </p>
+        <ol style={s.steps}>
+          <li style={s.step}>
+            Expand <span style={s.label}>Train Model</span>.
+          </li>
+          <li style={s.step}>
+            Select the model architecture from the dropdown. The button
+            highlights if that model's weights are already the active
+            inference model.
+          </li>
+          <li style={s.step}>
+            Click <span style={s.label}>🏋️ Train</span>. A progress bar,
+            epoch counter, and live val-accuracy readout appear below.
+          </li>
+          <li style={s.step}>
+            When training completes, switch to the new weights via{' '}
+            <span style={s.label}>Settings → Controls → Model</span>.
+          </li>
+        </ol>
+        <div style={s.callout}>
+          <span style={s.label}>After switching models:</span> Monitor the{' '}
+          <span style={s.label}>Confidence Gauge</span> on the dashboard for
+          30 minutes. If confidence drops below 60 %, collect more images
+          under the failing conditions and retrain.
+        </div>
       </SectionCard>
     </div>
   )

@@ -5,12 +5,14 @@ Scans the data directory, performs stratified train/val/test split,
 and returns PyTorch DataLoaders ready for training.
 """
 
+import os
 import sys
 import random
 import logging
 from pathlib import Path
 from collections import Counter
 
+import torch
 from torch.utils.data import DataLoader
 
 # Add parent to path for config import
@@ -61,7 +63,11 @@ def prepare_dataset(
     train_ratio = train_ratio or config.TRAIN_SPLIT
     val_ratio   = val_ratio   or config.VAL_SPLIT
     batch_size  = batch_size  or config.BATCH_SIZE
-    num_workers = num_workers if num_workers is not None else config.NUM_WORKERS
+    # Windows + DataLoader multiprocessing deadlocks inside daemon threads (spawn context
+    # tries to re-import the main module which restarts uvicorn). Force single-process loading.
+    if num_workers is None:
+        num_workers = 0 if os.name == "nt" else config.NUM_WORKERS
+    pin_memory = torch.cuda.is_available()
     image_size  = image_size  or config.CNN_INPUT_SIZE
     subset_size = subset_size if subset_size is not None else config.SUBSET_SIZE
 
@@ -142,7 +148,7 @@ def prepare_dataset(
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin_memory,
         drop_last=True,
     )
     val_loader = DataLoader(
@@ -150,14 +156,14 @@ def prepare_dataset(
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin_memory,
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin_memory,
     )
 
     logger.info(f"✅ DataLoaders ready — "

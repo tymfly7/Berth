@@ -1,10 +1,12 @@
-version: '3.8'
+name: berth
 
 services:
   berth:
     build: .
+    image: berth:1.0
+    container_name: berth
     ports:
-      - "8000:8000"
+      - "127.0.0.1:9000:8000"
     environment:
       - BERTH_HOST=0.0.0.0
       - BERTH_PORT=8000

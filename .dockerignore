@@ -1,0 +1,10 @@
+backend/venv/
+backend/data/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+frontend/node_modules/
+frontend/.vite/
+.git/
+*.db-shm
+*.db-wal

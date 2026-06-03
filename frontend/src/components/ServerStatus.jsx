@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../api'
-
-const API_BASE = `http://${window.location.hostname}:8000`
+import { API_BASE } from '../config'
 
 export default function ServerStatus() {
   const [status, setStatus] = useState({ busy: false, operations: [] })

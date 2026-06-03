@@ -13,10 +13,7 @@ const MODELS = [
 
 const LOTS_KEY = 'berth_test_lots'
 
-const DEFAULT_LOTS = [
-  { name: 'LotA', id: 'lot-lota' },
-  { name: 'LotB', id: 'ctrl_testing' },
-]
+const DEFAULT_LOTS = []
 
 const slugify = (name) =>
   'lot-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')

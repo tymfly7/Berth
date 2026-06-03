@@ -67,7 +67,7 @@ TRAIN_SPLIT = 0.70
 VAL_SPLIT   = 0.15
 TEST_SPLIT  = 0.15
 
-EPOCHS              = int(os.getenv("BERTH_EPOCHS", "30"))
+EPOCHS              = int(os.getenv("BERTH_EPOCHS", "10"))
 YOLO_DETECT_EPOCHS  = int(os.getenv("BERTH_YOLO_DETECT_EPOCHS", "100"))
 BATCH_SIZE           = int(os.getenv("BERTH_BATCH_SIZE", "32"))
 LEARNING_RATE        = float(os.getenv("BERTH_LR", "1e-3"))
