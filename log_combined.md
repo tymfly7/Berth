@@ -351,3 +351,36 @@ Replaced hardcoded 18-slot grid with polygon/rectangle ROI editor. `RoiStore` pe
 ### ROI Editor Colors (`RoiEditor.jsx`)
 
 - **All ROIs now green** — replaced the 5-color `COLORS` array with a single `ROI_COLOR = '#10b981'`; applied to all new ROI creation paths and the redraw `baseColor` fallback. Spot-type colors (reserved amber, handicap blue) unchanged.
+
+---
+
+## 2026-06-03 — Training Data Browser + Collapsible Training Sections
+
+### Backend (`backend/main.py`)
+- **Added `GET /api/dataset/browse`** — new endpoint that scans `data/occupied/`, `data/vacant/`, `data/yolo_data/parking_rois_gopro/`, and `data/yolo_detect_dataset/` (with train/val/test split counts). Returns per-folder image counts and existence flags. Gives admin visibility into training data without reading individual files.
+
+### Frontend (`frontend/src/components/SettingsPanel.jsx`)
+- **Added `TrainingDataBrowser` component** — fetches `/api/dataset/browse` on mount and displays a per-folder table (name, image count, YOLO split breakdown). Includes a manual "↻ Refresh" button.
+- **Added "Training Data" subsection** — collapsed by default, sits between Controls and Model Training in the Settings panel.
+- **"Model Training" subsection** — changed `defaultOpen` to `false` so it starts collapsed.
+
+### Frontend (`frontend/src/components/TrainingPanel.jsx`)
+- **Added `Collapsible` component** — shared collapsed-by-default accordion used throughout the training panel.
+- **Wrapped "Training Dataset"** (drop zones + upload button) in a `Collapsible`; starts closed.
+- **Wrapped "Data Augmentation"** in the new `Collapsible` (replaced the old bespoke `augOpen` state + inline button).
+- **Wrapped "Train Model"** (model selector + Train button) in a `Collapsible`; starts closed.
+- **Removed `augOpen` state** — no longer needed after migrating to the shared `Collapsible`.
+
+---
+
+## 2026-06-03 — YOLO Detect Dataset Upload + Classifier Tooltip
+
+### Backend (`backend/main.py`)
+- **Added `POST /api/dataset/upload-yolo`** — accepts `images: List[UploadFile]` (full parking lot frames) and `annotations: UploadFile` (annotations.json). Validates JSON structure (requires train/valid/test splits), saves images to `data/yolo_data/parking_rois_gopro/images/` and annotations to `data/yolo_data/parking_rois_gopro/annotations.json`. Rejects non-JSON annotation files and malformed JSON with 400 errors.
+
+### Frontend (`frontend/src/components/TrainingPanel.jsx`)
+- **Added `Tooltip` component** — hover-triggered popup anchored above the trigger element; `whiteSpace: pre-line` so tooltip text supports `\n` line breaks; z-index 999, pointer-events none.
+- **Renamed "Training Dataset" collapsible → "Classifier Images"** — label now includes a `?` tooltip explaining: for CNN/ResNet/MobileNetV4/YOLO26 Classify; expects individual cropped spot images; model resizes to 224×224.
+- **Added "YOLO Detect Dataset" collapsible** — two drop zones: `🖼️ Parking Images` (multiple full-scene frames) and `📋 annotations.json` (single JSON file). Upload button disabled until both are present. Tooltip explains the required annotations.json structure (train/valid/test splits, file_names, rois_list, occupancy_list) and where files are saved on the server.
+- **Added `YoloImagesZone` and `YoloAnnotationZone` components** — purpose-specific drop zones (images accepts image/* multiple; annotation accepts .json single).
+- **Added YOLO upload state and handler** — `yoloImages`, `yoloAnnotation`, `yoloUploading`, `yoloMsg`, `yoloError`, `yoloTimer`; `handleYoloUpload` POSTs to `/api/dataset/upload-yolo` via FormData.

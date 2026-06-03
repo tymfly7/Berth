@@ -1,9 +1,7 @@
 import { useState, useEffect } from 'react'
 import { apiFetch } from '../api'
+import { API_BASE } from '../config'
 import RoiEditor from './RoiEditor'
-
-
-const API_BASE = `http://${window.location.hostname}:8000`
 const CAMERA_ID = 'default'
 
 export default function RoiManager() {

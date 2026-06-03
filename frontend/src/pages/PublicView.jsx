@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { apiFetch } from '../api'
-import { API_BASE } from '../config'
+import { API_BASE, WS_BASE } from '../config'
 import { Link } from 'react-router-dom'
 import MetricCards from '../components/MetricCards'
 import LotMap from '../components/LotMap'
@@ -120,7 +120,7 @@ export default function PublicView() {
 
       const connect = () => {
         const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-        const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${cam.cameraId}${wsToken}`)
+        const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cam.cameraId}${wsToken}`)
         camWsRefs.current[cam.cameraId] = ws
         ws.onmessage = (e) => {
           try {

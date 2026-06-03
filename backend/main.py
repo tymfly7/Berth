@@ -37,7 +37,9 @@ from fastapi import (
     UploadFile, File, Form, HTTPException, Request, Depends,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse, Response, FileResponse
+from fastapi.staticfiles import StaticFiles
 from PIL import Image
 import io
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -107,20 +109,22 @@ async def not_found_handler(request: Request, exc):
         content={"detail": "We looked everywhere and we couldn't find that!"},
     )
 _allowed_origins = [o for o in [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
     os.getenv("BERTH_ALLOWED_ORIGIN", ""),
 ] if o]
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_static_dir = Path("static")
+if (_static_dir / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=_static_dir / "assets"), name="assets")
 
 API_KEY = config.API_KEY
 
@@ -278,6 +282,9 @@ def _frame_to_b64(frame: np.ndarray) -> str:
 
 @app.get("/")
 def root():
+    index = _static_dir / "index.html"
+    if index.exists():
+        return FileResponse(index)
     return {
         "service": "Berth",
         "version": "1.0.0",
@@ -1242,6 +1249,102 @@ async def upload_dataset_images(
         _finish_op(op_id)
 
 
+@app.post("/api/dataset/upload-yolo", dependencies=[Depends(verify_api_key)])
+@limiter.limit(config.UPLOAD_RATE_LIMIT)
+async def upload_yolo_dataset(
+    request: Request,
+    images: List[UploadFile] = File(...),
+    annotations: UploadFile = File(...),
+):
+    """
+    Upload a YOLO detect dataset to data/yolo_data/parking_rois_gopro/.
+    - images: full-scene parking lot images (jpg/png)
+    - annotations: annotations.json with train/valid/test splits
+    """
+    if config.DEPLOYMENT_PROFILE == "edge":
+        raise HTTPException(403, "Dataset upload is not available on edge nodes.")
+    op_id = _register_op("yolo_upload", "Saving YOLO dataset…")
+    try:
+        gopro_dir = config.YOLO_GOPRO_DIR
+        img_dir = gopro_dir / "images"
+        img_dir.mkdir(parents=True, exist_ok=True)
+
+        # Validate and save annotations.json
+        if Path(annotations.filename).suffix.lower() != ".json":
+            raise HTTPException(400, "annotations file must be a .json file")
+        ann_content = await annotations.read()
+        if len(ann_content) > 50 * 1024 * 1024:
+            raise HTTPException(400, "annotations.json exceeds 50 MB limit")
+        import json as _json
+        try:
+            parsed = _json.loads(ann_content)
+        except Exception:
+            raise HTTPException(400, "annotations file is not valid JSON")
+        for split in ("train", "valid", "test"):
+            if split not in parsed:
+                raise HTTPException(400, f"annotations.json missing required split: '{split}'")
+        (gopro_dir / "annotations.json").write_bytes(ann_content)
+
+        # Save images
+        allowed = {".jpg", ".jpeg", ".png", ".bmp"}
+        max_image_bytes = 20 * 1024 * 1024
+        saved = 0
+        skipped = 0
+        for file in images:
+            safe_name = Path(file.filename).name
+            ext = Path(safe_name).suffix.lower()
+            if ext not in allowed:
+                skipped += 1
+                continue
+            content = await file.read()
+            if len(content) > max_image_bytes:
+                skipped += 1
+                continue
+            dest = img_dir / safe_name
+            if dest.exists():
+                stem = Path(safe_name).stem
+                dest = img_dir / f"{stem}_{uuid.uuid4().hex[:6]}{ext}"
+            with open(dest, "wb") as fh:
+                fh.write(content)
+            saved += 1
+
+        _model_info_cache["data"] = None
+        return {"saved_images": saved, "skipped": skipped, "annotations": "saved"}
+    finally:
+        _finish_op(op_id)
+
+
+@app.get("/api/dataset/browse", dependencies=[Depends(verify_api_key)])
+def browse_dataset():
+    data_dir = config.DATA_DIR
+    folders = []
+
+    def _count(path):
+        if not path.exists():
+            return None
+        exts = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
+        return sum(1 for f in path.iterdir() if f.is_file() and f.suffix.lower() in exts)
+
+    for name in ("occupied", "vacant"):
+        p = data_dir / name
+        folders.append({"name": name, "count": _count(p), "exists": p.exists()})
+
+    gopro = config.YOLO_GOPRO_DIR
+    folders.append({"name": "yolo_data/parking_rois_gopro", "count": _count(gopro), "exists": gopro.exists()})
+
+    yolo_ds = config.YOLO_DATASET_DIR
+    if yolo_ds.exists():
+        splits = {}
+        for split in ("train", "val", "test"):
+            img_dir = yolo_ds / "images" / split
+            splits[split] = _count(img_dir)
+        folders.append({"name": "yolo_detect_dataset", "count": sum(v for v in splits.values() if v), "exists": True, "splits": splits})
+    else:
+        folders.append({"name": "yolo_detect_dataset", "count": None, "exists": False})
+
+    return {"folders": folders}
+
+
 @app.post("/api/dataset/prepare", dependencies=[Depends(verify_api_key)])
 def prepare_dataset(source: str = None, max_per_class: int = 0,
                     generate_sample: bool = False, sample_count: int = 200):
@@ -1638,6 +1741,13 @@ async def augment_preview(request: Request):
 
     return {"images": results, "count": len(results)}
 
+
+@app.get("/{full_path:path}")
+def spa_fallback(full_path: str):
+    index = _static_dir / "index.html"
+    if index.exists():
+        return FileResponse(index)
+    raise HTTPException(status_code=404, detail="Not found")
 
 # ── Entry point ───────────────────────────────────────────
 if __name__ == "__main__":

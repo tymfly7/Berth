@@ -272,6 +272,11 @@ class Trainer:
             correct += (predicted == labels).sum().item()
             total += labels.size(0)
 
+        if total == 0:
+            raise RuntimeError(
+                "Training loader produced 0 samples — dataset may be smaller than batch_size "
+                "and drop_last=True discarded everything. Add more images or reduce batch size."
+            )
         avg_loss = running_loss / total
         accuracy = 100.0 * correct / total
         return avg_loss, accuracy
@@ -296,6 +301,11 @@ class Trainer:
             correct += (predicted == labels).sum().item()
             total += labels.size(0)
 
+        if total == 0:
+            raise RuntimeError(
+                "Validation loader produced 0 samples — dataset may be smaller than batch_size. "
+                "Add more images or reduce batch size."
+            )
         avg_loss = running_loss / total
         accuracy = 100.0 * correct / total
         return avg_loss, accuracy

@@ -12,7 +12,7 @@ WORKDIR /app
 
 # System deps for OpenCV
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx libglib2.0-0 && \
+    libgl1 libglib2.0-0 && \
     rm -rf /var/lib/apt/lists/*
 
 # Python deps
@@ -37,4 +37,4 @@ ENV BERTH_PORT=8000
 ENV BERTH_MODEL=demo
 
 # Run
-CMD ["python", "main.py"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { apiFetch } from '../api'
-
-const API_BASE = `http://${window.location.hostname}:8000`
+import { API_BASE } from '../config'
 
 function getColor(rate) {
   if (rate >= 80) return 'var(--color-occupied)'
@@ -135,24 +134,7 @@ export default function HeatmapView({ cameras = [] }) {
   const next = () => setCamIdx(i => (i + 1) % cameras.length)
   const title = `🔥 Usage Heatmap${cam && multi ? ` — ${cam.name}` : ''}`
 
-  if (rois.length > 0 && heatmap.length > 0) {
-    return (
-      <div className="glass-card" style={{ padding: '20px' }}>
-        <div className="section-title">{title}</div>
-        <div style={{ position: 'relative' }}>
-          {multi && <ArrowBtn side="left" onClick={prev} />}
-          {multi && <ArrowBtn side="right" onClick={next} />}
-          <canvas
-            ref={canvasRef}
-            style={{ width: '100%', height: 200, display: 'block', borderRadius: 'var(--radius-sm)' }}
-          />
-        </div>
-        <Legend />
-      </div>
-    )
-  }
-
-  if (!heatmap || heatmap.length === 0) {
+  if (rois.length === 0 || heatmap.length === 0) {
     return (
       <div className="glass-card" style={{ padding: '20px' }}>
         <div className="section-title">{title}</div>
@@ -173,36 +155,10 @@ export default function HeatmapView({ cameras = [] }) {
       <div style={{ position: 'relative' }}>
         {multi && <ArrowBtn side="left" onClick={prev} />}
         {multi && <ArrowBtn side="right" onClick={next} />}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(6, 1fr)',
-          gap: '6px',
-          padding: '4px',
-        }}>
-          {(() => {
-            const isTimeFormat = heatmap.some(s => s.occupied_seconds !== undefined)
-            const maxSecs = isTimeFormat ? Math.max(...heatmap.map(s => s.occupied_seconds ?? 0), 1) : 100
-            return heatmap.map((slot) => {
-              const val = isTimeFormat ? (slot.occupied_seconds ?? 0) : (slot.occupancy_rate ?? 0)
-              const rate = isTimeFormat ? (val / maxSecs) * 100 : val
-              return (
-                <div
-                  key={slot.slot_id}
-                  style={{
-                    aspectRatio: '1', borderRadius: 'var(--radius-sm)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '0.65rem', fontWeight: 600, color: 'white',
-                    transition: 'all var(--transition-base)', cursor: 'default',
-                    background: getColor(rate), opacity: getOpacity(rate),
-                  }}
-                  title={isTimeFormat ? `Slot #${slot.slot_id}: ${formatTime(val)}` : `Slot #${slot.slot_id}: ${val}% occupied`}
-                >
-                  {slot.slot_id}
-                </div>
-              )
-            })
-          })()}
-        </div>
+        <canvas
+          ref={canvasRef}
+          style={{ width: '100%', height: 200, display: 'block', borderRadius: 'var(--radius-sm)' }}
+        />
       </div>
       <Legend />
     </div>

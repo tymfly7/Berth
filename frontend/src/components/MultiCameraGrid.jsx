@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef, memo } from 'react'
 import CameraFeedCell from './CameraFeedCell'
-
-const WS_BASE = `ws://${window.location.hostname}:8000`
+import { WS_BASE } from '../config'
 const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
 
 // Owns one camera's WebSocket + state. Re-renders only when its own data changes.

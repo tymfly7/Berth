@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { apiFetch } from '../api'
-import { API_BASE } from '../config'
+import { API_BASE, WS_BASE } from '../config'
 import '../App.css'
 import Header from '../components/Header'
 import VideoFeed from '../components/VideoFeed'
@@ -14,7 +14,7 @@ import LotMap from '../components/LotMap'
 import { roiToSlot } from '../utils/roiUtils'
 
 const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
-const WS_URL = `ws://${window.location.hostname}:8000/ws/video${_API_KEY ? `?token=${_API_KEY}` : ''}`
+const WS_URL = `${WS_BASE}/ws/video${_API_KEY ? `?token=${_API_KEY}` : ''}`
 
 export default function AdminView() {
   const [connected, setConnected] = useState(false)
@@ -205,7 +205,7 @@ export default function AdminView() {
     activeIds.forEach(id => {
       if (camWsRefs.current[id]) return
       const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-      const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/cameras/${id}${wsToken}`)
+      const ws = new WebSocket(`${WS_BASE}/ws/cameras/${id}${wsToken}`)
       camWsRefs.current[id] = ws
       ws.onmessage = (e) => {
         try {

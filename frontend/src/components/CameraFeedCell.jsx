@@ -1,3 +1,15 @@
+import { useState, useEffect } from 'react'
+
+function useDelayed(value, delayMs) {
+  const [delayed, setDelayed] = useState(false)
+  useEffect(() => {
+    if (value) { setDelayed(true); return }
+    const t = setTimeout(() => setDelayed(true), delayMs)
+    return () => clearTimeout(t)
+  }, [value, delayMs])
+  return delayed
+}
+
 const s = {
   cell: {
     position: 'relative',
@@ -81,6 +93,7 @@ export default function CameraFeedCell({
   onClick,
   mini = false,
 }) {
+  const showConnecting = useDelayed(!connected && !frame && !unavailable, 600)
   return (
     <div
       style={{ ...s.cell, cursor: onClick ? 'pointer' : 'default' }}
@@ -94,7 +107,7 @@ export default function CameraFeedCell({
         />
       ) : (
         <div style={s.placeholder}>
-          {unavailable ?? (connected ? 'Waiting for frames…' : 'Connecting…')}
+          {unavailable ?? (connected ? 'Waiting for frames…' : (showConnecting ? 'Connecting…' : ''))}
         </div>
       )}
 

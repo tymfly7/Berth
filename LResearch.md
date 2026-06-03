@@ -12,7 +12,6 @@ The source thread continuously reads raw video frames from wherever the camera p
 
 - **USB webcam** — reads as fast as the camera delivers frames (typically 24–30 fps)
 - **RTSP stream** — same, reads as fast as the stream sends them
-- **Video file** — reads at the file's native frame rate, loops at the end
 - **YouTube/HLS** — reads HLS segments as they arrive in bursts every few seconds
 
 Each frame gets stored in two places:
