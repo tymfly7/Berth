@@ -1,0 +1,20 @@
+description: Ultralytics YOLO26s-cls model trained on D:\Documents\School Project\backend\classify_yolo_data
+author: Ultralytics
+date: '2026-06-04T15:51:10.811847'
+version: 8.4.56
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 1
+task: classify
+batch: 1
+imgsz:
+- 64
+- 64
+names:
+  0: occupied
+  1: vacant
+args:
+  batch: 1
+  half: false
+channels: 3
+end2end: false
