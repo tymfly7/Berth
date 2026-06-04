@@ -287,14 +287,15 @@ export default function RoiEditor({
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
         e.preventDefault()
         redo()
-      } else if (e.key === 'Delete' && mode === 'edit' && selectedId) {
+      } else if (e.key === 'Delete' && selectedId &&
+                 !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
         commitChange(rois.filter(r => r.id !== selectedId))
         setSelectedId(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, mode, selectedId, rois, commitChange])
+  }, [undo, redo, selectedId, rois, commitChange])
 
   useEffect(() => { redraw() }, [redraw])
 
