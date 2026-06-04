@@ -13,14 +13,29 @@ Scope: live streams only (regular/finished videos are out of scope).
 """
 
 import time
+import threading
 import logging
 
 import config
 
 logger = logging.getLogger("berth.youtube")
 
-# In-memory cache: {watch_url: (stream_url, expires_at)}
+# In-memory cache: {watch_url: (stream_url, resolved_at)}
 _cache: dict = {}
+
+# Per-URL resolution locks so concurrent reconnects of the same stream coalesce
+# into one yt-dlp call instead of stampeding YouTube.
+_locks: dict = {}
+_locks_guard = threading.Lock()
+
+
+def _lock_for(watch_url: str) -> threading.Lock:
+    with _locks_guard:
+        lk = _locks.get(watch_url)
+        if lk is None:
+            lk = threading.Lock()
+            _locks[watch_url] = lk
+        return lk
 
 
 class YouTubeResolveError(Exception):
@@ -80,37 +95,50 @@ def resolve_stream_url(watch_url: str, force_refresh: bool = False,
     """
     ttl = ttl if ttl is not None else config.YOUTUBE_STREAM_CACHE_TTL
 
+    # Fast path: a fresh cached URL satisfies non-refresh callers without locking.
     if not force_refresh:
         cached = _cache.get(watch_url)
-        if cached and cached[1] > time.time():
+        if cached and (time.time() - cached[1]) < ttl:
             return cached[0]
 
-    try:
-        from yt_dlp import YoutubeDL
-    except ImportError as e:
-        raise YouTubeResolveError(
-            "yt-dlp is not installed — run: pip install yt-dlp"
-        ) from e
+    request_time = time.time()
+    with _lock_for(watch_url):
+        # Coalesce concurrent reconnects: if another waiter resolved after we
+        # started waiting, reuse its result instead of re-resolving. Also honour
+        # a still-fresh cache entry for non-forced callers.
+        cached = _cache.get(watch_url)
+        if cached:
+            if cached[1] >= request_time:
+                return cached[0]
+            if not force_refresh and (time.time() - cached[1]) < ttl:
+                return cached[0]
 
-    try:
-        # Prefer 480p or lower: smaller HLS segments download faster, reducing
-        # the blocking time per cap.read() call and improving perceived FPS.
-        with YoutubeDL({
-            "quiet": True,
-            "no_warnings": True,
-            "format": "best[height<=480]/best",
-        }) as ydl:
-            info = ydl.extract_info(watch_url, download=False)
-    except Exception as e:
-        logger.error(f"yt-dlp failed to resolve '{watch_url}': {e}")
-        raise YouTubeResolveError(f"Could not resolve YouTube URL: {e}") from e
+        try:
+            from yt_dlp import YoutubeDL
+        except ImportError as e:
+            raise YouTubeResolveError(
+                "yt-dlp is not installed — run: pip install yt-dlp"
+            ) from e
 
-    stream_url = _pick_m3u8(info)
-    if not stream_url:
-        raise YouTubeResolveError(
-            f"No playable stream URL found for '{watch_url}'"
-        )
+        try:
+            # Prefer 480p or lower: smaller HLS segments download faster, reducing
+            # the blocking time per cap.read() call and improving perceived FPS.
+            with YoutubeDL({
+                "quiet": True,
+                "no_warnings": True,
+                "format": "best[height<=480]/best",
+            }) as ydl:
+                info = ydl.extract_info(watch_url, download=False)
+        except Exception as e:
+            logger.error(f"yt-dlp failed to resolve '{watch_url}': {e}")
+            raise YouTubeResolveError(f"Could not resolve YouTube URL: {e}") from e
 
-    _cache[watch_url] = (stream_url, time.time() + ttl)
-    logger.info(f"Resolved YouTube stream for '{watch_url}' (ttl={ttl}s)")
-    return stream_url
+        stream_url = _pick_m3u8(info)
+        if not stream_url:
+            raise YouTubeResolveError(
+                f"No playable stream URL found for '{watch_url}'"
+            )
+
+        _cache[watch_url] = (stream_url, time.time())
+        logger.info(f"Resolved YouTube stream for '{watch_url}' (ttl={ttl}s)")
+        return stream_url

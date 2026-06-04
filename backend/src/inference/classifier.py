@@ -7,6 +7,7 @@ image as occupied or vacant with confidence score.
 
 import sys
 import logging
+import threading
 from pathlib import Path
 import torch
 import numpy as np
@@ -22,11 +23,11 @@ _EDGE_CNN_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4s"}
 
 
 def get_classifier(model_name=None, **kwargs):
-    """Return ExecuTorchClassifier on edge profile for CNN models, ParkingClassifier otherwise."""
+    """Return EdgeClassifier on edge profile for CNN models, ParkingClassifier otherwise."""
     effective = model_name or config.ACTIVE_MODEL
     if config.DEPLOYMENT_PROFILE == "edge" and effective in _EDGE_CNN_MODELS:
-        from src.inference.executorch_classifier import ExecuTorchClassifier
-        return ExecuTorchClassifier(model_name=model_name, **kwargs)
+        from src.inference.ncnn_classifier import EdgeClassifier
+        return EdgeClassifier(model_name=model_name, **kwargs)
     return ParkingClassifier(model_name=model_name, **kwargs)
 
 
@@ -52,6 +53,10 @@ class ParkingClassifier:
         self.threshold = confidence_threshold or config.CNN_CONFIDENCE_THRESHOLD
         self.model = None
         self._loaded = False
+        # Ultralytics YOLO objects are not thread-safe for concurrent predict()
+        # (the first call fuses the model, deleting Conv.bn). Multiple
+        # InferencePool workers share one classifier per camera, so serialize.
+        self._infer_lock = threading.Lock()
 
         # Preprocessing transform (no augmentation — inference only)
         self.transform = transforms.Compose([
@@ -88,11 +93,14 @@ class ParkingClassifier:
         """Load a YOLO26 classify model (Ultralytics API)."""
         try:
             from ultralytics import YOLO
-            model_path = config.YOLO26_CLASSIFY_PATH
-            if not model_path.exists():
-                raise FileNotFoundError(
-                    f"YOLO26 classify weights not found at '{model_path}'. Train it first."
-                )
+            if config.DEPLOYMENT_PROFILE == "edge" and config.YOLO26_CLASSIFY_NCNN_PATH.exists():
+                model_path = config.YOLO26_CLASSIFY_NCNN_PATH
+            else:
+                model_path = config.YOLO26_CLASSIFY_PATH
+                if not model_path.exists():
+                    raise FileNotFoundError(
+                        f"YOLO26 classify weights not found at '{model_path}'. Train it first."
+                    )
             self._yolo_classify = YOLO(str(model_path))
             self._loaded = True
             logger.info(f"✅ Loaded YOLO26 classify model on {self.device}")
@@ -105,11 +113,14 @@ class ParkingClassifier:
         """Load a YOLO26 detect model (Ultralytics API)."""
         try:
             from ultralytics import YOLO
-            model_path = config.YOLO26_DETECT_PATH
-            if not model_path.exists():
-                raise FileNotFoundError(
-                    f"YOLO26 detect weights not found at '{model_path}'. Train it first."
-                )
+            if config.DEPLOYMENT_PROFILE == "edge" and config.YOLO26_DETECT_NCNN_PATH.exists():
+                model_path = config.YOLO26_DETECT_NCNN_PATH
+            else:
+                model_path = config.YOLO26_DETECT_PATH
+                if not model_path.exists():
+                    raise FileNotFoundError(
+                        f"YOLO26 detect weights not found at '{model_path}'. Train it first."
+                    )
             self._yolo_detect = YOLO(str(model_path))
             self._loaded = True
             logger.info(f"✅ Loaded YOLO26 detect model on {self.device}")
@@ -156,12 +167,14 @@ class ParkingClassifier:
 
         if getattr(self, "_yolo_classify", None) is not None:
             pil_img = self._to_pil(image)
-            results = self._yolo_classify.predict(pil_img, verbose=False)
+            with self._infer_lock:
+                results = self._yolo_classify.predict(pil_img, verbose=False)
             return self._yolo_result_to_dict(results[0])
 
         if getattr(self, "_yolo_detect", None) is not None:
             pil_img = self._to_pil(image)
-            results = self._yolo_detect.predict(pil_img, verbose=False, conf=0.3, classes=[1])
+            with self._infer_lock:
+                results = self._yolo_detect.predict(pil_img, verbose=False, conf=0.3, classes=[1])
             return self._yolo_detect_to_dict(results[0])
 
         pil_img = self._to_pil(image)
@@ -195,12 +208,14 @@ class ParkingClassifier:
 
         if getattr(self, "_yolo_classify", None) is not None:
             pil_images = [self._to_pil(img) for img in images]
-            results = self._yolo_classify.predict(pil_images, verbose=False)
+            with self._infer_lock:
+                results = self._yolo_classify.predict(pil_images, verbose=False)
             return [self._yolo_result_to_dict(r) for r in results]
 
         if getattr(self, "_yolo_detect", None) is not None:
             pil_images = [self._to_pil(img) for img in images]
-            results = self._yolo_detect.predict(pil_images, verbose=False, conf=0.3, classes=[1])
+            with self._infer_lock:
+                results = self._yolo_detect.predict(pil_images, verbose=False, conf=0.3, classes=[1])
             return [self._yolo_detect_to_dict(r) for r in results]
 
         # Preprocess all images

@@ -1,13 +1,11 @@
 """
 Edge Model Exporter
 ====================
-Exports trained PyTorch weights to on-device formats for RPi5 / ARM64 edge nodes.
+Exports trained models to NCNN for RPi5 / ARM64 edge nodes.
+NCNN uses the XNNPACK/Vulkan backend on Cortex-A76 — faster than ONNX runtime.
 
-Primary target : ExecuTorch (.pte) — native PyTorch, XNNPACK-optimised for ARM64.
-Automatic fallback : ONNX (.onnx) when the `executorch` package is not available
-                     (e.g. during development on x86 before cross-compiling for RPi5).
-
-Exported files land beside the original .pth weights in config.MODEL_DIR.
+CNN models:  torch.jit.trace → pnnx → edge_{model_name}_ncnn_model/
+YOLO models: Ultralytics export → {weights_stem}_ncnn_model/
 
 Usage (called automatically by train_manager after a successful run):
     from src.export.model_exporter import export_pytorch_model, export_yolo_model
@@ -16,16 +14,17 @@ Usage (called automatically by train_manager after a successful run):
 """
 
 import logging
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import torch
-import numpy as np
 
 import config
 
 logger = logging.getLogger("berth.exporter")
 
-# Input shape expected by all classification CNNs after preprocessing.
 _EXAMPLE_INPUT = torch.zeros(1, 3, config.CNN_INPUT_SIZE, config.CNN_INPUT_SIZE)
 
 _PYTORCH_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4s"}
@@ -33,9 +32,9 @@ _PYTORCH_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4s"}
 
 def export_pytorch_model(model_name: str, weights_path: Path) -> Path:
     """
-    Export a trained PyTorch classification model to ExecuTorch (.pte) or ONNX (.onnx).
+    Export a trained PyTorch classification model to NCNN via pnnx.
 
-    Returns the path to the exported file, or None if export failed.
+    Returns the path to the exported ncnn model directory, or None if export failed.
     The source .pth weights file is left untouched.
     """
     if model_name not in _PYTORCH_MODELS:
@@ -46,22 +45,14 @@ def export_pytorch_model(model_name: str, weights_path: Path) -> Path:
         logger.warning(f"Exporter: weights not found at {weights_path} — skipping export")
         return None
 
-    # Try ExecuTorch first; fall back to ONNX if unavailable.
-    try:
-        return _export_executorch(model_name, weights_path)
-    except ImportError:
-        logger.info("executorch not installed — falling back to ONNX export")
-        return _export_onnx(model_name, weights_path)
-    except Exception as exc:
-        logger.warning(f"ExecuTorch export failed ({exc}) — falling back to ONNX")
-        return _export_onnx(model_name, weights_path)
+    return _export_ncnn(model_name, weights_path)
 
 
 def export_yolo_model(model_name: str, weights_path: Path) -> Path:
     """
-    Export a YOLO model to ExecuTorch (.pte) or ONNX (.onnx) via Ultralytics.
+    Export a YOLO model to NCNN via Ultralytics (fastest format on RPi5/ARM64).
 
-    Returns the path to the exported file, or None if export failed.
+    Returns the path to the exported ncnn model directory, or None if export failed.
     """
     if not Path(weights_path).exists():
         logger.warning(f"Exporter: YOLO weights not found at {weights_path} — skipping")
@@ -70,24 +61,13 @@ def export_yolo_model(model_name: str, weights_path: Path) -> Path:
     try:
         from ultralytics import YOLO
         model = YOLO(str(weights_path))
-
-        # Try ExecuTorch format; fall back to ONNX.
-        try:
-            import executorch  # noqa: F401 — presence check only
-            out = model.export(format="executorch", imgsz=config.YOLO_CLASSIFY_IMG_SIZE)
-            out_path = Path(str(weights_path).replace(".pt", ".pte"))
-            logger.info(f"YOLO ExecuTorch export: {out_path}")
-            return out_path
-        except (ImportError, Exception) as exc:
-            logger.info(f"YOLO ExecuTorch export skipped ({exc}) — trying ONNX")
-
-        out = model.export(format="onnx")
-        out_path = Path(str(weights_path).replace(".pt", ".onnx"))
-        logger.info(f"YOLO ONNX export: {out_path}")
+        out = model.export(format="ncnn")
+        out_path = Path(out) if out else Path(str(weights_path).replace(".pt", "_ncnn_model"))
+        logger.info(f"YOLO NCNN export: {out_path}")
         return out_path
 
     except Exception as exc:
-        logger.warning(f"YOLO export failed for {weights_path}: {exc}")
+        logger.warning(f"YOLO NCNN export failed for {weights_path}: {exc}")
         return None
 
 
@@ -101,44 +81,39 @@ def _load_model_for_export(model_name: str, weights_path: Path):
     return model
 
 
-def _export_executorch(model_name: str, weights_path: Path) -> Path:
-    """Export to ExecuTorch .pte using XNNPACK delegate (ARM64 optimised)."""
-    from torch.export import export as torch_export
-    from executorch.exir import to_edge, EdgeCompileConfig
-    from executorch.backends.xnnpack.partition.xnnpack_partitioner import XnnpackPartitioner
+def _export_ncnn(model_name: str, weights_path: Path) -> Path:
+    """Export to NCNN via torch.jit.trace + pnnx (fastest format on RPi5/ARM64)."""
+    pnnx_bin = Path(sys.executable).parent / "pnnx.exe"
+    if not pnnx_bin.exists():
+        pnnx_bin = shutil.which("pnnx")
+    if not pnnx_bin:
+        logger.warning("pnnx not found — install with: pip install pnnx")
+        return None
 
     model = _load_model_for_export(model_name, weights_path)
-    example = (_EXAMPLE_INPUT,)
+    out_dir = config.MODEL_DIR / f"edge_{model_name}_ncnn_model"
+    out_dir.mkdir(exist_ok=True)
 
-    ep = torch_export(model, example)
-    edge_prog = to_edge(
-        ep,
-        compile_config=EdgeCompileConfig(_check_ir_validity=False),
-    )
-    exec_prog = edge_prog.to_backend([XnnpackPartitioner()]).to_executorch()
+    tmp_pt = out_dir / "model.pt"
+    try:
+        traced = torch.jit.trace(model, _EXAMPLE_INPUT)
+        traced.save(str(tmp_pt))
 
-    out_path = config.MODEL_DIR / f"edge_{model_name}.pte"
-    with open(out_path, "wb") as fh:
-        fh.write(exec_prog.buffer)
+        s = config.CNN_INPUT_SIZE
+        subprocess.run(
+            [str(pnnx_bin), str(tmp_pt), f"inputshape=[1,3,{s},{s}]f32"],
+            check=True,
+            cwd=str(out_dir),
+        )
 
-    logger.info(f"ExecuTorch export: {out_path} ({out_path.stat().st_size // 1024} KB)")
-    return out_path
+        logger.info(f"NCNN export: {out_dir}")
+        return out_dir
 
+    except Exception as exc:
+        logger.warning(f"NCNN export failed for {model_name}: {exc}")
+        return None
 
-def _export_onnx(model_name: str, weights_path: Path) -> Path:
-    """Export to ONNX — fallback when ExecuTorch is unavailable."""
-    model = _load_model_for_export(model_name, weights_path)
-    out_path = config.MODEL_DIR / f"edge_{model_name}.onnx"
-
-    torch.onnx.export(
-        model,
-        _EXAMPLE_INPUT,
-        str(out_path),
-        opset_version=17,
-        input_names=["input"],
-        output_names=["logit"],
-        dynamic_axes={"input": {0: "batch"}, "logit": {0: "batch"}},
-    )
-
-    logger.info(f"ONNX export: {out_path} ({out_path.stat().st_size // 1024} KB)")
-    return out_path
+    finally:
+        for name in ("model.pt", "model.pnnx.param", "model.pnnx.bin",
+                     "model_pnnx.py", "model.pnnx.onnx", "model_ncnn.py"):
+            (out_dir / name).unlink(missing_ok=True)

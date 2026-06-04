@@ -218,12 +218,12 @@ export default function AdminView() {
                       style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 2, fontSize: '1.1rem', padding: '4px 10px' }}
                       onClick={() => setLotMapIdx(i => (i + 1) % allCameraSlots.length)}>›</button>
                   </>}
-                  <LotMap slots={slots} demo={liveForCam.length === 0} title={multi ? cam.name : null} />
+                  <LotMap slots={slots} roiOnly={liveForCam.length === 0} title={multi ? cam.name : null} />
                 </div>
               </>
             )
           })()}
-          <AnalyticsChart />
+          <AnalyticsChart connected={connected} />
 
           <div className="analytics-row">
             <ConfidenceGauge confidence={displayMetrics.avg_confidence} />

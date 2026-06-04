@@ -10,7 +10,7 @@ services:
     environment:
       - BERTH_HOST=0.0.0.0
       - BERTH_PORT=8000
-      - BERTH_MODEL=demo
+      - BERTH_MODEL=yolo26_classify
       - BERTH_API_KEY=${BERTH_API_KEY:-}
       - BERTH_EPOCHS=30
       - BERTH_BATCH_SIZE=64
@@ -18,4 +18,5 @@ services:
       - ./backend/data:/app/data
       - ./backend/models:/app/models
       - ./backend/outputs:/app/outputs
+      - ./backend/uploads:/app/uploads
     restart: unless-stopped
