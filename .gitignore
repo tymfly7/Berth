@@ -249,3 +249,6 @@ log_monetization_plan.md
 
 #thesis folder
 thesis/
+# Runtime SQLite database
+backend/berth.db
+backend/berth.db-*

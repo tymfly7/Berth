@@ -4,6 +4,8 @@ import { API_BASE, WS_BASE } from '../config'
 import { createPortal } from 'react-dom'
 import RoiEditor from './RoiEditor'
 
+const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
+
 const s = {
   card: {
     background: 'var(--bg-card)',
@@ -290,7 +292,8 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
     // WebSocket fallback only if no snapshot — loads in async after editor is open
     if (!bg && cam.active) {
       new Promise(resolve => {
-        const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cam.id}`)
+        const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
+        const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cam.id}${wsToken}`)
         editWsRef.current = ws
         const timeout = setTimeout(() => { ws.close(); resolve(null) }, 5000)
         ws.onmessage = (e) => {
