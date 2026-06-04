@@ -18,9 +18,6 @@ services:
       # Copy edge_*_ncnn_model/ dirs and *_ncnn_model/ dirs from hub into ./backend/models/ before first run.
       - ./backend/models:/app/models
       - berth_edge_data:/app/edge_data
-    devices:
-      # USB camera passthrough — adjust index if using /dev/video1, /dev/video2, etc.
-      - /dev/video0:/dev/video0
     ports:
       - "8000:8000"
     restart: unless-stopped

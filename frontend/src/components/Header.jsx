@@ -64,10 +64,10 @@ export default function Header({ connected, model }) {
   }, [])
 
   const isAdmin = location.pathname === '/admin'
-  const isAuthed = localStorage.getItem('admin_authed') === 'true'
+  const isAuthed = sessionStorage.getItem('admin_authed') === 'true'
 
   const logout = () => {
-    localStorage.removeItem('admin_authed')
+    sessionStorage.removeItem('admin_authed')
     navigate('/')
   }
 

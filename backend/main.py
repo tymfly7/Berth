@@ -327,7 +327,7 @@ async def predict(request: Request, file: UploadFile = File(...)):
         raise HTTPException(413, "Image exceeds 20 MB limit")
 
     # Validate extension and decode via shared helper
-    frame = await _read_image_from_bytes(file.filename, content)
+    frame = _read_image_from_bytes(file.filename, content)
     pil_image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
     model_name = _resolve_model_name()
