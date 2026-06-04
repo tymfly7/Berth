@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { apiFetch } from '../api'
 
 const style = {
-  container: { padding: '20px' },
+  container: { marginTop: 18 },
   modelRow: {
     display: 'flex',
     justifyContent: 'space-between',
@@ -33,6 +33,7 @@ const style = {
   },
   compTable: {
     width: '100%',
+    tableLayout: 'fixed',
     fontSize: '0.72rem',
     borderCollapse: 'collapse',
     marginTop: 8,
@@ -74,7 +75,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
 
   if (!modelInfo) {
     return (
-      <div className="glass-card loading-shimmer" style={{ padding: '20px', height: 120 }}>
+      <div className="loading-shimmer" style={{ marginTop: 18, height: 120 }}>
         <div className="section-title">🧠 Model Info</div>
       </div>
     )
@@ -131,7 +132,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="glass-card" style={style.container}>
+    <div style={style.container}>
       <div className="section-title">🧠 Model Info</div>
 
       <div style={{ ...style.modelRow, cursor: 'default' }}>
@@ -218,25 +219,25 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
       })}
 
       {/* ── Evaluate All + Excel ────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-        <button
-          className="btn btn-primary btn-sm"
-          style={{ flex: 1 }}
-          disabled={isEvaluating}
-          onClick={handleEvaluateAll}
-        >
-          {isEvaluating ? '⏳ Evaluating…' : '📊 Evaluate All'}
-        </button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
         {hasComparison && (
           <button
             className="btn btn-ghost btn-sm"
-            style={{ flex: 1 }}
+            style={{ fontSize: '0.72rem', padding: '3px 8px' }}
             onClick={handleDownloadExcel}
             title="Download results as Excel"
           >
             📥 Excel
           </button>
         )}
+        <button
+          className="btn btn-ghost-blue btn-sm"
+          style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+          disabled={isEvaluating}
+          onClick={handleEvaluateAll}
+        >
+          {isEvaluating ? '⏳ Evaluating…' : '📊 Evaluate All'}
+        </button>
       </div>
 
       {/* Evaluation progress */}
@@ -263,16 +264,24 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
 
       {/* ── Overall comparison table ────────────────────────────────────────── */}
       {hasComparison && (
-        <div style={{ marginTop: 14 }}>
+        <div style={{ marginTop: 14, overflow: 'hidden' }}>
           <div className="section-title" style={{ marginBottom: 6 }}>📊 Evaluation Results</div>
           <table style={style.compTable}>
+            <colgroup>
+              <col style={{ width: '28%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '15%' }} />
+            </colgroup>
             <thead>
               <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)' }}>
                 <th style={{ textAlign: 'left',  padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Model</th>
-                <th style={{ textAlign: 'right', padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Acc</th>
-                <th style={{ textAlign: 'right', padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Prec</th>
-                <th style={{ textAlign: 'right', padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Rec</th>
-                <th style={{ textAlign: 'right', padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>F1</th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Acc</th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Prec</th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Rec</th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>F1</th>
                 <th style={{ textAlign: 'right', padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Time</th>
               </tr>
             </thead>
@@ -288,31 +297,32 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                       background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent',
                     }}
                   >
-                    <td style={{ padding: '4px', fontWeight: isActive ? 700 : 600, fontSize: '0.72rem' }}>
+                    <td style={{ padding: '4px 4px', fontWeight: isActive ? 700 : 600, fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 0 }}
+                        title={r.model}>
                       {r.model}
-                      {isActive && <span className="badge badge-info" style={{ marginLeft: 4, fontSize: '0.6rem', padding: '1px 4px' }}>Active</span>}
+                      {isActive && <span className="badge badge-info" style={{ marginLeft: 4, fontSize: '0.6rem', padding: '1px 4px' }}>ACTIVE</span>}
                     </td>
-                    <td style={{ padding: '4px', textAlign: 'right', color: 'var(--color-vacant)', fontWeight: 600 }}>
+                    <td style={{ padding: '4px 2px', textAlign: 'right', color: 'var(--color-vacant)', fontWeight: 600 }}>
                       {r.test_accuracy != null ? `${r.test_accuracy.toFixed(1)}%` : '—'}
                     </td>
                     {hasPRF ? (
                       <>
-                        <td style={{ padding: '4px', textAlign: 'right' }}>
+                        <td style={{ padding: '4px 2px', textAlign: 'right' }}>
                           {r.test_precision != null ? `${r.test_precision.toFixed(1)}%` : '—'}
                         </td>
-                        <td style={{ padding: '4px', textAlign: 'right' }}>
+                        <td style={{ padding: '4px 2px', textAlign: 'right' }}>
                           {r.test_recall != null ? `${r.test_recall.toFixed(1)}%` : '—'}
                         </td>
-                        <td style={{ padding: '4px', textAlign: 'right' }}>
+                        <td style={{ padding: '4px 2px', textAlign: 'right' }}>
                           {r.test_f1 != null ? `${r.test_f1.toFixed(1)}%` : '—'}
                         </td>
                       </>
                     ) : (
-                      <td colSpan={3} style={{ padding: '4px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.65rem', fontStyle: 'italic' }}>
-                        top-1 accuracy{r.epochs != null ? ` · ${r.epochs} ep` : ''}
+                      <td colSpan={3} style={{ padding: '4px 2px', textAlign: 'right', color: 'var(--text-muted)', fontSize: '0.65rem', fontStyle: 'italic' }}>
+                        top-1{r.epochs != null ? ` · ${r.epochs} ep` : ''}
                       </td>
                     )}
-                    <td style={{ padding: '4px', textAlign: 'right', color: 'var(--text-muted)' }}>
+                    <td style={{ padding: '4px 4px', textAlign: 'right', color: 'var(--text-muted)' }}>
                       {r.train_time != null ? `${Math.round(r.train_time)}s` : '—'}
                     </td>
                   </tr>
@@ -329,29 +339,30 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
               background: 'rgba(99,102,241,0.05)',
               borderRadius: 4,
               fontSize: '0.72rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              flexWrap: 'wrap',
             }}>
-              <span style={{ fontWeight: 600 }}>YOLO26 Detect</span>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>object detection model</span>
-              <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center' }}>
-                <span><span style={{ color: 'var(--text-muted)' }}>mAP@50 </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ fontWeight: 600 }}>YOLO26 Detect</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>object detection model</span>
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <span>
+                  <span style={{ color: 'var(--text-muted)' }}>mAP@50 </span>
                   <span style={{ color: 'var(--color-vacant)', fontWeight: 600 }}>
                     {r.test_accuracy != null ? `${r.test_accuracy.toFixed(1)}%` : '—'}
                   </span>
                 </span>
-                <span><span style={{ color: 'var(--text-muted)' }}>P </span>
+                <span>
+                  <span style={{ color: 'var(--text-muted)' }}>P </span>
                   {r.test_precision != null ? `${r.test_precision.toFixed(1)}%` : '—'}
                 </span>
-                <span><span style={{ color: 'var(--text-muted)' }}>R </span>
+                <span>
+                  <span style={{ color: 'var(--text-muted)' }}>R </span>
                   {r.test_recall != null ? `${r.test_recall.toFixed(1)}%` : '—'}
                 </span>
                 {r.train_time != null && (
                   <span style={{ color: 'var(--text-muted)' }}>{Math.round(r.train_time)}s</span>
                 )}
-              </span>
+              </div>
             </div>
           ))}
 

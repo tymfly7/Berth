@@ -33,7 +33,7 @@ for d in (DATA_DIR, UPLOAD_DIR, MODEL_DIR, OUTPUT_DIR):
 # Server
 # ---------------------------------------------------------------------------
 HOST = os.getenv("BERTH_HOST", "0.0.0.0")
-PORT = int(os.getenv("BERTH_PORT", "8000"))
+PORT = int(os.getenv("BERTH_PORT", "8001"))  # 8000 left free for other local services (e.g. Docker)
 
 # ---------------------------------------------------------------------------
 # Security
@@ -67,8 +67,8 @@ TRAIN_SPLIT = 0.70
 VAL_SPLIT   = 0.15
 TEST_SPLIT  = 0.15
 
-EPOCHS              = int(os.getenv("BERTH_EPOCHS", "10"))
-YOLO_DETECT_EPOCHS  = int(os.getenv("BERTH_YOLO_DETECT_EPOCHS", "100"))
+EPOCHS              = int(os.getenv("BERTH_EPOCHS", "30"))
+YOLO_DETECT_EPOCHS  = int(os.getenv("BERTH_YOLO_DETECT_EPOCHS", "30"))
 BATCH_SIZE           = int(os.getenv("BERTH_BATCH_SIZE", "32"))
 LEARNING_RATE        = float(os.getenv("BERTH_LR", "1e-3"))
 WEIGHT_DECAY         = 1e-4          # L2 regularization
@@ -83,6 +83,12 @@ SUBSET_SIZE = int(os.getenv("BERTH_SUBSET", "12000"))
 # Smaller input size for YOLO classify — spots are pre-cropped so 64 px is
 # enough and is ~10x faster than 224 px.
 YOLO_CLASSIFY_IMG_SIZE = int(os.getenv("BERTH_YOLO_CLASSIFY_IMGSZ", "64"))
+
+# YOLO detect — full-frame scenes pack ~30+ small parking spots, so 640 px
+# starves them; 960 px recovers small-object recall. yolo26s gives more
+# capacity than nano for the small (~230-image) annotated dataset.
+YOLO_DETECT_IMG_SIZE = int(os.getenv("BERTH_YOLO_DETECT_IMGSZ", "960"))
+YOLO_DETECT_MODEL    = os.getenv("BERTH_YOLO_DETECT_MODEL", "yolo26s.pt")
 
 # ---------------------------------------------------------------------------
 # Edge deployment

@@ -346,7 +346,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   const roiIsError = roiMsg && (roiMsg.startsWith('Error') || roiMsg.startsWith('A lot'))
 
   return (
-    <div className="glass-card" style={style.section}>
+    <div>
       {/* Mode + model */}
       <div className="section-title">Mode</div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>

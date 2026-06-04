@@ -183,6 +183,21 @@ body::before {
   border-color: var(--border-glow);
 }
 
+.btn-ghost-blue {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  transition: background var(--transition-fast), color var(--transition-fast),
+              border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.btn-ghost-blue:hover {
+  background: var(--gradient-accent);
+  color: white;
+  border-color: transparent;
+  box-shadow: 0 2px 12px rgba(99, 102, 241, 0.3);
+}
+
 .btn-sm {
   padding: 6px 14px;
   font-size: 0.8rem;

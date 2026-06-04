@@ -147,7 +147,7 @@ class Trainer:
         params = model.count_parameters()
         logger.info(f"   Parameters: {params['total']:,} total, {params['trainable']:,} trainable")
 
-    def train(self, train_loader, val_loader, progress_callback=None):
+    def train(self, train_loader, val_loader, progress_callback=None, batch_callback=None):
         """
         Run the full training loop.
 
@@ -169,7 +169,7 @@ class Trainer:
             epoch_start = time.time()
 
             # --- Train one epoch ---
-            train_loss, train_acc = self._train_epoch(train_loader)
+            train_loss, train_acc = self._train_epoch(train_loader, epoch=epoch, batch_callback=batch_callback)
 
             # --- Validate ---
             val_loss, val_acc = self._validate(val_loader)
@@ -246,14 +246,15 @@ class Trainer:
 
         return results
 
-    def _train_epoch(self, loader):
+    def _train_epoch(self, loader, epoch=None, batch_callback=None):
         """Train for one epoch. Returns (loss, accuracy)."""
         self.model.train()
         running_loss = 0.0
         correct = 0
         total = 0
+        total_batches = len(loader)
 
-        for images, labels in loader:
+        for batch_idx, (images, labels) in enumerate(loader):
             images = images.to(self.device)
             labels = labels.to(self.device).float().unsqueeze(1)
 
@@ -271,6 +272,9 @@ class Trainer:
             predicted = (outputs > 0.5).float()
             correct += (predicted == labels).sum().item()
             total += labels.size(0)
+
+            if batch_callback and batch_idx % 20 == 0:
+                batch_callback(epoch, batch_idx + 1, total_batches)
 
         if total == 0:
             raise RuntimeError(

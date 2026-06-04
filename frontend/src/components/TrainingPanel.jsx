@@ -70,7 +70,7 @@ function Collapsible({ label, children, defaultOpen = false }) {
 }
 
 const style = {
-  container: { padding: '20px' },
+  container: {},
   row: { display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
   logBox: {
     background: 'rgba(0,0,0,0.3)',
@@ -367,7 +367,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
   const canYoloUpload = yoloImages.length > 0 && yoloAnnotation !== null && !yoloUploading
 
   return (
-    <div className="glass-card" style={style.container}>
+    <div style={style.container}>
       <div className="section-title">🏋️ Training</div>
 
       {/* ── Classifier Images ────────────────────────────── */}

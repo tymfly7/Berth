@@ -76,7 +76,7 @@ function PickerCell({ cameraId, name, apiBase, onClick }) {
   )
 }
 
-export default function VideoFeed({ frame, connected, activeCamera, apiBase, cameras = [] }) {
+export default function VideoFeed({ connected, activeCamera, apiBase, cameras = [], onCameraMetrics, onCameraUnavailable }) {
   const [roiOpen, setRoiOpen]       = useState(false)
   const [picking, setPicking]       = useState(false)
   const [selectedCamId, setSelectedCamId] = useState(null)
@@ -274,7 +274,7 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
 
         {/* Normal live view */}
-        {!roiOpen && !picking && connected && frame && (
+        {!roiOpen && !picking && connected && (
           <span className="badge badge-occupied" style={{ background: 'rgba(239,68,68,0.9)', color: '#fff', fontSize: '0.65rem' }}>
             ● LIVE
           </span>
@@ -361,7 +361,7 @@ export default function VideoFeed({ frame, connected, activeCamera, apiBase, cam
 
       {/* ── Live camera grid — kept mounted to preserve WS connections ── */}
       <div style={{ display: roiOpen || picking ? 'none' : 'block' }}>
-        <MultiCameraGrid cameras={cameras} bare onFocusChange={setFocusedCamId} />
+        <MultiCameraGrid cameras={cameras} bare onFocusChange={setFocusedCamId} onMetrics={onCameraMetrics} onUnavailable={onCameraUnavailable} />
       </div>
 
       {/* ── Camera picker (slidable feed thumbnails) ── */}

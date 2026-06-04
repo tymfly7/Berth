@@ -138,7 +138,7 @@ class VideoProcessor:
         )
         self._display_thread.start()
         self._infer_thread = threading.Thread(
-            target=self._inference_loop, daemon=True, name="sp-infer"
+            target=self._inference_submit_loop, daemon=True, name="sp-infer"
         )
         self._infer_thread.start()
         self._thread = threading.Thread(
@@ -416,76 +416,82 @@ class VideoProcessor:
 
     # ── Inference loop (background) ────────────────────────────────────────
 
-    def _inference_loop(self):
+    def _inference_submit_loop(self):
         """
-        Wakes on every new raw frame and runs the slot detector. Updates
-        metrics, heatmap, DB, and the overlay cache used by the display loop.
-        Runs as fast as the model allows without blocking video display.
+        Lightweight event loop: wakes on new frames and submits work to the
+        shared InferencePool. Returns immediately after submit so this thread
+        never blocks on the model — the pool worker calls detect() and invokes
+        _on_inference_result when done.
         """
+        from src.inference.inference_pool import InferencePool
+        pool = InferencePool.get()
         while self.running:
             if not self._infer_event.wait(timeout=2.0):
                 continue
             self._infer_event.clear()
             if not self.running:
                 break
-
             with self._latest_raw_lock:
                 raw = self._latest_raw
             if raw is None:
                 continue
-
             frame = cv2.resize(raw, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
-            result = self._detector.detect(frame, camera_id=self.camera_id)
+            pool.submit(
+                self._detector, frame, self.camera_id,
+                lambda result, f=frame: self._on_inference_result(result, f),
+            )
 
-            new_status_map = {s["id"]: s["status"] for s in result.get("slots", [])}
+    def _on_inference_result(self, result: dict, frame: np.ndarray) -> None:
+        """Called by a pool worker after detect() completes. Updates overlay cache, metrics, DB."""
+        new_status_map = {s["id"]: s["status"] for s in result.get("slots", [])}
 
-            # Anomaly detection (optional YOLO26 detect pass).
-            new_anomalies = []
-            if self._anomaly_enabled and self._yolo_detector is not None and self._roi_cache:
-                h, w = frame.shape[:2]
+        # Anomaly detection (optional YOLO26 detect pass).
+        new_anomalies = []
+        if self._anomaly_enabled and self._yolo_detector is not None and self._roi_cache:
+            h, w = frame.shape[:2]
+            try:
+                from src.inference.parking_geometry import classify_vehicle_parking
+                cars = self._yolo_detector.predict_frame(frame)
+                for car in cars:
+                    clf = classify_vehicle_parking(car["bbox"], self._roi_cache, w, h)
+                    if clf["status"] == "misparked":
+                        x1, y1, x2, y2 = (int(v) for v in car["bbox"])
+                        label = "STRADDLE" if clf["reason"] == "straddling" else "OUTSIDE"
+                        new_anomalies.append({"bbox": (x1, y1, x2, y2), "label": label})
+            except Exception as e:
+                logger.warning(f"Anomaly detection error: {e}")
+
+        with self._cached_status_lock:
+            self._cached_status_map = new_status_map
+            self._cached_anomalies = new_anomalies
+
+        metrics = self._result_to_metrics(result)
+        metrics["misparked_count"] = len(new_anomalies)
+        metrics["anomaly_enabled"] = self._anomaly_enabled
+        ts = datetime.now(timezone.utc).isoformat()
+
+        with self._lock:
+            self._metrics = metrics
+            self._history.append({
+                "timestamp": ts,
+                "available": metrics["available"],
+                "occupied": metrics["occupied"],
+                "occupancy_percent": metrics["occupancy_percent"],
+            })
+            self._update_heatmap(result["slots"])
+            now_t = time.time()
+            if now_t - self._last_db_write >= 60:
+                self._last_db_write = now_t
                 try:
-                    from src.inference.parking_geometry import classify_vehicle_parking
-                    cars = self._yolo_detector.predict_frame(frame)
-                    for car in cars:
-                        clf = classify_vehicle_parking(car["bbox"], self._roi_cache, w, h)
-                        if clf["status"] == "misparked":
-                            x1, y1, x2, y2 = (int(v) for v in car["bbox"])
-                            label = "STRADDLE" if clf["reason"] == "straddling" else "OUTSIDE"
-                            new_anomalies.append({"bbox": (x1, y1, x2, y2), "label": label})
-                except Exception as e:
-                    logger.warning(f"Anomaly detection error: {e}")
-
-            with self._cached_status_lock:
-                self._cached_status_map = new_status_map
-                self._cached_anomalies = new_anomalies
-
-            metrics = self._result_to_metrics(result)
-            metrics["misparked_count"] = len(new_anomalies)
-            metrics["anomaly_enabled"] = self._anomaly_enabled
-            ts = datetime.now(timezone.utc).isoformat()
-
-            with self._lock:
-                self._metrics = metrics
-                self._history.append({
-                    "timestamp": ts,
-                    "available": metrics["available"],
-                    "occupied": metrics["occupied"],
-                    "occupancy_percent": metrics["occupancy_percent"],
-                })
-                self._update_heatmap(result["slots"])
-                now_t = time.time()
-                if now_t - self._last_db_write >= 60:
-                    self._last_db_write = now_t
-                    try:
-                        db.record_occupancy(
-                            self.camera_id,
-                            metrics["available"],
-                            metrics["occupied"],
-                            metrics["occupancy_percent"],
-                        )
-                        db.maybe_record_alert(self.camera_id, metrics["occupancy_percent"])
-                    except Exception as _db_err:
-                        logger.warning(f"DB write failed: {_db_err}")
+                    db.record_occupancy(
+                        self.camera_id,
+                        metrics["available"],
+                        metrics["occupied"],
+                        metrics["occupancy_percent"],
+                    )
+                    db.maybe_record_alert(self.camera_id, metrics["occupancy_percent"])
+                except Exception as _db_err:
+                    logger.warning(f"DB write failed: {_db_err}")
 
     # ── Helpers ────────────────────────────────────────────────────────────
 

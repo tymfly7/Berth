@@ -76,6 +76,8 @@ async def lifespan(app: FastAPI):
     # is slow (5–15 s) and must not block the asyncio event loop.
     def _startup_warmup():
         camera_registry._restore_active()
+        from src.inference.inference_pool import InferencePool
+        InferencePool.get()
         try:
             _get_processor()
             logger.info("VideoProcessor pre-warmed")
@@ -116,7 +118,9 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
+    # localhost/127.0.0.1 plus private LAN ranges (10/8, 192.168/16, 172.16-31/12)
+    # so the board works both locally and when viewed from another device on the network.
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1|10(\.\d{1,3}){3}|192\.168(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2})(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1188,6 +1192,7 @@ def start_training(request: Request, model_name: str = "cnn_scratch",
                 total = s.get("total_epochs") or 0
                 _update_op_progress(op_id, epoch / total if total > 0 else 0)
                 if s.get("status") in ("done", "error", "idle"):
+                    _model_info_cache["data"] = None
                     break
             except Exception:
                 break
@@ -1583,8 +1588,11 @@ async def video_ws(websocket: WebSocket, token: str = ""):
         await websocket.close(code=4001)
         return
     await websocket.accept()
-    proc = _get_processor()
-    proc.start_processing()
+    # Offload the (potentially slow) model load + processor start to a worker
+    # thread so a cold connect never blocks the event loop and freezes every
+    # other request/WS.
+    proc = await asyncio.to_thread(_get_processor)
+    await asyncio.to_thread(proc.start_processing)
     logger.info("WebSocket client connected")
     last_frame_seq = -1
     try:
@@ -1751,4 +1759,17 @@ def spa_fallback(full_path: str):
 
 # ── Entry point ───────────────────────────────────────────
 if __name__ == "__main__":
-    uvicorn.run("main:app", host=config.HOST, port=config.PORT, reload=True)
+    # Reload is off by default: it spawns a child process (breaks Ctrl+C on
+    # Windows) and watching the huge data/ + venv/ trees is wasteful and can
+    # retrigger a full reload — which reloads every model — on each DB write.
+    # Opt in with BERTH_RELOAD=1; even then, only watch *.py and skip the big
+    # data/venv/db dirs.
+    _reload = os.getenv("BERTH_RELOAD") == "1"
+    uvicorn.run(
+        "main:app",
+        host=config.HOST,
+        port=config.PORT,
+        reload=_reload,
+        reload_includes=["*.py"] if _reload else None,
+        reload_excludes=["data/*", "venv/*", "*.db*", "roi_configs/*"] if _reload else None,
+    )

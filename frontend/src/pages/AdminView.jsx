@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { apiFetch } from '../api'
-import { API_BASE, WS_BASE } from '../config'
+import { API_BASE } from '../config'
 import '../App.css'
 import Header from '../components/Header'
 import VideoFeed from '../components/VideoFeed'
@@ -13,13 +13,9 @@ import SettingsPanel from '../components/SettingsPanel'
 import LotMap from '../components/LotMap'
 import { roiToSlot } from '../utils/roiUtils'
 
-const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
-const WS_URL = `${WS_BASE}/ws/video${_API_KEY ? `?token=${_API_KEY}` : ''}`
-
 export default function AdminView() {
-  const [connected, setConnected] = useState(false)
-  const [frame, setFrame] = useState(null)
-  const [metrics, setMetrics] = useState({
+  // Zero-valued fallback used by displayMetrics until camera WS data arrives.
+  const [metrics] = useState({
     total: 0, available: 0, occupied: 0,
     occupancy_percent: 0, avg_confidence: 0, slots: [],
   })
@@ -30,13 +26,10 @@ export default function AdminView() {
   const [allCameraSlots, setAllCameraSlots] = useState([])
   const [liveSlotsMap, setLiveSlotsMap] = useState({})
   const [lotMapIdx, setLotMapIdx] = useState(0)
-  const wsRef = useRef(null)
-  const reconnectTimer = useRef(null)
-  const camWsRefs = useRef({})
-  const unloading = useRef(false)
-  const metricsThrottleRef = useRef(0)
-  const camMetricsThrottleRef = useRef({})
   const prevCamIdsRef = useRef('')
+
+  // "Live" once any active camera's WS is delivering metrics.
+  const connected = Object.keys(allCameraMetrics).length > 0
 
   const displayMetrics = useMemo(() => {
     const entries = Object.values(allCameraMetrics)
@@ -55,42 +48,6 @@ export default function AdminView() {
       slots:             entries.flatMap(m => m.slots || []),
     }
   }, [allCameraMetrics, metrics])
-
-  const connectWs = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
-
-    const ws = new WebSocket(WS_URL)
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      setConnected(true)
-      console.log('✅ WebSocket connected')
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        if (data.frame) setFrame(data.frame)
-        if (data.metrics) {
-          const now = Date.now()
-          if (now - metricsThrottleRef.current >= 500) {
-            metricsThrottleRef.current = now
-            setMetrics(data.metrics)
-          }
-        }
-      } catch (e) {
-        console.error('Parse error:', e)
-      }
-    }
-
-    ws.onclose = () => {
-      setConnected(false)
-      if (!unloading.current)
-        reconnectTimer.current = setTimeout(connectWs, 500)
-    }
-
-    ws.onerror = () => ws.close()
-  }, [])
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -152,90 +109,38 @@ export default function AdminView() {
     const historyInterval = setInterval(fetchHistory,   30_000)
     const modelInterval   = setInterval(fetchModelInfo, 60_000)
 
-    const handleUnload = () => {
-      unloading.current = true
-      clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
-    }
-    window.addEventListener('beforeunload', handleUnload)
-
     return () => {
-      window.removeEventListener('beforeunload', handleUnload)
       clearInterval(cameraInterval)
       clearInterval(historyInterval)
       clearInterval(modelInterval)
-      clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
     }
   }, [fetchCameras, fetchModelInfo, fetchHistory])
 
-  // Only open the legacy /ws/video connection when at least one camera is active.
-  useEffect(() => {
-    if (cameras.some(c => c.active)) {
-      connectWs()
-    } else {
-      clearTimeout(reconnectTimer.current)
-      wsRef.current?.close()
-      setConnected(false)
-    }
-  }, [cameras, connectWs])
-
-  // Stable signature of the active-camera set so the WS effect only
-  // re-subscribes when membership actually changes — not on every 10s camera
-  // poll, which previously tore down all sockets and wiped metrics (flicker).
+  // Stable signature of the active-camera set, used only to prune metrics for
+  // cameras that leave the active set (metric hallucination).
   const activeCamKey = cameras.filter(c => c.active).map(c => c.id).sort().join(',')
 
-  // Subscribe to all active cameras' WS for live slot statuses.
   useEffect(() => {
     const activeIds = new Set(activeCamKey ? activeCamKey.split(',') : [])
-
-    Object.entries(camWsRefs.current).forEach(([id, ws]) => {
-      if (!activeIds.has(id)) { ws.close(); delete camWsRefs.current[id] }
-    })
-
-    // Drop metrics/slots for cameras no longer active, so deactivated lots
-    // stop counting toward the aggregate (metric hallucination).
     const pruneStale = prev => {
       const next = Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
       return Object.keys(next).length === Object.keys(prev).length ? prev : next
     }
     setAllCameraMetrics(pruneStale)
     setLiveSlotsMap(pruneStale)
-
-    activeIds.forEach(id => {
-      if (camWsRefs.current[id]) return
-      const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-      const ws = new WebSocket(`${WS_BASE}/ws/cameras/${id}${wsToken}`)
-      camWsRefs.current[id] = ws
-      ws.onmessage = (e) => {
-        try {
-          const d = JSON.parse(e.data)
-          if (d.type === 'feed_unavailable') {
-            // Feed stopped/deactivated — drop its metrics immediately.
-            setAllCameraMetrics(({ [id]: _drop, ...rest }) => rest)
-            setLiveSlotsMap(({ [id]: _drop, ...rest }) => rest)
-            return
-          }
-          if (d.metrics) {
-            const now = Date.now()
-            const last = camMetricsThrottleRef.current[id] || 0
-            if (now - last >= 500) {
-              camMetricsThrottleRef.current[id] = now
-              setAllCameraMetrics(prev => ({ ...prev, [id]: d.metrics }))
-              if (Array.isArray(d.metrics.slots))
-                setLiveSlotsMap(prev => ({ ...prev, [id]: d.metrics.slots }))
-            }
-          }
-        } catch { /* ignore */ }
-      }
-      ws.onerror = () => { ws.close(); delete camWsRefs.current[id] }
-    })
-
-    return () => {
-      Object.values(camWsRefs.current).forEach(ws => ws.close())
-      camWsRefs.current = {}
-    }
   }, [activeCamKey])
+
+  // Live per-camera metrics/slots are surfaced from MultiCameraGrid's sockets
+  // (one WS per camera) instead of opening a second WS per camera here.
+  const handleCamMetrics = useCallback((id, m) => {
+    setAllCameraMetrics(prev => ({ ...prev, [id]: m }))
+    if (Array.isArray(m.slots)) setLiveSlotsMap(prev => ({ ...prev, [id]: m.slots }))
+  }, [])
+
+  const handleCamUnavailable = useCallback((id) => {
+    setAllCameraMetrics(({ [id]: _drop, ...rest }) => rest)
+    setLiveSlotsMap(({ [id]: _drop, ...rest }) => rest)
+  }, [])
 
   useEffect(() => {
     setLotMapIdx(i => Math.min(i, Math.max(0, allCameraSlots.length - 1)))
@@ -264,11 +169,12 @@ export default function AdminView() {
       <div className="dashboard-grid">
         <div className="main-column">
           <VideoFeed
-            frame={frame}
             connected={connected}
             activeCamera={cameras.find(c => c.active) || null}
             apiBase={API_BASE}
             cameras={cameras}
+            onCameraMetrics={handleCamMetrics}
+            onCameraUnavailable={handleCamUnavailable}
           />
           <div className="metrics-row fade-in">
             <MetricCards
