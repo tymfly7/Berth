@@ -14,7 +14,7 @@ function centroid(pts) {
   ]
 }
 
-export default function LotMap({ slots, demo = false, title = null }) {
+export default function LotMap({ slots, roiOnly = false, title = null }) {
   if (!slots || slots.length === 0) return null
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
@@ -57,7 +57,7 @@ export default function LotMap({ slots, demo = false, title = null }) {
         }}>
           {title ? `${title} — ` : 'Lot Map — '}{slots.length} slot{slots.length !== 1 ? 's' : ''}
         </span>
-        {demo && (
+        {roiOnly && (
           <span style={{
             fontSize: '0.6rem', color: 'var(--text-muted)',
             background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)',

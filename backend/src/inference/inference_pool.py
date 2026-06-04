@@ -16,7 +16,7 @@ import logging
 
 logger = logging.getLogger("berth.inference_pool")
 
-_DEFAULT_WORKERS = min(max(1, (os.cpu_count() or 1) - 1), 8)
+_DEFAULT_WORKERS = min(max(1, (os.cpu_count() or 1) - 1), 4)
 
 
 class InferencePool:

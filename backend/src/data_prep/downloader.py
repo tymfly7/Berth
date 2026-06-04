@@ -148,7 +148,7 @@ def organize_pklot(source_root=None, target_root=None, max_per_class=0,):
 
 def generate_sample_dataset(target_root=None, num_per_class=100):
     """
-    Generate a tiny synthetic dataset for testing/demo purposes.
+    Generate a tiny synthetic dataset for testing purposes.
     Creates random colored squares to simulate occupied (dark) and vacant (light) spaces.
 
     Args:

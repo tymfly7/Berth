@@ -121,8 +121,20 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
     }
   }
 
-  const handleDownloadExcel = () => {
-    window.open(`${apiBase}/api/evaluate/excel`, '_blank')
+  const handleDownloadExcel = async () => {
+    try {
+      const res = await apiFetch(`${apiBase}/api/evaluate/excel`)
+      if (!res.ok) throw new Error(`Server error ${res.status}`)
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = 'model_comparison.xlsx'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      alert(`Download failed: ${e.message}`)
+    }
   }
 
   const isEvaluating  = evalStatus?.status === 'training'

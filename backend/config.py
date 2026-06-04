@@ -20,6 +20,7 @@ UPLOAD_DIR = BASE_DIR / "uploads"
 MODEL_DIR = BASE_DIR / "models"
 OUTPUT_DIR = BASE_DIR / "outputs"
 SPOTS_CONFIG_PATH = BASE_DIR / "spots_config.json"
+DB_PATH = Path(os.getenv("BERTH_DB_PATH", str(BASE_DIR / "berth.db")))
 
 # PKLot dataset root — set this to your downloaded PKLot path
 # Expected structure: PKLOT_ROOT/PKLotSegmented/{PUC,UFPR04,UFPR05}/.../Occupied|Empty
@@ -52,8 +53,10 @@ ACTIVE_MODEL = os.getenv("BERTH_MODEL", "yolo26_classify")
 CNN_SCRATCH_PATH      = MODEL_DIR / "best_cnn_scratch.pth"
 RESNET50_PATH         = MODEL_DIR / "best_resnet50.pth"
 MOBILENETV4_PATH      = MODEL_DIR / "best_mobilenetv4.pth"
-YOLO26_CLASSIFY_PATH  = MODEL_DIR / "best_yolo26_classify.pt"
-YOLO26_DETECT_PATH    = MODEL_DIR / "best_yolo26_detect.pt"
+YOLO26_CLASSIFY_PATH      = MODEL_DIR / "best_yolo26_classify.pt"
+YOLO26_DETECT_PATH        = MODEL_DIR / "best_yolo26_detect.pt"
+YOLO26_CLASSIFY_NCNN_PATH = MODEL_DIR / "best_yolo26_classify_ncnn_model"
+YOLO26_DETECT_NCNN_PATH   = MODEL_DIR / "best_yolo26_detect_ncnn_model"
 YOLO_DATASET_DIR         = DATA_DIR  / "yolo_detect_dataset"
 YOLO_GOPRO_DIR           = DATA_DIR  / "yolo_data" / "parking_rois_gopro"
 CLASSIFY_YOLO_DATA_DIR   = BASE_DIR  / "classify_yolo_data"
@@ -67,8 +70,9 @@ TRAIN_SPLIT = 0.70
 VAL_SPLIT   = 0.15
 TEST_SPLIT  = 0.15
 
-EPOCHS              = int(os.getenv("BERTH_EPOCHS", "30"))
-YOLO_DETECT_EPOCHS  = int(os.getenv("BERTH_YOLO_DETECT_EPOCHS", "30"))
+EPOCHS               = int(os.getenv("BERTH_EPOCHS", "30"))
+YOLO_CLASSIFY_EPOCHS = int(os.getenv("BERTH_YOLO_CLASSIFY_EPOCHS", "30"))
+YOLO_DETECT_EPOCHS   = int(os.getenv("BERTH_YOLO_DETECT_EPOCHS", "30"))
 BATCH_SIZE           = int(os.getenv("BERTH_BATCH_SIZE", "32"))
 LEARNING_RATE        = float(os.getenv("BERTH_LR", "1e-3"))
 WEIGHT_DECAY         = 1e-4          # L2 regularization
@@ -107,7 +111,7 @@ EDGE_HUB_URL = os.getenv("BERTH_EDGE_HUB_URL", "")
 FRAME_WIDTH   = 640  if DEPLOYMENT_PROFILE == "edge" else 1280
 FRAME_HEIGHT  = 480  if DEPLOYMENT_PROFILE == "edge" else 720
 STREAM_FPS    = 6    if DEPLOYMENT_PROFILE == "edge" else 20
-JPEG_QUALITY  = 92
+JPEG_QUALITY  = 80   # monitoring stream — 80 ~halves payload vs 92 with little visible loss
 
 # Live YouTube HLS URLs expire; cache resolved stream URLs for this long.
 YOUTUBE_STREAM_CACHE_TTL = int(os.getenv("BERTH_YT_CACHE_TTL", "240"))  # seconds

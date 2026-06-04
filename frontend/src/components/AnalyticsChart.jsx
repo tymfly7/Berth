@@ -2,6 +2,56 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import { apiFetch } from '../api'
 import { API_BASE } from '../config'
 
+function aggregateByMonth(data) {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const byDay = {}
+  data.forEach(d => {
+    const date = (d.timestamp || '').slice(0, 10)
+    if (!date) return
+    if (!byDay[date]) byDay[date] = { available: [], occupied: [] }
+    byDay[date].available.push(d.available || 0)
+    byDay[date].occupied.push(d.occupied || 0)
+  })
+  const result = []
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    const vals = byDay[date]
+    result.push({
+      timestamp: date,
+      available: vals ? Math.round(vals.available.reduce((s, v) => s + v, 0) / vals.available.length) : 0,
+      occupied:  vals ? Math.round(vals.occupied.reduce((s, v) => s + v, 0) / vals.occupied.length) : 0,
+    })
+  }
+  return result
+}
+
+function aggregateByDay(data, days = 7) {
+  const byDay = {}
+  data.forEach(d => {
+    const date = (d.timestamp || '').slice(0, 10)
+    if (!date) return
+    if (!byDay[date]) byDay[date] = { available: [], occupied: [] }
+    byDay[date].available.push(d.available || 0)
+    byDay[date].occupied.push(d.occupied || 0)
+  })
+  const result = []
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    const date = d.toISOString().slice(0, 10)
+    const vals = byDay[date]
+    result.push({
+      timestamp: date,
+      available: vals ? Math.round(vals.available.reduce((s, v) => s + v, 0) / vals.available.length) : 0,
+      occupied:  vals ? Math.round(vals.occupied.reduce((s, v) => s + v, 0) / vals.occupied.length) : 0,
+    })
+  }
+  return result
+}
+
 const TABS = [
   { key: 'live',  label: 'Live' },
   { key: 'day',   label: 'Day' },
@@ -9,7 +59,7 @@ const TABS = [
   { key: 'month', label: 'Month' },
 ]
 
-function drawChart(canvas, data) {
+function drawChart(canvas, data, tab = 'live') {
   if (!canvas || !data || data.length === 0) return
 
   const ctx = canvas.getContext('2d')
@@ -87,23 +137,59 @@ function drawChart(canvas, data) {
 
   const availData = data.map(d => d.available)
   const occData   = data.map(d => d.occupied)
+  const isBars = tab === 'week' || tab === 'month'
 
-  drawLine(availData, 'rgba(16,185,129,1)', true)
-  drawLine(occData,   'rgba(244,63,94,1)',  true)
-  drawLine(availData, 'rgba(16,185,129,1)', false)
-  drawLine(occData,   'rgba(244,63,94,1)',  false)
+  if (isBars) {
+    const groupW = plotW / data.length
+    const barPad = Math.max(2, groupW * 0.1)
+    const gap    = Math.max(1, groupW * 0.05)
+    const barW   = Math.max(2, (groupW - barPad * 2 - gap) / 2)
+    data.forEach((d, i) => {
+      const x0 = pad.left + i * groupW + barPad
+      const availH = maxVal > 0 ? (d.available / maxVal) * plotH : 0
+      ctx.fillStyle = 'rgba(16,185,129,0.85)'
+      ctx.fillRect(x0, pad.top + plotH - availH, barW, availH)
+      const occH = maxVal > 0 ? (d.occupied / maxVal) * plotH : 0
+      ctx.fillStyle = 'rgba(244,63,94,0.85)'
+      ctx.fillRect(x0 + barW + gap, pad.top + plotH - occH, barW, occH)
+    })
+  } else {
+    drawLine(availData, 'rgba(16,185,129,1)', true)
+    drawLine(occData,   'rgba(244,63,94,1)',  true)
+    drawLine(availData, 'rgba(16,185,129,1)', false)
+    drawLine(occData,   'rgba(244,63,94,1)',  false)
+  }
 
-  // X-axis labels (first, middle, last)
-  const labelIdxs = [0, Math.floor(data.length / 2), data.length - 1]
+  // X-axis labels
+  let labelIdxs
+  if (tab === 'month') {
+    labelIdxs = []
+    for (let i = 0; i < data.length; i += 5) labelIdxs.push(i)
+    if (labelIdxs[labelIdxs.length - 1] !== data.length - 1) labelIdxs.push(data.length - 1)
+  } else {
+    const maxLabels = tab === 'week' ? Math.min(7, data.length) : Math.max(2, Math.min(data.length, Math.floor(plotW / 58)))
+    labelIdxs = maxLabels === 1
+      ? [0]
+      : Array.from({ length: maxLabels }, (_, i) => Math.round(i * (data.length - 1) / (maxLabels - 1)))
+  }
   ctx.fillStyle = 'rgba(255,255,255,0.3)'
   ctx.font = '9px Inter, sans-serif'
   ctx.textAlign = 'center'
   labelIdxs.forEach(i => {
     const raw = data[i]?.timestamp || ''
-    const label = raw.length > 10
-      ? raw.slice(11, 16)   // HH:MM — ISO or space-separated datetime
-      : raw.slice(5, 10)    // MM-DD — date-only (month view)
-    const x = data.length === 1 ? pad.left + plotW / 2 : pad.left + (i / (data.length - 1)) * plotW
+    let label
+    if (tab === 'week') {
+      const [y, m, day] = raw.slice(0, 10).split('-').map(Number)
+      const d = new Date(y, m - 1, day)
+      label = isNaN(d) ? raw.slice(5, 10) : d.toLocaleDateString('en-US', { weekday: 'short' })
+    } else if (raw.length > 10) {
+      label = raw.slice(11, 16)   // HH:MM
+    } else {
+      label = raw.slice(5, 10)    // MM-DD
+    }
+    const x = isBars
+      ? pad.left + i * (plotW / data.length) + (plotW / data.length) / 2
+      : data.length === 1 ? pad.left + plotW / 2 : pad.left + (i / (data.length - 1)) * plotW
     ctx.fillText(label, x, pad.top + plotH + 16)
   })
 
@@ -121,12 +207,14 @@ function drawChart(canvas, data) {
   ctx.fillText('Occupied', pad.left + 106, legendY)
 }
 
-export default function AnalyticsChart() {
+export default function AnalyticsChart({ connected = false }) {
   const canvasRef = useRef(null)
+  const chartDataRef = useRef({ data: [], tab: 'live' })
   const [tab, setTab] = useState('live')
   const [trendData, setTrendData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [fetchError, setFetchError] = useState(false)
+  const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, label: '', available: 0, occupied: 0 })
 
   const fetchTrend = useCallback(async (range) => {
     setLoading(true)
@@ -154,13 +242,64 @@ export default function AnalyticsChart() {
   const activeData = trendData ?? []
 
   useEffect(() => {
-    if (activeData.length === 0 && canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d')
-      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+    const now = new Date().toISOString()
+    const zeros = [{ timestamp: now, available: 0, occupied: 0 }, { timestamp: now, available: 0, occupied: 0 }]
+    let data = (tab === 'live' && !connected) ? zeros : (activeData.length > 0 ? activeData : zeros)
+    if (tab === 'week') data = aggregateByDay(data, 7)
+    if (tab === 'month') data = aggregateByMonth(data)
+    data = data.map(d => ({ ...d, available: Math.round(d.available || 0), occupied: Math.round(d.occupied || 0) }))
+    chartDataRef.current = { data, tab }
+    drawChart(canvasRef.current, data, tab)
+  }, [activeData, tab, connected])
+
+  const handleMouseMove = useCallback((e) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const { data, tab: currentTab } = chartDataRef.current
+    if (!data || data.length === 0) return
+
+    const rect = canvas.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    const pad = { top: 20, right: 16, bottom: 30, left: 40 }
+    const plotW = rect.width - pad.left - pad.right
+    const plotH = rect.height - pad.top - pad.bottom
+
+    if (mx < pad.left || mx > rect.width - pad.right || my < pad.top || my > pad.top + plotH) {
+      setTooltip(t => ({ ...t, visible: false }))
       return
     }
-    drawChart(canvasRef.current, activeData)
-  }, [activeData])
+
+    const isBars = currentTab === 'week' || currentTab === 'month'
+    let idx
+    if (isBars) {
+      idx = Math.max(0, Math.min(data.length - 1, Math.floor((mx - pad.left) / (plotW / data.length))))
+    } else {
+      idx = data.length === 1 ? 0 : Math.max(0, Math.min(data.length - 1, Math.round((mx - pad.left) / plotW * (data.length - 1))))
+    }
+
+    const d = data[idx]
+    if (!d) return
+    const raw = d.timestamp || ''
+    let label
+    if (currentTab === 'week') {
+      const [y, m, day] = raw.slice(0, 10).split('-').map(Number)
+      const dt = new Date(y, m - 1, day)
+      label = isNaN(dt.getTime()) ? raw.slice(5, 10) : dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+    } else if (raw.length > 10) {
+      label = raw.slice(11, 16)
+    } else {
+      label = raw.slice(5, 10)
+    }
+
+    const tx = Math.min(mx + 12, rect.width - 115)
+    const ty = Math.max(my - 50, 4)
+    setTooltip({ visible: true, x: tx, y: ty, label, available: d.available, occupied: d.occupied })
+  }, [])
+
+  const handleMouseLeave = useCallback(() => {
+    setTooltip(t => ({ ...t, visible: false }))
+  }, [])
 
   const tabStyle = (key) => ({
     padding: '3px 12px',
@@ -175,7 +314,7 @@ export default function AnalyticsChart() {
     transition: 'background 0.15s',
   })
 
-  const isEmpty = activeData.length === 0
+  const chartH = tab === 'month' ? 180 : 240
 
   return (
     <div className="glass-card" style={{ padding: '20px' }}>
@@ -198,12 +337,27 @@ export default function AnalyticsChart() {
         <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '40px 0' }}>
           Could not load trend data. Retrying…
         </div>
-      ) : isEmpty ? (
-        <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '40px 0' }}>
-          {tab === 'live' ? 'No data recorded today yet.' : 'No historical data yet — data accumulates over time.'}
-        </div>
       ) : (
-        <canvas ref={canvasRef} style={{ width: '100%', height: 180, borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.2)' }} />
+        <div style={{ position: 'relative' }}>
+          <canvas
+            ref={canvasRef}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            style={{ width: '100%', height: chartH, borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.2)', display: 'block' }}
+          />
+          {tooltip.visible && (
+            <div style={{
+              position: 'absolute', left: tooltip.x, top: tooltip.y,
+              background: 'rgba(12,18,32,0.95)', border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 6, padding: '6px 10px', pointerEvents: 'none',
+              fontSize: '0.72rem', color: '#fff', lineHeight: 1.7, zIndex: 10, minWidth: 105,
+            }}>
+              <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: '0.68rem', marginBottom: 2 }}>{tooltip.label}</div>
+              <div><span style={{ color: 'rgba(16,185,129,1)' }}>&#9646;</span> Available: <strong>{tooltip.available}</strong></div>
+              <div><span style={{ color: 'rgba(244,63,94,1)' }}>&#9646;</span> Occupied: <strong>{tooltip.occupied}</strong></div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

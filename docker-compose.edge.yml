@@ -8,18 +8,22 @@ services:
         - linux/arm64
     environment:
       - BERTH_DEPLOYMENT=edge
-      - BERTH_MODEL=mobilenetv4        # MobileNetV4 recommended for RPi5 CPU
+      - BERTH_MODEL=mobilenetv4s       # MobileNetV4 recommended for RPi5 CPU
       - BERTH_EDGE_HUB_URL=http://HUB_IP:8000   # replace HUB_IP
       - BERTH_API_KEY=${BERTH_API_KEY:-}
       - BERTH_PORT=8000
+      - BERTH_DB_PATH=/app/edge_data/berth.db
     volumes:
       # Persist exported edge models and the local SQLite buffer.
-      # Copy edge_mobilenetv4.pte (or .onnx) from hub into ./models/ before first run.
+      # Copy edge_*_ncnn_model/ dirs and *_ncnn_model/ dirs from hub into ./backend/models/ before first run.
       - ./backend/models:/app/models
-      - ./backend/berth.db:/app/berth.db
+      - berth_edge_data:/app/edge_data
     devices:
       # USB camera passthrough — adjust index if using /dev/video1, /dev/video2, etc.
       - /dev/video0:/dev/video0
     ports:
       - "8000:8000"
     restart: unless-stopped
+
+volumes:
+  berth_edge_data:

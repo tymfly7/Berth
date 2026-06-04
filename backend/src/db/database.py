@@ -11,7 +11,7 @@ import config
 
 logger = logging.getLogger("berth.db")
 
-DB_PATH = config.BASE_DIR / "berth.db"
+DB_PATH = config.DB_PATH
 
 _local = threading.local()
 
@@ -81,60 +81,74 @@ def record_occupancy(camera_id: str, available: int, occupied: int,
     c.execute(
         "INSERT INTO occupancy_history (timestamp, camera_id, available, occupied, occupancy_percent) "
         "VALUES (?, ?, ?, ?, ?)",
-        (ts, camera_id, available, occupied, occupancy_percent),
+        (ts, camera_id, int(available), int(occupied), occupancy_percent),
     )
     c.commit()
 
 
-_TREND_CONFIG = {
-    "day":   (timedelta(hours=24), "datetime(strftime('%s', timestamp) - (strftime('%s', timestamp) % 300), 'unixepoch')"),
-    "week":  (timedelta(days=7),   "strftime('%Y-%m-%d %H:00:00', timestamp)"),
-    "month": (timedelta(days=30),  "strftime('%Y-%m-%d', timestamp)"),
+_BUCKET_CONFIG = {
+    "week":  (timedelta(days=7),  "strftime('%Y-%m-%d %H:00:00', timestamp)"),
+    "month": (timedelta(days=30), "strftime('%Y-%m-%d', timestamp)"),
 }
-
-_TODAY_GROUP = "datetime(strftime('%s', timestamp) - (strftime('%s', timestamp) % 300), 'unixepoch')"
 
 
 def query_trends(range_: str, camera_id: str = None):
     """
-    Returns aggregated occupancy data for the given range.
-      range_: 'today' (midnight→now, 5-min) | 'day' (last 24h, 5-min) | 'week' | 'month'
+    Returns occupancy data for the given range.
+      today/day: raw per-snapshot values (no time-bucketing), summed across cameras per timestamp
+      week/month: hourly/daily averages rounded to integers
     Each row: { timestamp, available, occupied, occupancy_percent }
     """
-    if range_ not in (*_TREND_CONFIG, "today"):
+    if range_ not in (*_BUCKET_CONFIG, "today", "day"):
         raise ValueError(f"Invalid range '{range_}': must be today, day, week, or month")
 
-    if range_ == "today":
-        now = datetime.now(timezone.utc)
-        since = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-        group_expr = _TODAY_GROUP
-    else:
-        delta, group_expr = _TREND_CONFIG[range_]
-        since = (datetime.now(timezone.utc) - delta).isoformat()
-
     cam_filter = "AND camera_id = ?" if camera_id else ""
-    params = [since] + ([camera_id] if camera_id else [])
 
-    rows = _conn().execute(
-        f"""
-        SELECT
-            {group_expr} AS ts,
-            ROUND(AVG(available), 1)         AS available,
-            ROUND(AVG(occupied), 1)          AS occupied,
-            ROUND(AVG(occupancy_percent), 1) AS occupancy_percent
-        FROM occupancy_history
-        WHERE timestamp >= ? {cam_filter}
-        GROUP BY {group_expr}
-        ORDER BY ts
-        """,
-        params,
-    ).fetchall()
+    if range_ in ("today", "day"):
+        if range_ == "today":
+            now = datetime.now(timezone.utc)
+            since = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        else:
+            since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        params = [since] + ([camera_id] if camera_id else [])
+        rows = _conn().execute(
+            f"""
+            SELECT
+                timestamp                                    AS ts,
+                CAST(ROUND(SUM(available))  AS INTEGER)      AS available,
+                CAST(ROUND(SUM(occupied))   AS INTEGER)      AS occupied,
+                ROUND(AVG(occupancy_percent), 1)             AS occupancy_percent
+            FROM occupancy_history
+            WHERE timestamp >= ? {cam_filter}
+            GROUP BY timestamp
+            ORDER BY ts
+            """,
+            params,
+        ).fetchall()
+    else:
+        delta, group_expr = _BUCKET_CONFIG[range_]
+        since = (datetime.now(timezone.utc) - delta).isoformat()
+        params = [since] + ([camera_id] if camera_id else [])
+        rows = _conn().execute(
+            f"""
+            SELECT
+                {group_expr}                              AS ts,
+                CAST(ROUND(AVG(available))  AS INTEGER)  AS available,
+                CAST(ROUND(AVG(occupied))   AS INTEGER)  AS occupied,
+                ROUND(AVG(occupancy_percent), 1)         AS occupancy_percent
+            FROM occupancy_history
+            WHERE timestamp >= ? {cam_filter}
+            GROUP BY {group_expr}
+            ORDER BY ts
+            """,
+            params,
+        ).fetchall()
 
     return [
         {
             "timestamp": r["ts"].replace(" ", "T"),
             "available": r["available"],
-            "occupied": r["occupied"],
+            "occupied":  r["occupied"],
             "occupancy_percent": r["occupancy_percent"],
         }
         for r in rows

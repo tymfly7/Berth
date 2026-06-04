@@ -171,7 +171,7 @@ class TrainManager:
                 except Exception:
                     pass
 
-            # Export to edge format (.pte / .onnx) — non-fatal
+            # Export to ONNX for edge inference — non-fatal
             try:
                 from src.export.model_exporter import export_pytorch_model
                 weights_map = {
@@ -213,7 +213,7 @@ class TrainManager:
 
             with _lock:
                 _state["message"] = "Cropping ROI spots from gopro annotations..."
-                _state["total_epochs"] = config.EPOCHS
+                _state["total_epochs"] = config.YOLO_CLASSIFY_EPOCHS
 
             classify_data_dir = build_yolo_classify_dataset()
 
@@ -237,7 +237,7 @@ class TrainManager:
                 with _lock:
                     _state["elapsed"] = round(time.time() - _classify_start, 1)
                     _state["message"] = (
-                        f"Epoch {trainer.epoch + 1}/{config.EPOCHS} — "
+                        f"Epoch {trainer.epoch + 1}/{config.YOLO_CLASSIFY_EPOCHS} — "
                         f"batch {_batch_count[0]} — loss: {loss_val:.4f}"
                     )
 
@@ -249,7 +249,7 @@ class TrainManager:
                     _state["val_acc"] = round(float(metrics.get("metrics/accuracy_top1", 0)) * 100, 2)
                     _state["elapsed"] = round(time.time() - _classify_start, 1)
                     _state["message"] = (
-                        f"Epoch {epoch}/{config.EPOCHS} — "
+                        f"Epoch {epoch}/{config.YOLO_CLASSIFY_EPOCHS} — "
                         f"Top-1 Acc: {_state['val_acc']:.2f}%"
                     )
 
@@ -259,7 +259,7 @@ class TrainManager:
             results = model.train(
                 data=str(classify_data_dir),           # pre-built subset: only occupied/ + vacant/
                 task="classify",
-                epochs=config.EPOCHS,
+                epochs=config.YOLO_CLASSIFY_EPOCHS,
                 batch=config.BATCH_SIZE,
                 imgsz=config.YOLO_CLASSIFY_IMG_SIZE,   # 64 px — spots are pre-cropped
                 cache="ram",
@@ -291,7 +291,7 @@ class TrainManager:
                 except Exception:
                     pass
 
-            # Export to edge format (.pte / .onnx) — non-fatal
+            # Export to ONNX for edge inference — non-fatal
             try:
                 from src.export.model_exporter import export_yolo_model
                 export_yolo_model("yolo26_classify", config.YOLO26_CLASSIFY_PATH)
@@ -407,7 +407,7 @@ class TrainManager:
                 except Exception:
                     pass
 
-            # Export to edge format (.pte / .onnx) — non-fatal
+            # Export to ONNX for edge inference — non-fatal
             try:
                 from src.export.model_exporter import export_yolo_model
                 export_yolo_model("yolo26_detect", config.YOLO26_DETECT_PATH)

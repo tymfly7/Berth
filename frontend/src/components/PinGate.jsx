@@ -1,4 +1,4 @@
-// Frontend-only auth gate — suitable for kiosk/demo use only; not a security boundary.
+// Frontend-only auth gate — suitable for kiosk use only; not a security boundary.
 // Bot protection here (honeypot, math challenge, attempt lockout) only raises the bar
 // against naive automated guessing; it is not real security since the check runs client-side.
 import { useState, useEffect } from 'react'

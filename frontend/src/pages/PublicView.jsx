@@ -56,7 +56,7 @@ export default function PublicView() {
 
     fetchMetrics()
     fetchHistory()
-    const pollInterval = setInterval(fetchMetrics, 8000)
+    const pollInterval = setInterval(fetchMetrics, 30000)
     const historyInterval = setInterval(fetchHistory, 60000)
     const clockInterval = setInterval(() => setTime(new Date()), 1000)
 
@@ -313,7 +313,7 @@ export default function PublicView() {
                   style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 2, fontSize: '1.2rem', padding: '6px 14px' }}
                   onClick={() => setLotMapIdx(i => (i + 1) % allCameraSlots.length)}>›</button>
               </>}
-              <LotMap slots={slots} demo={liveForCam.length === 0} title={multi ? cam.name : null} />
+              <LotMap slots={slots} roiOnly={liveForCam.length === 0} title={multi ? cam.name : null} />
             </div>
           </div>
         )

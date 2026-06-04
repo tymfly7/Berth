@@ -83,14 +83,15 @@ async def lifespan(app: FastAPI):
             logger.info("VideoProcessor pre-warmed")
         except Exception as e:
             logger.warning(f"Processor pre-warm skipped: {e}")
-        # Pre-load every classifier so the first analyze of each model isn't
-        # delayed by a cold ~2 s load (users switch models to compare them).
-        for _name in ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26"):
-            try:
-                _get_classifier(_name)
-            except Exception as e:
-                logger.warning(f"Classifier pre-warm skipped for {_name}: {e}")
-        logger.info("Classifiers pre-warmed")
+        # Pre-load only the active classifier. The others load lazily on first
+        # use and stay cached after — pre-loading all five bloated startup time
+        # and resident memory (and on edge dragged in the torch/ultralytics path
+        # for the YOLO models, which the ncnn-only profile cannot satisfy).
+        try:
+            _get_classifier(_active_mode or config.ACTIVE_MODEL)
+        except Exception as e:
+            logger.warning(f"Classifier pre-warm skipped: {e}")
+        logger.info("Active classifier pre-warmed")
     threading.Thread(target=_startup_warmup, daemon=True, name="startup-warmup").start()
     yield
     camera_registry.shutdown()
@@ -898,6 +899,20 @@ def evaluate_all():
     result = TrainManager().start_evaluation()
     if result.get("status") == "error":
         raise HTTPException(400, result["message"])
+
+    def _monitor():
+        from src.train.train_manager import TrainManager as TM
+        while True:
+            time.sleep(2)
+            try:
+                s = TM().get_status()
+                if s.get("status") in ("done", "error", "idle"):
+                    _model_info_cache["data"] = None
+                    break
+            except Exception:
+                break
+
+    threading.Thread(target=_monitor, daemon=True).start()
     return result
 
 
@@ -1114,6 +1129,22 @@ def _load_model_training_details() -> dict:
     return details
 
 
+def _count_images(path: Path) -> int:
+    """Count image files in a flat directory via os.scandir. Faster than
+    Path.glob('*.*') on the large dataset dirs — no per-entry fnmatch or Path
+    allocation — which matters because model switching re-runs this on each
+    model_info cache miss."""
+    if not path.exists():
+        return 0
+    exts = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp")
+    count = 0
+    with os.scandir(path) as it:
+        for entry in it:
+            if entry.is_file() and entry.name.lower().endswith(exts):
+                count += 1
+    return count
+
+
 @app.get("/api/model/info", dependencies=[Depends(verify_api_key)])
 def model_info():
     now = time.monotonic()
@@ -1126,8 +1157,8 @@ def model_info():
     occ_dir = data_dir / "occupied"
     vac_dir = data_dir / "vacant"
     dataset_ready = occ_dir.exists() and vac_dir.exists()
-    occupied_count = len(list(occ_dir.glob("*.*"))) if occ_dir.exists() else 0
-    vacant_count = len(list(vac_dir.glob("*.*"))) if vac_dir.exists() else 0
+    occupied_count = _count_images(occ_dir)
+    vacant_count = _count_images(vac_dir)
     dataset_count = occupied_count + vacant_count
 
     comparison_path = config.OUTPUT_DIR / "model_comparison.json"

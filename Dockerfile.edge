@@ -10,7 +10,7 @@ FROM python:3.11-slim
 
 # System dependencies for OpenCV (headless) and USB camera access
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libgl1-mesa-glx \
+        libgl1 \
         libglib2.0-0 \
         libsm6 \
         libxrender1 \
@@ -20,14 +20,18 @@ WORKDIR /app
 
 # Install Python dependencies before copying source (layer cache efficiency)
 COPY backend/requirements.edge.txt requirements.edge.txt
+# Pre-install CPU-only torch so ultralytics doesn't pull the CUDA build
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r requirements.edge.txt
 
 # Copy backend source (no frontend — edge serves JSON only)
 COPY backend/ /app/
 
+RUN mkdir -p /app/edge_data
+
 # Edge profile is the default; override via env vars at runtime
 ENV BERTH_DEPLOYMENT=edge \
-    BERTH_MODEL=mobilenetv4 \
+    BERTH_MODEL=mobilenetv4s \
     BERTH_HOST=0.0.0.0 \
     BERTH_PORT=8000
 
