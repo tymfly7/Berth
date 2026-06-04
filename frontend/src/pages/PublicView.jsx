@@ -174,7 +174,7 @@ export default function PublicView() {
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      padding: '40px 24px',
+      padding: '40px clamp(12px, 4vw, 24px)',
       position: 'relative',
     }}>
       {/* Heading + clock */}
@@ -271,7 +271,7 @@ export default function PublicView() {
       {/* Metric cards */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
         gap: 16,
         width: '100%',
         maxWidth: 800,

@@ -143,12 +143,6 @@ const s = {
   },
 }
 
-function gridColumns(count) {
-  if (count <= 1) return '1fr'
-  if (count <= 2) return '1fr 1fr'
-  return '1fr 1fr 1fr'
-}
-
 export default function MultiCameraGrid({ cameras, bare = false, onFocusChange, onMetrics, onUnavailable }) {
   const [metricsMap, setMetricsMap] = useState({})
   const [focusedId, setFocusedId] = useState(null)
@@ -200,7 +194,7 @@ export default function MultiCameraGrid({ cameras, bare = false, onFocusChange, 
   // components themselves are never reparented, so WebSocket connections survive.
   const containerStyle = focusedId
     ? { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-start' }
-    : { display: 'grid', gridTemplateColumns: gridColumns(active.length), gap: 12 }
+    : { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))', gap: 12 }
 
   const content = (
     <>

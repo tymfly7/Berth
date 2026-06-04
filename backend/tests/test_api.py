@@ -70,10 +70,13 @@ def test_public_metrics(test_client):
 
 def test_predict_no_model(test_client):
     data = _jpeg_bytes()
-    r = test_client.post(
-        "/api/predict",
-        files={"file": ("spot.jpg", data, "image/jpeg")},
-    )
+    # Force the "no trained model available" branch so the test doesn't depend
+    # on which model weights happen to exist on the machine running it.
+    with patch("main._resolve_model_name", return_value=None):
+        r = test_client.post(
+            "/api/predict",
+            files={"file": ("spot.jpg", data, "image/jpeg")},
+        )
     assert r.status_code == 400
 
 

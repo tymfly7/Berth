@@ -12,7 +12,6 @@ The PKLot dataset contains images from 3 parking lots:
 Each image is a cropped parking space, pre-labeled as Occupied or Empty.
 """
 
-import os
 import sys
 import shutil
 import logging

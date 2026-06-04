@@ -52,6 +52,31 @@ function aggregateByDay(data, days = 7) {
   return result
 }
 
+function aggregateByMinutes(data, bucketMin) {
+  // The live/day tabs are raw 60s snapshots (up to ~1440/day) — far too jagged as
+  // a line. Average into fixed time buckets (live = 15 min, day = 60 min). Buckets
+  // are epoch-based so they align regardless of timezone; timestamps stay ISO/UTC
+  // to match the rest of the chart's HH:MM labelling.
+  const bucketMs = bucketMin * 60_000
+  const buckets = {}
+  data.forEach(d => {
+    const t = Date.parse(d.timestamp)
+    if (Number.isNaN(t)) return
+    const key = Math.floor(t / bucketMs) * bucketMs
+    if (!buckets[key]) buckets[key] = { available: [], occupied: [] }
+    buckets[key].available.push(d.available || 0)
+    buckets[key].occupied.push(d.occupied || 0)
+  })
+  return Object.keys(buckets).map(Number).sort((a, b) => a - b).map(key => {
+    const v = buckets[key]
+    return {
+      timestamp: new Date(key).toISOString(),
+      available: Math.round(v.available.reduce((s, x) => s + x, 0) / v.available.length),
+      occupied:  Math.round(v.occupied.reduce((s, x) => s + x, 0) / v.occupied.length),
+    }
+  })
+}
+
 const TABS = [
   { key: 'live',  label: 'Live' },
   { key: 'day',   label: 'Day' },
@@ -245,6 +270,8 @@ export default function AnalyticsChart({ connected = false }) {
     const now = new Date().toISOString()
     const zeros = [{ timestamp: now, available: 0, occupied: 0 }, { timestamp: now, available: 0, occupied: 0 }]
     let data = (tab === 'live' && !connected) ? zeros : (activeData.length > 0 ? activeData : zeros)
+    if (tab === 'live') data = aggregateByMinutes(data, 15)
+    if (tab === 'day')  data = aggregateByMinutes(data, 60)
     if (tab === 'week') data = aggregateByDay(data, 7)
     if (tab === 'month') data = aggregateByMonth(data)
     data = data.map(d => ({ ...d, available: Math.round(d.available || 0), occupied: Math.round(d.occupied || 0) }))

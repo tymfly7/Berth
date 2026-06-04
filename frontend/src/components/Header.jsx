@@ -6,6 +6,8 @@ const style = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: '8px 16px',
     padding: '20px 0',
     borderBottom: '1px solid var(--border-color)',
     marginBottom: '4px',
@@ -31,7 +33,9 @@ const style = {
   right: {
     display: 'flex',
     alignItems: 'center',
-    gap: '16px',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: '8px 16px',
   },
   time: {
     fontSize: '0.8rem',

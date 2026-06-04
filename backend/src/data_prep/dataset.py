@@ -11,7 +11,6 @@ Labels:
     1 = Occupied (car present)
 """
 
-import os
 import random as _random
 from pathlib import Path
 from PIL import Image
