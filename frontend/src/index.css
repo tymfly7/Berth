@@ -67,6 +67,10 @@
 html {
   font-size: 16px;
   scroll-behavior: smooth;
+  /* Stop any single over-wide child (e.g. a dense panel) from making the whole
+     document wider than the screen, which makes mobile browsers shrink-to-fit
+     and render everything tiny. Wide panels scroll within their own containers. */
+  overflow-x: hidden;
 }
 
 body {

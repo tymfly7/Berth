@@ -198,7 +198,6 @@ def propose_from_frames(
     try:
         from ultralytics import YOLO
         import config as cfg
-        from pathlib import Path
 
         # Project YOLO model first, then a small pretrained fallback
         candidates = [str(cfg.YOLO26_DETECT_PATH), "yolo26s.pt"]

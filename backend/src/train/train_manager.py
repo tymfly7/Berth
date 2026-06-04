@@ -16,7 +16,6 @@ from src.db import database as db
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 import config
 from src.models.model_factory import create_model, list_available_models
 from src.train.trainer import Trainer
@@ -256,7 +255,7 @@ class TrainManager:
             model.add_callback("on_train_batch_end", on_batch_end)
             model.add_callback("on_train_epoch_end", on_epoch_end)
 
-            results = model.train(
+            model.train(
                 data=str(classify_data_dir),           # pre-built subset: only occupied/ + vacant/
                 task="classify",
                 epochs=config.YOLO_CLASSIFY_EPOCHS,
@@ -371,7 +370,7 @@ class TrainManager:
             model.add_callback("on_train_batch_end", on_batch_end)
             model.add_callback("on_train_epoch_end", on_epoch_end)
 
-            results = model.train(
+            model.train(
                 data=str(yaml_path),
                 task="detect",
                 epochs=config.YOLO_DETECT_EPOCHS,

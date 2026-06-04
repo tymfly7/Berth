@@ -6,7 +6,6 @@ import sqlite3
 import threading
 import logging
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 import config
 
 logger = logging.getLogger("berth.db")

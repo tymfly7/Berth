@@ -69,3 +69,12 @@ def patch_roi_dir(tmp_path, monkeypatch):
     roi_dir = tmp_path / "roi_configs"
     roi_dir.mkdir()
     monkeypatch.setattr(roi_module, "_ROI_DIR", roi_dir)
+
+
+@pytest.fixture(autouse=True)
+def disable_auth(monkeypatch):
+    # The endpoint tests assume auth is disabled. Force it off so a local
+    # BERTH_API_KEY (e.g. from the developer's .env) doesn't turn every
+    # protected endpoint into a 401 and make the suite environment-dependent.
+    import main
+    monkeypatch.setattr(main, "API_KEY", "")
