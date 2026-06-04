@@ -140,11 +140,20 @@ class TrainManager:
                         f"Val Acc: {metrics['val_acc']:.2f}%"
                     )
 
+            def on_batch(epoch, batch_idx, total_batches):
+                with _lock:
+                    _state["elapsed"] = round(time.time() - start_time, 1)
+                    _state["message"] = (
+                        f"Epoch {epoch}/{config.EPOCHS} — "
+                        f"batch {batch_idx}/{total_batches}"
+                    )
+
             # Train
             results = trainer.train(
                 data["train_loader"],
                 data["val_loader"],
                 progress_callback=on_progress,
+                batch_callback=on_batch,
             )
 
             with _lock:
@@ -215,7 +224,7 @@ class TrainManager:
                 run_id = db.start_training_run("yolo26_classify")
             except Exception:
                 pass
-            model = YOLO("yolo26n-cls.yaml")  # build from scratch, no pretrained weights
+            model = YOLO("yolo26s-cls.yaml")  # build from scratch, no pretrained weights
 
             def on_batch_end(trainer):
                 _batch_count[0] += 1
@@ -329,7 +338,7 @@ class TrainManager:
                 run_id = db.start_training_run("yolo26_detect")
             except Exception:
                 pass
-            model = YOLO("yolo26n.pt")
+            model = YOLO(config.YOLO_DETECT_MODEL)
 
             def on_batch_end(trainer):
                 _batch_count[0] += 1
@@ -366,11 +375,12 @@ class TrainManager:
                 data=str(yaml_path),
                 task="detect",
                 epochs=config.YOLO_DETECT_EPOCHS,
-                batch=config.BATCH_SIZE,
-                imgsz=640,
+                batch=-1,                              # AutoBatch: adapt to the larger model/imgsz, avoid OOM
+                imgsz=config.YOLO_DETECT_IMG_SIZE,     # 960 — recover small parking-spot recall
                 cache="ram",                           # cache decoded images in RAM
                 workers=min(8, config.NUM_WORKERS * 4),
                 amp=True,                              # mixed-precision (fp16 on GPU)
+                patience=30,                           # let it converge before early-stopping
                 project=str(config.OUTPUT_DIR / "yolo26_detect"),
                 name="run",
                 exist_ok=True,

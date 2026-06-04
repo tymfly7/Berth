@@ -4,7 +4,7 @@ import { WS_BASE } from '../config'
 const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
 
 // Owns one camera's WebSocket + state. Re-renders only when its own data changes.
-const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onClick, mini }) {
+const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onUnavailable, onClick, mini }) {
   const [frame, setFrame]           = useState(null)
   const [metrics, setMetrics]       = useState({ available: 0, occupied: 0 })
   const [connected, setConnected]   = useState(false)
@@ -15,6 +15,8 @@ const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onClick, mini }) {
   const stopReconnect      = useRef(false)
   const onMetricsRef       = useRef(onMetrics)
   onMetricsRef.current     = onMetrics
+  const onUnavailableRef   = useRef(onUnavailable)
+  onUnavailableRef.current = onUnavailable
   const metricsThrottleRef = useRef(0)
 
   const connect = useCallback(() => {
@@ -37,6 +39,7 @@ const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onClick, mini }) {
           clearTimeout(reconnectTimer.current)
           setConnected(false)
           setUnavailable(permanent ? (data.reason ?? 'Feed unavailable') : null)
+          onUnavailableRef.current?.(cam.id)
           ws.close()
           return
         }
@@ -146,7 +149,7 @@ function gridColumns(count) {
   return '1fr 1fr 1fr'
 }
 
-export default function MultiCameraGrid({ cameras, bare = false, onFocusChange }) {
+export default function MultiCameraGrid({ cameras, bare = false, onFocusChange, onMetrics, onUnavailable }) {
   const [metricsMap, setMetricsMap] = useState({})
   const [focusedId, setFocusedId] = useState(null)
 
@@ -159,7 +162,13 @@ export default function MultiCameraGrid({ cameras, bare = false, onFocusChange }
 
   const handleMetrics = useCallback((cameraId, metrics) => {
     setMetricsMap(prev => ({ ...prev, [cameraId]: metrics }))
-  }, [])
+    onMetrics?.(cameraId, metrics)
+  }, [onMetrics])
+
+  const handleUnavailable = useCallback((cameraId) => {
+    setMetricsMap(({ [cameraId]: _drop, ...rest }) => rest)
+    onUnavailable?.(cameraId)
+  }, [onUnavailable])
 
   // Clear focus if the focused camera is deactivated
   useEffect(() => {
@@ -228,6 +237,7 @@ export default function MultiCameraGrid({ cameras, bare = false, onFocusChange }
                   <CameraFeed
                     cam={cam}
                     onMetrics={handleMetrics}
+                    onUnavailable={handleUnavailable}
                     mini={inStrip}
                     onClick={!focusedId ? () => setFocus(cam.id) : undefined}
                   />
