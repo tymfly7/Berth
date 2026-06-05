@@ -25,7 +25,7 @@ class ParkingYOLO26:
     #       separate training workflow and a dataset converted to YOLO format.
     """
 
-    def __init__(self, model_path: str, conf: float = 0.1, iou: float = 0.7):
+    def __init__(self, model_path: str, conf: float = 0.40, iou: float = 0.7):
         try:
             from ultralytics import YOLO
         except ImportError:
