@@ -18,7 +18,6 @@ from __future__ import annotations
 # flagged "outside markings". Fraction-of-car is size-robust: a parked car reads
 # ~1.0 inside its spot; a straddling car reads ~0.5 in each of two spots.
 _STRADDLE_FRAC   = 0.35   # ≥ this fraction of the car inside ≥ 2 spots → straddling
-_OUTSIDE_FRAC    = 0.10   # car's best overlap with any spot below this → outside markings
 _OCCUPIED_THRESH = 0.20   # IoU threshold for marking a slot occupied (unchanged)
 
 
@@ -147,10 +146,15 @@ def classify_vehicle_parking(
     frame_w: int,
     frame_h: int,
     straddle_thresh: float = _STRADDLE_FRAC,
-    outside_thresh: float = _OUTSIDE_FRAC,
 ) -> dict:
     """
     Classify a single detected vehicle bounding box against ROI polygons.
+
+    Only flags double-parked (straddling) vehicles. A vehicle that overlaps no
+    marked spot is NOT an anomaly — it is simply not in the lot (a car on the
+    street, or a false detection on a fountain / tree / sign). Reliably detecting
+    "parked outside the lines" would need a lot-boundary ROI, which we don't have,
+    so we deliberately do not flag it (it produced false alarms across the scene).
 
     Args:
         car_box:      Pixel bbox [x1, y1, x2, y2] of the detected car.
@@ -159,12 +163,10 @@ def classify_vehicle_parking(
         frame_w/h:    Pixel dimensions used to denormalize polygon coords.
         straddle_thresh: fraction of the car inside a spot that counts as
                          "intruding" it. A car intruding ≥ 2 spots is straddling.
-        outside_thresh:  if the car's best overlap fraction across all spots is
-                         below this, it is parked outside the markings entirely.
 
     Returns dict:
         status:        "ok" | "misparked"
-        reason:        None | "straddling" | "outside_markings"
+        reason:        None | "straddling"
         overlaps:      list of {"roi_id", "label", "overlap"} for every ROI
         intruded_rois: list of roi_id strings with overlap ≥ straddle_thresh
     """
@@ -184,16 +186,6 @@ def classify_vehicle_parking(
 
     if not overlaps:
         return {"status": "ok", "reason": None, "overlaps": overlaps, "intruded_rois": []}
-
-    max_overlap = max(e["overlap"] for e in overlaps)
-
-    if max_overlap < outside_thresh:
-        return {
-            "status": "misparked",
-            "reason": "outside_markings",
-            "overlaps": overlaps,
-            "intruded_rois": [],
-        }
 
     intruded = [e["roi_id"] for e in overlaps if e["overlap"] >= straddle_thresh]
     if len(intruded) >= 2:
@@ -220,7 +212,6 @@ def aggregate_lot(
     frame_w: int,
     frame_h: int,
     straddle_thresh: float = _STRADDLE_FRAC,
-    outside_thresh: float = _OUTSIDE_FRAC,
     occupied_thresh: float = _OCCUPIED_THRESH,
 ) -> dict:
     """
@@ -258,7 +249,7 @@ def aggregate_lot(
     misparked = []
     for car in cars:
         result = classify_vehicle_parking(
-            car["bbox"], rois, frame_w, frame_h, straddle_thresh, outside_thresh
+            car["bbox"], rois, frame_w, frame_h, straddle_thresh
         )
         if result["status"] == "misparked":
             misparked.append({
