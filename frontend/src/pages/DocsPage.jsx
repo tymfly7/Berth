@@ -532,9 +532,11 @@ export default function DocsPage() {
       {/* ── Section 7: Anomaly Detection ─────────────────────── */}
       <SectionCard num={7} id="s7" title="Enabling Anomaly Detection">
         <p style={s.body}>
-          Anomaly detection flags vehicles parked outside valid ROI zones —
-          such as blocking fire lanes, disabled bays, or yellow-hatched
-          no-park areas.
+          Anomaly detection flags <span style={s.label}>double-parked</span>{' '}
+          vehicles — a car that straddles two or more marked spots instead of
+          sitting inside a single one. It deliberately does <em>not</em> flag cars
+          outside the lot (passing traffic, street parking, or false detections on
+          fountains and trees), so it stays quiet on busy public-area cameras.
         </p>
         <ol style={s.steps}>
           <li style={s.step}>
@@ -545,18 +547,20 @@ export default function DocsPage() {
           </li>
           <li style={s.step}>
             A <span style={s.label}>Misparked</span> count card appears in the
-            Metric Cards row. It shows how many vehicles are detected outside
-            designated ROIs.
+            Metric Cards row, showing how many vehicles are straddling spots.
           </li>
           <li style={s.step}>
-            The <span style={s.label}>Anomaly Panel</span> in the settings area
-            provides a per-camera breakdown.
+            Straddling cars are outlined in <span style={s.label}>orange</span> on
+            the live feed (highlighting the spots they span); the{' '}
+            <span style={s.label}>Anomaly Panel</span> gives a per-camera breakdown.
           </li>
         </ol>
         <div style={s.calloutWarn}>
-          <span style={s.label}>Prerequisite:</span> Anomaly detection requires
-          at least one ROI to be defined per camera. It uses the area
-          <em> outside</em> all ROI polygons as the anomaly zone.
+          <span style={s.label}>Prerequisite:</span> requires a trained{' '}
+          <span style={s.label}>YOLO26 detector</span> and at least one ROI per
+          camera. A vehicle is flagged when a large share of its footprint overlaps
+          two or more adjacent spots (compared against each spot’s exact polygon, so
+          angled stalls don’t trigger false alarms).
         </div>
       </SectionCard>
 
