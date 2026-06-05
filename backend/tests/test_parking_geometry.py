@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.inference.parking_geometry import (
     box_iou,
     overlap_fraction,
+    car_overlap_polygon,
     classify_vehicle_parking,
     aggregate_lot,
 )
@@ -74,9 +75,9 @@ def test_overlap_fraction_half():
 # ── classify_vehicle_parking ─────────────────────────────────────────────────
 
 def test_classify_straddling():
-    """Car centred on boundary between ROI_A and ROI_B straddles both."""
-    # bbox [25, 20, 55, 80] overlaps each ROI by ~0.27 IoU > 0.15 threshold
-    result = classify_vehicle_parking([25, 20, 55, 80], ROIS, W, H)
+    """Car spanning both ROI_A and ROI_B straddles both (IoU ~0.45 each)."""
+    # bbox [15, 10, 65, 90] overlaps each 30×80 slot with IoU 0.4545 > 0.40 threshold
+    result = classify_vehicle_parking([15, 10, 65, 90], ROIS, W, H)
     assert result["status"] == "misparked", result
     assert result["reason"] == "straddling", result
     assert "roi_a" in result["intruded_rois"]
@@ -96,6 +97,46 @@ def test_classify_ok_in_single_spot():
     result = classify_vehicle_parking([12, 12, 38, 88], ROIS, W, H)
     assert result["status"] == "ok", result
     assert result["reason"] is None
+
+
+def test_classify_small_car_in_oversized_spot_not_outside():
+    """Regression: a small car correctly parked inside a spot whose bbox is much
+    larger than the car must read 'ok', not a false 'outside_markings'. Under the
+    old IoU metric this car's IoU (~0.05) fell below the outside threshold and was
+    wrongly flagged — the bug behind the false alarms. overlap_fraction reads ~1.0."""
+    big_spot = {
+        "id": "big", "label": "Big",
+        "polygon": [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+    }
+    result = classify_vehicle_parking([40, 40, 55, 60], [big_spot], W, H)
+    assert result["status"] == "ok", result
+    assert result["reason"] is None, result
+
+
+def test_car_overlap_polygon_excludes_bbox_corner():
+    """A car in the empty corner of an angled stall's bounding box (inside the
+    bbox but outside the real polygon) reads ~0 overlap — where the bbox-based
+    overlap_fraction is fooled into reading 1.0."""
+    triangle = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]  # hypotenuse x + y = 100
+    car = [80, 80, 95, 95]                            # corner: x + y > 100, outside
+    assert car_overlap_polygon(car, triangle, W, H) < 1e-6
+    assert overlap_fraction(car, [0, 0, 100, 100]) == 1.0  # bbox metric is fooled
+
+
+def test_classify_angled_spots_correct_park_not_straddling():
+    """Regression for 45°-angled stalls: a car parked correctly in one slanted
+    stall must NOT be flagged as straddling, even though its axis-aligned bbox
+    overlaps the *bounding box* of the neighbouring slanted stall. Polygon-accurate
+    overlap keeps the neighbour below the straddle threshold."""
+    # Two parallelogram stalls leaning right; their bounding boxes overlap in x.
+    spot_a = {"id": "a", "label": "A",
+              "polygon": [[0.1, 0.0], [0.4, 0.0], [0.3, 1.0], [0.0, 1.0]]}
+    spot_b = {"id": "b", "label": "B",
+              "polygon": [[0.4, 0.0], [0.7, 0.0], [0.6, 1.0], [0.3, 1.0]]}
+    car = [20, 40, 38, 80]  # correctly inside A; bbox pokes into B's bounding box
+    result = classify_vehicle_parking(car, [spot_a, spot_b], W, H)
+    assert result["status"] == "ok", result
+    assert result["reason"] is None, result
 
 
 def test_classify_no_rois():
@@ -129,7 +170,7 @@ def test_aggregate_one_car_ok():
 
 def test_aggregate_straddling_car():
     """Straddling car flagged as misparked; both slots show occupied."""
-    cars = [{"bbox": [25, 20, 55, 80], "confidence": 0.85}]
+    cars = [{"bbox": [15, 10, 65, 90], "confidence": 0.85}]
     result = aggregate_lot(cars, ROIS, W, H)
     assert result["misparked_count"] == 1
     assert result["misparked"][0]["reason"] == "straddling"
@@ -148,7 +189,7 @@ def test_aggregate_mixed():
     """One ok car + one straddler → 1 misparked, 2 occupied slots."""
     cars = [
         {"bbox": [12, 12, 38, 88], "confidence": 0.9},   # ok, inside A
-        {"bbox": [25, 20, 55, 80], "confidence": 0.85},  # straddles A+B
+        {"bbox": [15, 10, 65, 90], "confidence": 0.85},  # straddles A+B
     ]
     result = aggregate_lot(cars, ROIS, W, H)
     assert result["misparked_count"] == 1
@@ -171,6 +212,9 @@ if __name__ == "__main__":
         test_classify_straddling,
         test_classify_outside_markings,
         test_classify_ok_in_single_spot,
+        test_classify_small_car_in_oversized_spot_not_outside,
+        test_car_overlap_polygon_excludes_bbox_corner,
+        test_classify_angled_spots_correct_park_not_straddling,
         test_classify_no_rois,
         test_aggregate_empty_lot,
         test_aggregate_one_car_ok,

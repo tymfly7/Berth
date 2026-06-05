@@ -381,14 +381,21 @@ class VideoProcessor:
                             color = self._STATUS_COLOR.get(status, self._STATUS_COLOR["unknown"])
                             cv2.polylines(display, [pts], True, color, 2)
 
-                # Draw cached anomaly bounding boxes.
+                # Draw cached anomaly overlays.
                 with self._cached_status_lock:
                     anomalies = list(self._cached_anomalies)
                 for a in anomalies:
-                    x1, y1, x2, y2 = a["bbox"]
-                    cv2.rectangle(display, (x1, y1), (x2, y2), (0, 165, 255), 2)
-                    cv2.putText(display, a["label"], (x1 + 2, max(y1 - 4, 14)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 1)
+                    color = (0, 165, 255)
+                    if "polygons" in a:
+                        for pts in a["polygons"]:
+                            cv2.polylines(display, [pts], True, color, 2)
+                            cv2.putText(display, a["label"], tuple(pts[0]),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
+                    else:
+                        x1, y1, x2, y2 = a["bbox"]
+                        cv2.rectangle(display, (x1, y1), (x2, y2), color, 2)
+                        cv2.putText(display, a["label"], (x1 + 2, max(y1 - 4, 14)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
                 # Track display-side FPS (only count new frames, not repeats).
                 if has_new:
@@ -452,12 +459,24 @@ class VideoProcessor:
             try:
                 from src.inference.parking_geometry import classify_vehicle_parking
                 cars = self._yolo_detector.predict_frame(frame)
+                roi_by_id = {r["id"]: r for r in self._roi_cache}
                 for car in cars:
                     clf = classify_vehicle_parking(car["bbox"], self._roi_cache, w, h)
                     if clf["status"] == "misparked":
-                        x1, y1, x2, y2 = (int(v) for v in car["bbox"])
-                        label = "STRADDLE" if clf["reason"] == "straddling" else "OUTSIDE"
-                        new_anomalies.append({"bbox": (x1, y1, x2, y2), "label": label})
+                        if clf["reason"] == "straddling":
+                            polygons = []
+                            for rid in clf["intruded_rois"]:
+                                roi = roi_by_id.get(rid)
+                                if roi and roi.get("polygon"):
+                                    pts = np.array(
+                                        [[int(p[0] * w), int(p[1] * h)] for p in roi["polygon"]],
+                                        dtype=np.int32,
+                                    )
+                                    polygons.append(pts)
+                            new_anomalies.append({"label": "STRADDLE", "polygons": polygons})
+                        else:
+                            x1, y1, x2, y2 = (int(v) for v in car["bbox"])
+                            new_anomalies.append({"label": "OUTSIDE", "bbox": (x1, y1, x2, y2)})
             except Exception as e:
                 logger.warning(f"Anomaly detection error: {e}")
 
