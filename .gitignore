@@ -253,3 +253,6 @@ thesis/
 # Runtime SQLite database
 backend/berth.db
 backend/berth.db-*
+
+#vscode settings
+.vscode/

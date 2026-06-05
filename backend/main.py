@@ -1126,6 +1126,26 @@ def _load_model_training_details() -> dict:
                 "total_time_s": round(float(last["time"]), 1)                      if last.get("time")                else None,
             }
 
+    # Fallback: the live training CSV is regenerated per run and can be absent
+    # (e.g. outputs were cleaned). The evaluate-all comparison still holds the
+    # YOLO detect mAP@50 (stored as test_accuracy), so surface it from there so
+    # the model card keeps showing mAP instead of going blank.
+    if "yolo26" not in details:
+        comp_path = config.OUTPUT_DIR / "model_comparison.json"
+        if comp_path.exists():
+            try:
+                with open(comp_path) as f:
+                    comp = json.load(f)
+                entry = next((m for m in comp if m.get("model") == "yolo26"), None)
+                if entry and entry.get("test_accuracy") is not None:
+                    details["yolo26"] = {
+                        "map50":     entry.get("test_accuracy"),
+                        "precision": entry.get("test_precision"),
+                        "recall":    entry.get("test_recall"),
+                    }
+            except (json.JSONDecodeError, ValueError, OSError):
+                pass
+
     return details
 
 
