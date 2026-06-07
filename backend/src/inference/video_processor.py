@@ -242,6 +242,8 @@ class VideoProcessor:
         else:
             file_frame_interval = 0.0
 
+        consecutive_failures = 0
+        _MAX_FAILURES = 50  # ~5 s at 0.1 s/retry before giving up
         try:
             while self.running:
                 ret, raw_frame = cap.read()
@@ -249,10 +251,14 @@ class VideoProcessor:
                     if self._is_file():
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         continue
-                    else:
-                        logger.warning("Camera frame grab failed, retrying...")
-                        time.sleep(0.1)
-                        continue
+                    consecutive_failures += 1
+                    if consecutive_failures >= _MAX_FAILURES:
+                        logger.warning(f"Camera '{self._source}' unavailable, stopping.")
+                        self.running = False
+                        break
+                    time.sleep(0.1)
+                    continue
+                consecutive_failures = 0
                 self._ingest_raw_frame(raw_frame)
                 # Live sources (USB/RTSP) block naturally inside cap.read().
                 if file_frame_interval:
@@ -277,14 +283,20 @@ class VideoProcessor:
 
         stop_grab = threading.Event()
 
+        def _fps_interval(cap) -> float:
+            fps = cap.get(cv2.CAP_PROP_FPS) if cap else 0
+            return 1.0 / fps if 1 <= fps <= 120 else 0.0
+
         def _grab():
             fails = 0
+            frame_interval = _fps_interval(cap_holder[0])
             while not stop_grab.is_set():
                 cap = cap_holder[0]
                 if cap is None:
                     new = self._open_capture(force_refresh=True)
                     if new:
                         cap_holder[0] = new
+                        frame_interval = _fps_interval(new)
                         fails = 0
                         logger.info(f"YouTube stream connected: {self._source}")
                     else:
@@ -295,6 +307,8 @@ class VideoProcessor:
                 if ret:
                     fails = 0
                     self._ingest_raw_frame(frame)
+                    if frame_interval:
+                        time.sleep(frame_interval)
                 else:
                     fails += 1
                     if fails >= 3:

@@ -14,7 +14,7 @@
     "source": "https://youtu.be/2lbkkeKd_-M",
     "type": "youtube",
     "roi_camera_id": "krom-b-a74b30",
-    "active": true,
+    "active": false,
     "added_at": "2026-06-01T09:49:40.764059+00:00"
   },
   {
@@ -23,16 +23,25 @@
     "source": "https://youtu.be/2lbkkeKd_-M",
     "type": "youtube",
     "roi_camera_id": "krom-a-c85379",
-    "active": true,
+    "active": false,
     "added_at": "2026-06-03T11:41:06.437196+00:00"
   },
   {
     "id": "kromc-eba892",
     "name": "KromC",
-    "source": "https://youtu.be/Cq1EUkQcn-k",
+    "source": "https://www.youtube.com/watch?v=Cq1EUkQcn-k",
     "type": "youtube",
     "roi_camera_id": "kromc-eba892",
-    "active": true,
+    "active": false,
     "added_at": "2026-06-02T08:39:59.151534+00:00"
+  },
+  {
+    "id": "bilder-8ddb6b",
+    "name": "bilder",
+    "source": "0",
+    "type": "usb",
+    "roi_camera_id": "bilder-8ddb6b",
+    "active": false,
+    "added_at": "2026-06-07T12:33:10.666882+00:00"
   }
 ]
