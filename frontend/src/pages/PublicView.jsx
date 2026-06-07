@@ -321,7 +321,7 @@ export default function PublicView() {
 
       {/* Trends chart */}
       <div style={{ width: '100%', maxWidth: 800, marginBottom: 32 }}>
-        <AnalyticsChart />
+        <AnalyticsChart cameras={allCameraSlots.map(c => ({ id: c.cameraId, name: c.name }))} />
       </div>
 
       {/* Admin link — bottom-right corner */}

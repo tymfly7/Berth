@@ -255,7 +255,7 @@ backend/berth.db
 backend/berth.db-*
 
 #vscode settings
-.vscode/
+# .vscode/
 
 #roi config
 roi_configs/

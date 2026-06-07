@@ -232,20 +232,29 @@ function drawChart(canvas, data, tab = 'live') {
   ctx.fillText('Occupied', pad.left + 106, legendY)
 }
 
-export default function AnalyticsChart({ connected = false }) {
+export default function AnalyticsChart({ connected = false, cameras = [] }) {
   const canvasRef = useRef(null)
   const chartDataRef = useRef({ data: [], tab: 'live' })
   const [tab, setTab] = useState('live')
+  const [selectedCamId, setSelectedCamId] = useState(null)
   const [trendData, setTrendData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [fetchError, setFetchError] = useState(false)
   const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, label: '', available: 0, occupied: 0 })
 
-  const fetchTrend = useCallback(async (range) => {
+  // Auto-reset to Unified if the selected camera is removed
+  useEffect(() => {
+    if (selectedCamId && !cameras.find(c => c.id === selectedCamId)) {
+      setSelectedCamId(null)
+    }
+  }, [cameras, selectedCamId])
+
+  const fetchTrend = useCallback(async (range, camId) => {
     setLoading(true)
     setFetchError(false)
     try {
-      const res = await apiFetch(`${API_BASE}/api/trends?range=${range}`)
+      const camParam = camId ? `&camera_id=${camId}` : ''
+      const res = await apiFetch(`${API_BASE}/api/trends?range=${range}${camParam}`)
       if (res.ok) {
         setTrendData(await res.json())
       } else {
@@ -259,10 +268,10 @@ export default function AnalyticsChart({ connected = false }) {
 
   useEffect(() => {
     const range = tab === 'live' ? 'today' : tab
-    fetchTrend(range)
-    const id = setInterval(() => fetchTrend(range), tab === 'live' ? 30_000 : 60_000)
+    fetchTrend(range, selectedCamId)
+    const id = setInterval(() => fetchTrend(range, selectedCamId), tab === 'live' ? 30_000 : 60_000)
     return () => clearInterval(id)
-  }, [tab, fetchTrend])
+  }, [tab, selectedCamId, fetchTrend])
 
   const activeData = trendData ?? []
 
@@ -341,6 +350,19 @@ export default function AnalyticsChart({ connected = false }) {
     transition: 'background 0.15s',
   })
 
+  const camTabStyle = (id) => ({
+    padding: '2px 10px',
+    fontSize: '0.68rem',
+    fontWeight: 500,
+    letterSpacing: '0.3px',
+    borderRadius: 'var(--radius-sm)',
+    border: 'none',
+    cursor: 'pointer',
+    background: selectedCamId === id ? 'rgba(99,102,241,0.85)' : 'rgba(255,255,255,0.06)',
+    color: selectedCamId === id ? '#fff' : 'var(--text-muted)',
+    transition: 'background 0.15s',
+  })
+
   const chartH = tab === 'month' ? 180 : 240
 
   return (
@@ -355,6 +377,19 @@ export default function AnalyticsChart({ connected = false }) {
           ))}
         </div>
       </div>
+
+      {cameras.length > 0 && (
+        <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
+          {cameras.map(c => (
+            <button key={c.id} style={camTabStyle(c.id)} onClick={() => setSelectedCamId(c.id)}>
+              {c.name}
+            </button>
+          ))}
+          <button style={camTabStyle(null)} onClick={() => setSelectedCamId(null)}>
+            Unified
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '40px 0' }}>

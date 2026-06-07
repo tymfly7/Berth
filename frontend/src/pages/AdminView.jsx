@@ -223,7 +223,10 @@ export default function AdminView() {
               </>
             )
           })()}
-          <AnalyticsChart connected={connected} />
+          <AnalyticsChart
+            connected={connected}
+            cameras={cameras.filter(c => c.active).map(c => ({ id: c.id, name: c.name }))}
+          />
 
           <div className="analytics-row">
             <ConfidenceGauge confidence={displayMetrics.avg_confidence} />
