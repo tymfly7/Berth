@@ -52,14 +52,16 @@ class CameraRegistry:
     # ── Persistence ────────────────────────────────────────────────────────
 
     def _load(self):
-        if CAMERAS_FILE.exists():
-            try:
-                with open(CAMERAS_FILE) as f:
-                    data = json.load(f)
-                for cam in data:
-                    self._cameras[cam["id"]] = cam
-            except Exception as e:
-                logger.warning(f"Could not load cameras.json: {e}")
+        if not CAMERAS_FILE.exists():
+            self._save()
+            return
+        try:
+            with open(CAMERAS_FILE) as f:
+                data = json.load(f)
+            for cam in data:
+                self._cameras[cam["id"]] = cam
+        except Exception as e:
+            logger.warning(f"Could not load cameras.json: {e}")
 
     def _save(self):
         try:
