@@ -259,3 +259,6 @@ backend/berth.db-*
 
 #roi config
 roi_configs/
+
+#cameras runtime state
+backend/cameras.json
