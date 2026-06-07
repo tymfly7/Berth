@@ -1,0 +1,50 @@
+# Standalone Raspberry Pi image — full-stack (frontend + backend, ARM64)
+#
+# Build natively on RPi:
+#   docker build -t berth-rpi:latest -f Dockerfile.rpi .
+#
+# Or cross-compile on x86 and transfer:
+#   docker buildx build --platform linux/arm64 -t berth-rpi:latest -f Dockerfile.rpi . --load
+#   docker save berth-rpi:latest | gzip > berth-rpi.tar.gz
+#   scp berth-rpi.tar.gz pi@raspberrypi.local:~/
+#   # on RPi: docker load < berth-rpi.tar.gz
+#
+# Admin password is baked in at build time (Vite env var):
+#   docker build --build-arg VITE_ADMIN_PASSWORD=yourpin -t berth-rpi:latest -f Dockerfile.rpi .
+
+# ── Stage 1: Build frontend ──────────────────────────────
+FROM node:20-slim AS frontend-build
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+ARG VITE_API_KEY="d2eaa86be9f8d9e618b93139246648d88e86096f00be4eea3b184b5a43e9ac09"
+ARG VITE_ADMIN_PASSWORD="password"
+ENV VITE_API_KEY=$VITE_API_KEY VITE_ADMIN_PASSWORD=$VITE_ADMIN_PASSWORD
+RUN npm run build
+
+# ── Stage 2: ARM64 backend + static frontend ─────────────
+FROM python:3.11-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 libsm6 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.edge.txt requirements.edge.txt
+# Pre-install CPU-only torch before requirements so ultralytics doesn't pull the CUDA wheel
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir -r requirements.edge.txt
+
+COPY backend/ /app/
+COPY --from=frontend-build /app/frontend/dist ./static/
+
+RUN mkdir -p /app/edge_data /app/models
+
+ENV BERTH_DEPLOYMENT=edge \
+    BERTH_MODEL=mobilenetv4s \
+    BERTH_HOST=0.0.0.0 \
+    BERTH_PORT=8000
+
+EXPOSE 8000
+CMD ["python", "main.py"]

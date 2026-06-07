@@ -1,0 +1,23 @@
+services:
+  berth-rpi:
+    image: berth-rpi:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.rpi
+      platforms:
+        - linux/arm64
+    environment:
+      - BERTH_DEPLOYMENT=edge
+      - BERTH_MODEL=mobilenetv4s
+      - BERTH_API_KEY=${BERTH_API_KEY:-}
+      - BERTH_PORT=8000
+      - BERTH_DB_PATH=/app/edge_data/berth.db
+    volumes:
+      - ./backend/models:/app/models       # pre-populate with *_ncnn_model/ dirs before first run
+      - berth_rpi_data:/app/edge_data      # persistent SQLite database
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+volumes:
+  berth_rpi_data:

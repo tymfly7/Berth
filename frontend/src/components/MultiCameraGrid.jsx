@@ -186,7 +186,7 @@ export default function MultiCameraGrid({ cameras, bare = false, onFocusChange, 
 
   // Focused cam is sorted first so flex layout places it at the top full-width row.
   const orderedCameras = focusedId
-    ? [active.find(c => c.id === focusedId), ...active.filter(c => c.id !== focusedId)]
+    ? [active.find(c => c.id === focusedId), ...active.filter(c => c.id !== focusedId)].filter(Boolean)
     : active
 
   // All CameraFeed instances stay in this single container across every layout

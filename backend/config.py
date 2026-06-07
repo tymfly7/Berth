@@ -19,7 +19,6 @@ DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = BASE_DIR / "uploads"
 MODEL_DIR = BASE_DIR / "models"
 OUTPUT_DIR = BASE_DIR / "outputs"
-SPOTS_CONFIG_PATH = BASE_DIR / "spots_config.json"
 DB_PATH = Path(os.getenv("BERTH_DB_PATH", str(BASE_DIR / "berth.db")))
 
 # PKLot dataset root — set this to your downloaded PKLot path
