@@ -262,3 +262,6 @@ roi_configs/
 
 #cameras runtime state
 backend/cameras.json
+
+#docker images
+*.tar.gz
