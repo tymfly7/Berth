@@ -18,6 +18,7 @@ from __future__ import annotations
 # flagged "outside markings". Fraction-of-car is size-robust: a parked car reads
 # ~1.0 inside its spot; a straddling car reads ~0.5 in each of two spots.
 _STRADDLE_FRAC   = 0.35   # ≥ this fraction of the car inside ≥ 2 spots → straddling
+_PARK_THRESH     = 0.60   # < this fraction inside its best single spot → poorly parked
 _OCCUPIED_THRESH = 0.20   # IoU threshold for marking a slot occupied (unchanged)
 
 
@@ -146,15 +147,20 @@ def classify_vehicle_parking(
     frame_w: int,
     frame_h: int,
     straddle_thresh: float = _STRADDLE_FRAC,
+    park_thresh: float = _PARK_THRESH,
 ) -> dict:
     """
     Classify a single detected vehicle bounding box against ROI polygons.
 
-    Only flags double-parked (straddling) vehicles. A vehicle that overlaps no
-    marked spot is NOT an anomaly — it is simply not in the lot (a car on the
-    street, or a false detection on a fountain / tree / sign). Reliably detecting
-    "parked outside the lines" would need a lot-boundary ROI, which we don't have,
-    so we deliberately do not flag it (it produced false alarms across the scene).
+    Flags two anomalies:
+      • "straddling" — the car intrudes ≥ 2 marked spots (double-lane parking).
+      • "outside"    — the car does not sit squarely inside any single spot
+                       (best single-spot overlap < park_thresh). This covers both
+                       a car sticking half-out of a stall and a car with no spot
+                       overlap at all (parked off the marked bays entirely).
+
+    A car is only "ok" when it sits mostly inside one spot. With no ROIs defined
+    at all, classification is impossible, so the car is treated as "ok".
 
     Args:
         car_box:      Pixel bbox [x1, y1, x2, y2] of the detected car.
@@ -163,10 +169,12 @@ def classify_vehicle_parking(
         frame_w/h:    Pixel dimensions used to denormalize polygon coords.
         straddle_thresh: fraction of the car inside a spot that counts as
                          "intruding" it. A car intruding ≥ 2 spots is straddling.
+        park_thresh:  minimum fraction of the car inside its best single spot for
+                      the car to count as properly parked. Below this → "outside".
 
     Returns dict:
         status:        "ok" | "misparked"
-        reason:        None | "straddling"
+        reason:        None | "straddling" | "outside"
         overlaps:      list of {"roi_id", "label", "overlap"} for every ROI
         intruded_rois: list of roi_id strings with overlap ≥ straddle_thresh
     """
@@ -185,6 +193,7 @@ def classify_vehicle_parking(
         })
 
     if not overlaps:
+        # No ROIs defined at all → cannot classify → not an anomaly.
         return {"status": "ok", "reason": None, "overlaps": overlaps, "intruded_rois": []}
 
     intruded = [e["roi_id"] for e in overlaps if e["overlap"] >= straddle_thresh]
@@ -192,6 +201,16 @@ def classify_vehicle_parking(
         return {
             "status": "misparked",
             "reason": "straddling",
+            "overlaps": overlaps,
+            "intruded_rois": intruded,
+        }
+
+    # Not straddling: poorly parked unless it sits mostly inside one spot.
+    max_overlap = max(e["overlap"] for e in overlaps)
+    if max_overlap < park_thresh:
+        return {
+            "status": "misparked",
+            "reason": "outside",
             "overlaps": overlaps,
             "intruded_rois": intruded,
         }
@@ -213,6 +232,7 @@ def aggregate_lot(
     frame_h: int,
     straddle_thresh: float = _STRADDLE_FRAC,
     occupied_thresh: float = _OCCUPIED_THRESH,
+    park_thresh: float = _PARK_THRESH,
 ) -> dict:
     """
     Aggregate per-spot occupancy and flag misparked vehicles.
@@ -249,7 +269,7 @@ def aggregate_lot(
     misparked = []
     for car in cars:
         result = classify_vehicle_parking(
-            car["bbox"], rois, frame_w, frame_h, straddle_thresh
+            car["bbox"], rois, frame_w, frame_h, straddle_thresh, park_thresh
         )
         if result["status"] == "misparked":
             misparked.append({

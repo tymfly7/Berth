@@ -18,6 +18,21 @@ const DEFAULT_LOTS = []
 const slugify = (name) =>
   'lot-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
+async function rotateImageDataUrl(dataUrl, degrees) {
+  const img = new Image()
+  img.src = dataUrl
+  await new Promise(res => { img.onload = res })
+  const swap = Math.abs(degrees % 180) === 90
+  const canvas = document.createElement('canvas')
+  canvas.width = swap ? img.height : img.width
+  canvas.height = swap ? img.width : img.height
+  const ctx = canvas.getContext('2d')
+  ctx.translate(canvas.width / 2, canvas.height / 2)
+  ctx.rotate((degrees * Math.PI) / 180)
+  ctx.drawImage(img, -img.width / 2, -img.height / 2)
+  return canvas.toDataURL('image/jpeg', 0.92)
+}
+
 // Downscale an uploaded image before POSTing — classification crops run at 64px,
 // so full-resolution photos only inflate upload + server decode. ROIs are stored
 // normalised (0–1), so resizing does not affect their mapping.
@@ -250,6 +265,16 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     setRoiEditorBg(null)
   }
 
+  const handleRotate = async (direction) => {
+    if (!uploadedImage) return
+    const degrees = direction === 'cw' ? 90 : -90
+    const dataUrl = await rotateImageDataUrl(uploadedImage, degrees)
+    setUploadedImage(dataUrl)
+    const resp = await fetch(dataUrl)
+    const blob = await resp.blob()
+    uploadedFileRef.current = blob
+  }
+
   const handleUpload = async (file) => {
     if (!file) return
     setMode('testing')
@@ -342,6 +367,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       `Testing ${MODELS.find(m => m.id === testModel)?.label}`
     )
   }
+
+  const [roiBtnHovered, setRoiBtnHovered] = useState(false)
 
   const roiIsError = roiMsg && (roiMsg.startsWith('Error') || roiMsg.startsWith('A lot'))
 
@@ -436,44 +463,34 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                   fontSize: '0.75rem', lineHeight: 1,
                 }}
               >✕</button>
+              <button
+                onClick={() => handleRotate('ccw')}
+                title="Rotate left 90°"
+                style={{
+                  position: 'absolute', top: 6, left: 6,
+                  background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%',
+                  color: '#fff', width: 28, height: 28, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '1rem', lineHeight: 1,
+                }}
+              >↺</button>
+              <button
+                onClick={() => handleRotate('cw')}
+                title="Rotate right 90°"
+                style={{
+                  position: 'absolute', top: 6, left: 40,
+                  background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%',
+                  color: '#fff', width: 28, height: 28, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '1rem', lineHeight: 1,
+                }}
+              >↻</button>
             </div>
           )}
 
-          {/* Lot selector — shown inline with Draw ROIs */}
-          <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>ROI Set:</span>
-              <select
-                value={selectedLotId}
-                onChange={e => setSelectedLotId(e.target.value)}
-                className="panel-select"
-                style={{ flex: 1 }}
-              >
-                {lots.map(l => (
-                  <option key={l.id} value={l.id}>{l.name}</option>
-                ))}
-              </select>
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{ flexShrink: 0 }}
-                title={`Edit ROIs for "${lots.find(l => l.id === selectedLotId)?.name}"`}
-                onClick={() => selectedLotId && openLotRoiEditor(selectedLotId)}
-                disabled={!selectedLotId}
-              >
-                ✎
-              </button>
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{ color: 'var(--color-occupied)', flexShrink: 0 }}
-                title={`Delete "${lots.find(l => l.id === selectedLotId)?.name}" ROI set`}
-                onClick={() => selectedLotId && handleDeleteLot(selectedLotId)}
-                disabled={!selectedLotId}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Lot selector + Draw ROIs — single row */}
+          <div style={{ marginTop: 10, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ position: 'relative', display: 'inline-block', flexShrink: 0 }}>
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => {
@@ -482,16 +499,57 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                   setRoiEditorBg(uploadedImage)
                   setRoiModalOpen(true)
                 }}
-                title="Draw or edit ROIs — you can rename or save as a new set"
+                onMouseEnter={() => setRoiBtnHovered(true)}
+                onMouseLeave={() => setRoiBtnHovered(false)}
               >
                 ✏️ ROI
               </button>
-              {rois.length > 0 && (
-                <span className="badge badge-info">
-                  {rois.length} ROI{rois.length !== 1 ? 's' : ''} defined
-                </span>
+              {roiBtnHovered && (
+                <div style={{
+                  position: 'absolute', bottom: '110%', left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: 'rgba(0,0,0,0.75)', color: '#fff',
+                  fontSize: '0.7rem', whiteSpace: 'nowrap',
+                  padding: '4px 8px', borderRadius: 'var(--radius-sm)',
+                  pointerEvents: 'none',
+                }}>
+                  Draw ROIs to test
+                </div>
               )}
             </div>
+            <select
+              value={selectedLotId}
+              onChange={e => setSelectedLotId(e.target.value)}
+              className="panel-select"
+              style={{ flex: 1 }}
+            >
+              {lots.map(l => (
+                <option key={l.id} value={l.id}>{l.name}</option>
+              ))}
+            </select>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ flexShrink: 0 }}
+              title={`Edit ROIs for "${lots.find(l => l.id === selectedLotId)?.name}"`}
+              onClick={() => selectedLotId && openLotRoiEditor(selectedLotId)}
+              disabled={!selectedLotId}
+            >
+              ✎
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ color: 'var(--color-occupied)', flexShrink: 0 }}
+              title={`Delete "${lots.find(l => l.id === selectedLotId)?.name}" ROI set`}
+              onClick={() => selectedLotId && handleDeleteLot(selectedLotId)}
+              disabled={!selectedLotId}
+            >
+              ✕
+            </button>
+            {rois.length > 0 && (
+              <span className="badge badge-info" style={{ flexShrink: 0 }}>
+                {rois.length} ROI{rois.length !== 1 ? 's' : ''}
+              </span>
+            )}
           </div>
 
           {roiMsg && (

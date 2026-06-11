@@ -84,13 +84,22 @@ def test_classify_straddling():
     assert "roi_b" in result["intruded_rois"]
 
 
-def test_classify_off_lot_car_is_ok():
-    """A car detected off the lot (no overlap with any spot) is NOT an anomaly —
-    it is simply not in the lot (street car, fountain, false detection). Previously
-    this was wrongly flagged 'outside_markings', which spammed the whole scene."""
+def test_classify_off_lot_car_is_outside():
+    """A car with no overlap with any marked spot is poorly parked ('outside') —
+    it is not in any marked bay. (ROIs are expected to cover the parking area.)"""
     result = classify_vehicle_parking([80, 80, 95, 95], ROIS, W, H)
-    assert result["status"] == "ok", result
-    assert result["reason"] is None, result
+    assert result["status"] == "misparked", result
+    assert result["reason"] == "outside", result
+
+
+def test_classify_partly_in_one_spot_is_outside():
+    """Car sticking out of a single stall (best overlap < park_thresh, no second
+    spot intruded) is poorly parked ('outside'), not straddling."""
+    # car [0, 50, 24, 90]: ~0.58 inside ROI_A, the rest off the left edge of the
+    # lot; no overlap with ROI_B. Best single-spot overlap 0.58 < 0.60 → outside.
+    result = classify_vehicle_parking([0, 50, 24, 90], ROIS, W, H)
+    assert result["status"] == "misparked", result
+    assert result["reason"] == "outside", result
 
 
 def test_classify_ok_in_single_spot():
@@ -177,11 +186,13 @@ def test_aggregate_straddling_car():
     assert result["misparked"][0]["reason"] == "straddling"
 
 
-def test_aggregate_off_lot_car_ignored():
-    """A car off the lot is not flagged as misparked and occupies no slot."""
+def test_aggregate_off_lot_car_flagged():
+    """A car off the marked bays is flagged misparked ('outside') and occupies
+    no slot."""
     cars = [{"bbox": [80, 80, 95, 95], "confidence": 0.7}]
     result = aggregate_lot(cars, ROIS, W, H)
-    assert result["misparked_count"] == 0
+    assert result["misparked_count"] == 1
+    assert result["misparked"][0]["reason"] == "outside"
     assert result["occupied"] == 0
 
 
@@ -210,7 +221,8 @@ if __name__ == "__main__":
         test_overlap_fraction_no_overlap,
         test_overlap_fraction_half,
         test_classify_straddling,
-        test_classify_off_lot_car_is_ok,
+        test_classify_off_lot_car_is_outside,
+        test_classify_partly_in_one_spot_is_outside,
         test_classify_ok_in_single_spot,
         test_classify_small_car_in_oversized_spot_not_outside,
         test_car_overlap_polygon_excludes_bbox_corner,
@@ -219,7 +231,7 @@ if __name__ == "__main__":
         test_aggregate_empty_lot,
         test_aggregate_one_car_ok,
         test_aggregate_straddling_car,
-        test_aggregate_off_lot_car_ignored,
+        test_aggregate_off_lot_car_flagged,
         test_aggregate_mixed,
     ]
     passed = failed = 0
