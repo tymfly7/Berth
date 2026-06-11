@@ -196,6 +196,7 @@ _processor = None
 _active_mode = config.ACTIVE_MODEL
 _processor_lock = threading.Lock()
 _anomaly_enabled = False
+_anomaly_park_thresh = 0.60   # min fraction of a car inside its best bay to count as parked
 
 # ── model_info cache (invalidated on training start / dataset upload) ─
 _model_info_cache: dict = {"data": None, "ts": 0.0}
@@ -825,15 +826,22 @@ def use_camera():
 # ── Anomaly detection settings ────────────────────────────
 @app.get("/api/settings/anomaly", dependencies=[Depends(verify_api_key)])
 def get_anomaly():
-    return {"enabled": _anomaly_enabled}
+    return {"enabled": _anomaly_enabled, "park_thresh": _anomaly_park_thresh}
 
 @app.post("/api/settings/anomaly", dependencies=[Depends(verify_api_key)])
 async def set_anomaly(request: Request):
-    global _anomaly_enabled
+    global _anomaly_enabled, _anomaly_park_thresh
     body = await request.json()
     enabled = bool(body.get("enabled", False))
+    if "park_thresh" in body:
+        try:
+            _anomaly_park_thresh = max(0.0, min(1.0, float(body["park_thresh"])))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "park_thresh must be a number between 0 and 1")
     try:
-        _get_processor().set_anomaly_detection(enabled)
+        proc = _get_processor()
+        proc.set_anomaly_detection(enabled)
+        proc.set_anomaly_sensitivity(_anomaly_park_thresh)
     except FileNotFoundError:
         raise HTTPException(400, "YOLO26 detect model not found. Train it first via the Training panel.")
     except RuntimeError as e:
@@ -845,9 +853,10 @@ async def set_anomaly(request: Request):
             if p:
                 try:
                     p.set_anomaly_detection(enabled)
+                    p.set_anomaly_sensitivity(_anomaly_park_thresh)
                 except Exception as e:
                     logger.debug(f"Anomaly toggle skipped for camera {cam['id']}: {e}")
-    return {"enabled": _anomaly_enabled}
+    return {"enabled": _anomaly_enabled, "park_thresh": _anomaly_park_thresh}
 
 # ── Model switching ──────────────────────────────────────
 @app.post("/api/use-model/{model_name}", dependencies=[Depends(verify_api_key)])
@@ -1609,6 +1618,7 @@ def activate_camera(camera_id: str):
         if p:
             try:
                 p.set_anomaly_detection(True)
+                p.set_anomaly_sensitivity(_anomaly_park_thresh)
             except Exception as e:
                 logger.debug(f"Anomaly setup skipped for {camera_id}: {e}")
     return {"activated": camera_id}

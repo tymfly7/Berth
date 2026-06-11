@@ -105,6 +105,7 @@ class VideoProcessor:
         self._roi_cache: list = []
         self._roi_cache_ts: float = 0.0
         self._anomaly_enabled = False
+        self._anomaly_park_thresh = 0.60
         self._yolo_detector = None
 
     # ── Setup ──────────────────────────────────────────────────────────────
@@ -159,6 +160,11 @@ class VideoProcessor:
         if enabled and self._yolo_detector is None:
             self._load_yolo_detector()
         self._anomaly_enabled = enabled
+
+    def set_anomaly_sensitivity(self, park_thresh: float) -> None:
+        """Set how strictly a car must sit inside one bay to count as parked.
+        Higher → stricter → more vehicles flagged as poorly parked."""
+        self._anomaly_park_thresh = max(0.0, min(1.0, float(park_thresh)))
 
     def _load_yolo_detector(self) -> None:
         from src.models.yolo_detector import ParkingYOLO26
@@ -475,7 +481,10 @@ class VideoProcessor:
                 cars = self._yolo_detector.predict_frame(frame)
                 roi_by_id = {r["id"]: r for r in self._roi_cache}
                 for car in cars:
-                    clf = classify_vehicle_parking(car["bbox"], self._roi_cache, w, h)
+                    clf = classify_vehicle_parking(
+                        car["bbox"], self._roi_cache, w, h,
+                        park_thresh=self._anomaly_park_thresh,
+                    )
                     if clf["status"] == "misparked":
                         if clf["reason"] == "straddling":
                             polygons = []

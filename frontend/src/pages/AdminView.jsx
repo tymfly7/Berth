@@ -26,6 +26,7 @@ export default function AdminView() {
   const [allCameraSlots, setAllCameraSlots] = useState([])
   const [liveSlotsMap, setLiveSlotsMap] = useState({})
   const [lotMapIdx, setLotMapIdx] = useState(0)
+  const [menuOpen, setMenuOpen] = useState(false)
   const prevCamIdsRef = useRef('')
 
   // "Live" once any active camera's WS is delivering metrics.
@@ -235,10 +236,23 @@ export default function AdminView() {
 
         </div>
 
-        <div className="side-column">
+        <div className={`side-column ${menuOpen ? 'side-column--open' : ''}`}>
           <SettingsPanel apiAction={apiAction} apiBase={API_BASE} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} onCamerasChange={setCameras} />
         </div>
       </div>
+
+      {/* Mobile-only: slide-in Settings drawer toggle + backdrop (inert ≥769px) */}
+      {menuOpen && (
+        <div className="mobile-menu-backdrop" onClick={() => setMenuOpen(false)} />
+      )}
+      <button
+        className="mobile-menu-toggle"
+        onClick={() => setMenuOpen(o => !o)}
+        title={menuOpen ? 'Close settings' : 'Open settings'}
+        aria-label={menuOpen ? 'Close settings' : 'Open settings'}
+      >
+        {menuOpen ? '✕' : '⚙'}
+      </button>
     </div>
   )
 }
