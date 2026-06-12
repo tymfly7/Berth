@@ -4,6 +4,7 @@ import TrainingPanel from './TrainingPanel'
 import ModelStatus from './ModelStatus'
 import CameraManager from './CameraManager'
 import AnomalyPanel from './AnomalyPanel'
+import OccupancyPanel from './OccupancyPanel'
 import { apiFetch } from '../api'
 
 
@@ -132,6 +133,8 @@ export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchMode
             <ControlPanel apiAction={apiAction} apiBase={apiBase} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} />
             <div style={{ height: 1, background: 'var(--border-color)', margin: '16px 0' }} />
             <AnomalyPanel apiBase={apiBase} />
+            <div style={{ height: 1, background: 'var(--border-color)', margin: '16px 0' }} />
+            <OccupancyPanel apiBase={apiBase} />
           </SubSection>
 
           <div style={dividerStyle} />
