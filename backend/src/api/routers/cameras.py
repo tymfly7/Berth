@@ -90,6 +90,26 @@ async def set_anomaly(request: Request):
     return {"enabled": processor_service.anomaly_enabled, "park_thresh": processor_service.anomaly_park_thresh}
 
 
+# ── Occupancy detection sensitivity ──────────────────────
+@router.get("/api/settings/occupancy", dependencies=[Depends(verify_api_key)])
+def get_occupancy_threshold():
+    return {"threshold": config.OCCUPANCY_THRESHOLD}
+
+
+@router.post("/api/settings/occupancy", dependencies=[Depends(verify_api_key)])
+async def set_occupancy_threshold(request: Request):
+    """Set the YOLO classify occupancy decision threshold live. Lower → more
+    spots called 'occupied' (fewer false negatives). Read fresh per inference,
+    so the change takes effect immediately across all cameras."""
+    body = await request.json()
+    try:
+        val = max(0.05, min(0.95, float(body["threshold"])))
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(400, "threshold must be a number between 0.05 and 0.95")
+    config.OCCUPANCY_THRESHOLD = val
+    return {"threshold": config.OCCUPANCY_THRESHOLD}
+
+
 # ── Camera registry endpoints ────────────────────────────
 @router.get("/api/cameras", dependencies=[Depends(verify_api_key)])
 def list_cameras():

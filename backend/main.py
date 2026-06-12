@@ -284,4 +284,5 @@ if __name__ == "__main__":
         reload=_reload,
         reload_includes=["*.py"] if _reload else None,
         reload_excludes=["data/*", "venv/*", "*.db*", "roi_configs/*"] if _reload else None,
+        ws_ping_interval=None,  # streaming at 20 FPS detects disconnects via send errors
     )

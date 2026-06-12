@@ -521,6 +521,7 @@ class VideoProcessor:
         metrics["anomaly_enabled"] = self._anomaly_enabled
         ts = datetime.now(timezone.utc).isoformat()
 
+        do_db_write = False
         with self._lock:
             self._metrics = metrics
             self._history.append({
@@ -533,16 +534,18 @@ class VideoProcessor:
             now_t = time.time()
             if now_t - self._last_db_write >= 60:
                 self._last_db_write = now_t
-                try:
-                    db.record_occupancy(
-                        self.camera_id,
-                        metrics["available"],
-                        metrics["occupied"],
-                        metrics["occupancy_percent"],
-                    )
-                    db.maybe_record_alert(self.camera_id, metrics["occupancy_percent"])
-                except Exception as _db_err:
-                    logger.warning(f"DB write failed: {_db_err}")
+                do_db_write = True
+        if do_db_write:
+            try:
+                db.record_occupancy(
+                    self.camera_id,
+                    metrics["available"],
+                    metrics["occupied"],
+                    metrics["occupancy_percent"],
+                )
+                db.maybe_record_alert(self.camera_id, metrics["occupancy_percent"])
+            except Exception as _db_err:
+                logger.warning(f"DB write failed: {_db_err}")
 
     # ── Helpers ────────────────────────────────────────────────────────────
 
