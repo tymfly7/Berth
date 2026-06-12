@@ -15,7 +15,7 @@ export default function PublicView() {
     occupancy_percent: 0, avg_confidence: 0, slots: [],
   })
   const [time, setTime] = useState(new Date())
-  const [history, setHistory] = useState([])
+  const [, setHistory] = useState([])
   const [allCameraSlots, setAllCameraSlots] = useState([])
   const [lotMapIdx, setLotMapIdx] = useState(0)
   const [liveSlotsMap, setLiveSlotsMap] = useState({})
@@ -123,6 +123,8 @@ export default function PublicView() {
         const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cam.cameraId}${wsToken}`)
         camWsRefs.current[cam.cameraId] = ws
         ws.onmessage = (e) => {
+          // Public view only consumes metrics — skip binary frame messages.
+          if (typeof e.data !== 'string') return
           try {
             const d = JSON.parse(e.data)
             if (d.type === 'feed_unavailable') {
@@ -277,7 +279,7 @@ export default function PublicView() {
         maxWidth: 800,
         marginBottom: 32,
       }}>
-        <MetricCards metrics={displayMetrics} />
+        <MetricCards metrics={displayMetrics} showMisparked={false} />
       </div>
 
       {/* Lot map */}

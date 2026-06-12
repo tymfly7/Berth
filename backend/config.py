@@ -46,6 +46,15 @@ UPLOAD_RATE_LIMIT = os.getenv("BERTH_UPLOAD_RATE_LIMIT", "10/minute")
 # ---------------------------------------------------------------------------
 ACTIVE_MODEL = os.getenv("BERTH_MODEL", "yolo26_classify")
 
+# Model identifiers — single source of truth. Endpoints validate against these
+# instead of re-listing literals, so the membership never drifts. Note the
+# three audiences differ: 'yolo26' is the detect interface used at inference
+# time, while training refers to it as 'yolo26_detect'.
+CLASSIFY_MODELS  = ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify")
+SUPPORTED_MODELS = CLASSIFY_MODELS + ("yolo26",)        # selectable for inference
+TESTABLE_MODELS  = CLASSIFY_MODELS                       # per-patch accuracy eval
+TRAINABLE_MODELS = CLASSIFY_MODELS + ("yolo26_detect",)  # 'yolo26' → 'yolo26_detect'
+
 # ---------------------------------------------------------------------------
 # Model paths
 # ---------------------------------------------------------------------------
@@ -59,6 +68,8 @@ YOLO26_DETECT_NCNN_PATH   = MODEL_DIR / "best_yolo26_detect_ncnn_model"
 YOLO_DATASET_DIR         = DATA_DIR  / "yolo_detect_dataset"
 YOLO_GOPRO_DIR           = DATA_DIR  / "yolo_data" / "parking_rois_gopro"
 CLASSIFY_YOLO_DATA_DIR   = BASE_DIR  / "classify_yolo_data"
+YOLO26_CLASSIFY_RUN_DIR  = OUTPUT_DIR / "yolo26_classify" / "run"
+YOLO26_DETECT_RUN_DIR    = OUTPUT_DIR / "yolo26_detect"   / "run"
 CNN_INPUT_SIZE    = 224
 CNN_CONFIDENCE_THRESHOLD = 0.6
 

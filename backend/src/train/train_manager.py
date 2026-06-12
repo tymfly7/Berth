@@ -501,7 +501,7 @@ class TrainManager:
     def _plot_comparison(self, results):
         """Generate comparison bar chart."""
         matplotlib.use("Agg")
-        
+
 
         models = [r["model"] for r in results]
         metrics = {

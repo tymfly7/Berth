@@ -13,6 +13,7 @@ const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onUnavailable, onC
   const wsRef              = useRef(null)
   const reconnectTimer     = useRef(null)
   const stopReconnect      = useRef(false)
+  const frameUrlRef        = useRef(null)   // current object URL — revoked when replaced
   const onMetricsRef       = useRef(onMetrics)
   onMetricsRef.current     = onMetrics
   const onUnavailableRef   = useRef(onUnavailable)
@@ -28,6 +29,15 @@ const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onUnavailable, onC
     ws.onopen = () => { stopReconnect.current = false; setConnected(true); setUnavailable(null) }
 
     ws.onmessage = (event) => {
+      // Binary message = raw JPEG frame. Wrap it in an object URL for <img src>,
+      // revoking the previous one so we don't leak a URL per frame.
+      if (typeof event.data !== 'string') {
+        const url = URL.createObjectURL(event.data)
+        if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current)
+        frameUrlRef.current = url
+        setFrame(url)
+        return
+      }
       try {
         const data = JSON.parse(event.data)
         if (data.type === 'feed_unavailable') {
@@ -44,7 +54,6 @@ const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onUnavailable, onC
           return
         }
         if (data.error) { ws.close(); return }
-        if (data.frame) setFrame(data.frame)
         if (data.metrics) {
           const now = Date.now()
           if (now - metricsThrottleRef.current >= 500) {
@@ -66,7 +75,11 @@ const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onUnavailable, onC
 
   useEffect(() => {
     connect()
-    return () => { clearTimeout(reconnectTimer.current); wsRef.current?.close() }
+    return () => {
+      clearTimeout(reconnectTimer.current)
+      wsRef.current?.close()
+      if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current)
+    }
   }, [connect])
 
   return (

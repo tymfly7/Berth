@@ -62,6 +62,10 @@ class VideoProcessor:
         self._source_type = "auto"
 
         self.running = False
+        # Bumped on every (re)start. Inference jobs capture the generation at
+        # submit time; a result that arrives after a source switch / restart is
+        # discarded so a stale frame's overlay can't clobber the live one.
+        self._generation = 0
         self._thread = None          # source thread
         self._display_thread = None
         self._infer_thread = None
@@ -91,7 +95,7 @@ class VideoProcessor:
         self._cached_status_lock = threading.Lock()
 
         self._frame = None
-        self._frame_b64 = None
+        self._frame_jpeg: bytes | None = None   # latest encoded JPEG (sent over WS as binary)
         self._metrics = self._default_metrics()
         self._history = deque(maxlen=100)
         self._last_db_write: float = 0.0
@@ -134,6 +138,7 @@ class VideoProcessor:
         if self.running:
             return
         self.running = True
+        self._generation += 1
         self._display_thread = threading.Thread(
             target=self._display_loop, daemon=True, name="sp-display"
         )
@@ -427,11 +432,11 @@ class VideoProcessor:
                     self._fps_ts = t0
 
                 _, buf = cv2.imencode(".jpg", display, [cv2.IMWRITE_JPEG_QUALITY, config.JPEG_QUALITY])
-                frame_b64 = base64.b64encode(buf).decode("utf-8")
+                jpeg_bytes = buf.tobytes()
 
                 with self._lock:
                     self._frame = display
-                    self._frame_b64 = frame_b64
+                    self._frame_jpeg = jpeg_bytes
                     # Only advance seq for genuinely new frames so the WS
                     # knows not to resend a repeated still.
                     if has_new:
@@ -463,13 +468,17 @@ class VideoProcessor:
             if raw is None:
                 continue
             frame = cv2.resize(raw, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
+            gen = self._generation
             pool.submit(
                 self._detector, frame, self.camera_id,
-                lambda result, f=frame: self._on_inference_result(result, f),
+                lambda result, f=frame, g=gen: self._on_inference_result(result, f, g),
             )
 
-    def _on_inference_result(self, result: dict, frame: np.ndarray) -> None:
+    def _on_inference_result(self, result: dict, frame: np.ndarray, generation: int | None = None) -> None:
         """Called by a pool worker after detect() completes. Updates overlay cache, metrics, DB."""
+        # Drop results from a previous source/run that finished after a restart.
+        if generation is not None and generation != self._generation:
+            return
         new_status_map = {s["id"]: s["status"] for s in result.get("slots", [])}
 
         # Anomaly detection (optional YOLO26 detect pass).
@@ -574,18 +583,22 @@ class VideoProcessor:
     # ── Public getters ─────────────────────────────────────────────────────
 
     def get_latest_frame_base64(self):
+        """Base64-encoded latest JPEG. Retained for non-WS callers; the live
+        WebSocket path uses get_frame_jpeg_and_seq() to send raw bytes."""
         with self._lock:
-            return self._frame_b64
+            return base64.b64encode(self._frame_jpeg).decode("utf-8") if self._frame_jpeg else None
 
     def get_frame_seq(self) -> int:
         """Increments each time a new JPEG is encoded. Use to detect new frames."""
         with self._lock:
             return self._frame_seq
 
-    def get_frame_and_seq(self) -> tuple:
-        """Atomically returns (frame_b64, frame_seq) under a single lock."""
+    def get_frame_jpeg_and_seq(self) -> tuple:
+        """Atomically returns (jpeg_bytes, frame_seq) under a single lock.
+        jpeg_bytes is the raw encoded JPEG — sent directly as a binary WS frame
+        (no base64), which is ~33% smaller on the wire than base64 in JSON."""
         with self._lock:
-            return self._frame_b64, self._frame_seq
+            return self._frame_jpeg, self._frame_seq
 
     def get_metrics(self):
         with self._lock:

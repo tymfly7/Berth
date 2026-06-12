@@ -98,8 +98,8 @@ def prepare_dataset(
     # -------------------------------------------------------------------
     # 3. Stratified split
     # -------------------------------------------------------------------
-    occupied = [(p, l) for p, l in all_samples if l == 1]
-    vacant   = [(p, l) for p, l in all_samples if l == 0]
+    occupied = [(p, lbl) for p, lbl in all_samples if lbl == 1]
+    vacant   = [(p, lbl) for p, lbl in all_samples if lbl == 0]
 
     random.seed(seed)
     random.shuffle(occupied)

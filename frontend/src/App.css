@@ -81,17 +81,23 @@
 
   /* Side column becomes a slide-in drawer instead of stacking under the heatmap. */
   .side-column {
+    /* block (not flex) so the inner card keeps its full height and the drawer
+       scrolls — a flex column would shrink the card and clip the lower sections. */
+    display: block;
     position: fixed;
     top: 0;
     right: 0;
+    height: 100vh;        /* fallback for browsers without dvh support */
     height: 100dvh;
     width: min(360px, 88vw);
     z-index: 1100;
     background: var(--bg-card);
     border-left: 1px solid var(--border-color);
     box-shadow: -8px 0 28px rgba(0, 0, 0, 0.55);
-    padding: 16px;
+    padding: 16px 16px 88px;  /* extra bottom room so the ⚙ button clears the last section */
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
     transform: translateX(100%);
     transition: transform 0.28s ease;
   }

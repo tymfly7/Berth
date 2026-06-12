@@ -604,6 +604,15 @@ All settings are centralized in `backend/config.py` and can be overridden via en
 | Warning | >= 85% |
 | Critical | >= 95% |
 
+### Security model & limitations
+
+Auth is intentionally coarse: a single shared `BERTH_API_KEY` gates every
+protected REST endpoint and the WebSocket stream (there is no per-user identity,
+roles, or audit trail). The `/admin` PIN gate is a client-side convenience, not
+a security boundary — the API key is what actually protects the backend. When
+`BERTH_API_KEY` is empty, **all** protected endpoints are open. Set it (and serve
+over TLS via a reverse proxy) before any network-facing deployment.
+
 ---
 
 ## Model Comparison

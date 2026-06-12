@@ -20,7 +20,7 @@ export default function AdminView() {
     occupancy_percent: 0, avg_confidence: 0, slots: [],
   })
   const [allCameraMetrics, setAllCameraMetrics] = useState({})
-  const [history, setHistory] = useState([])
+  const [, setHistory] = useState([])
   const [modelInfo, setModelInfo] = useState(null)
   const [cameras, setCameras] = useState([])
   const [allCameraSlots, setAllCameraSlots] = useState([])

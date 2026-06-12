@@ -70,10 +70,10 @@ export default function AnomalyPanel({ apiBase }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div>
           <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-            Wrong Parking Detection
+            Misparked Vehicle Detection
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.4 }}>
-            Flags vehicles outside ROI markings on live feed. Requires YOLO26 detect model.
+            Flags misparked vehicles on live feeds. Requires the YOLO26 Detect model.
           </div>
         </div>
         <button

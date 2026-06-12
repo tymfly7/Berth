@@ -76,7 +76,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   if (!modelInfo) {
     return (
       <div className="loading-shimmer" style={{ marginTop: 18, height: 120 }}>
-        <div className="section-title">🧠 Model Info</div>
+        <div className="section-title">Model Info</div>
       </div>
     )
   }
@@ -145,7 +145,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div style={style.container}>
-      <div className="section-title">🧠 Model Info</div>
+      <div className="section-title">Model Info</div>
 
       <div style={{ ...style.modelRow, cursor: 'default' }}>
         <span className="text-muted">Dataset Ready</span>
@@ -239,7 +239,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
             onClick={handleDownloadExcel}
             title="Download results as Excel"
           >
-            📥 Excel
+            Excel
           </button>
         )}
         <button
@@ -248,7 +248,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
           disabled={isEvaluating}
           onClick={handleEvaluateAll}
         >
-          {isEvaluating ? '⏳ Evaluating…' : '📊 Evaluate All'}
+          {isEvaluating ? 'Evaluating…' : 'Evaluate All'}
         </button>
       </div>
 
@@ -277,7 +277,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
       {/* ── Overall comparison table ────────────────────────────────────────── */}
       {hasComparison && (
         <div style={{ marginTop: 14, overflow: 'hidden' }}>
-          <div className="section-title" style={{ marginBottom: 6 }}>📊 Evaluation Results</div>
+          <div className="section-title" style={{ marginBottom: 6 }}>Evaluation Results</div>
           <table style={style.compTable}>
             <colgroup>
               <col style={{ width: '28%' }} />

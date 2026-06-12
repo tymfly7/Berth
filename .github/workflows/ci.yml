@@ -37,4 +37,4 @@ jobs:
       - run: ruff check backend/ --select E,F,W --ignore E501
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
-      - run: cd frontend && npm ci && npx eslint src/ --ext .jsx,.tsx --max-warnings 0
+      - run: cd frontend && npm ci && npx eslint src --max-warnings 0

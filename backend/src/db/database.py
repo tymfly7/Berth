@@ -23,8 +23,14 @@ def _conn() -> sqlite3.Connection:
     return _local.conn
 
 
-def init_db() -> None:
-    c = _conn()
+# ── Schema migrations ──────────────────────────────────────────────────────────
+# Versioned, ordered migrations keyed off SQLite's built-in PRAGMA user_version.
+# Each entry is (target_version, callable(conn)). On startup every migration whose
+# version exceeds the DB's current user_version runs in order, then user_version is
+# bumped. Add a new (version, fn) tuple to evolve the schema — never edit a shipped
+# one. This keeps existing DBs upgradeable without dropping data.
+
+def _migration_1_base_schema(c: sqlite3.Connection) -> None:
     c.executescript("""
         CREATE TABLE IF NOT EXISTS occupancy_history (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,7 +39,6 @@ def init_db() -> None:
             available         INTEGER NOT NULL,
             occupied          INTEGER NOT NULL,
             occupancy_percent REAL    NOT NULL,
-            synced            INTEGER NOT NULL DEFAULT 0,
             UNIQUE (camera_id, timestamp)
         );
         CREATE INDEX IF NOT EXISTS idx_occ_ts     ON occupancy_history(timestamp);
@@ -46,7 +51,6 @@ def init_db() -> None:
             level             TEXT NOT NULL,
             occupancy_percent REAL NOT NULL,
             message           TEXT,
-            synced            INTEGER NOT NULL DEFAULT 0,
             UNIQUE (camera_id, timestamp, level)
         );
         CREATE INDEX IF NOT EXISTS idx_alert_ts ON alert_events(timestamp);
@@ -62,13 +66,33 @@ def init_db() -> None:
             status           TEXT NOT NULL DEFAULT 'running'
         );
     """)
-    # Migrate existing DBs that predate the synced column.
+
+
+def _migration_2_synced_columns(c: sqlite3.Connection) -> None:
+    # Add the edge-sync flag to existing tables (idempotent for legacy DBs that
+    # already had it added by the pre-migration-framework ad-hoc ALTER).
     for table in ("occupancy_history", "alert_events"):
         cols = [r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()]
         if "synced" not in cols:
             c.execute(f"ALTER TABLE {table} ADD COLUMN synced INTEGER NOT NULL DEFAULT 0")
+
+
+_MIGRATIONS = [
+    (1, _migration_1_base_schema),
+    (2, _migration_2_synced_columns),
+]
+
+
+def init_db() -> None:
+    c = _conn()
+    current = c.execute("PRAGMA user_version").fetchone()[0]
+    for version, migrate in _MIGRATIONS:
+        if version > current:
+            migrate(c)
+            c.execute(f"PRAGMA user_version = {version}")
+            logger.info(f"DB migrated to schema v{version}")
     c.commit()
-    logger.info(f"SQLite DB ready at {DB_PATH}")
+    logger.info(f"SQLite DB ready at {DB_PATH} (schema v{_MIGRATIONS[-1][0]})")
 
 
 # ── Occupancy ─────────────────────────────────────────────────────────────────

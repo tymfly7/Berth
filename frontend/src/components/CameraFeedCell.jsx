@@ -101,7 +101,7 @@ export default function CameraFeedCell({
     >
       {frame && !unavailable ? (
         <img
-          src={`data:image/jpeg;base64,${frame}`}
+          src={frame}
           style={s.img}
           alt={name}
         />

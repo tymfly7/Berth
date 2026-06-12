@@ -1,5 +1,4 @@
 import torch
-import pytest
 
 from src.models.cnn_scratch import ParkingCNN
 from src.models.cnn_transfer import ParkingResNet, ParkingMobileNetV4
