@@ -147,7 +147,9 @@ class ParkingClassifier:
         probs = result.probs.data.cpu().numpy()
         # Class 0 = occupied, Class 1 = vacant (alphabetical folder order in YOLO classify dataset)
         prob_occupied = float(probs[0]) if len(probs) > 0 else 0.5
-        if prob_occupied > 0.5:
+        # Bias toward "occupied" via a sub-0.5 threshold to cut false negatives
+        # (taken spots reported as vacant). Tunable via config.OCCUPANCY_THRESHOLD.
+        if prob_occupied > config.OCCUPANCY_THRESHOLD:
             return {"status": "occupied", "confidence": round(prob_occupied, 4), "probability": round(prob_occupied, 4)}
         return {"status": "vacant", "confidence": round(1.0 - prob_occupied, 4), "probability": round(prob_occupied, 4)}
 

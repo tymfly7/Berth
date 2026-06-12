@@ -47,6 +47,10 @@ export default function AdminView() {
       avg_confidence:    entries.reduce((s, m) => s + (m.avg_confidence || 0), 0) / entries.length,
       fps:               Math.round(entries.reduce((s, m) => s + (m.fps || 0), 0) / entries.length * 10) / 10,
       slots:             entries.flatMap(m => m.slots || []),
+      // Aggregate anomaly stats across cameras (mirrors /api/public/metrics) so
+      // the Misparked card shows the unified total, not just the first camera's.
+      misparked_count:   entries.reduce((s, m) => s + (m.misparked_count || 0), 0),
+      anomaly_enabled:   entries.some(m => m.anomaly_enabled),
     }
   }, [allCameraMetrics, metrics])
 
@@ -205,9 +209,6 @@ export default function AdminView() {
                             background: i === safeIdx ? 'var(--accent-primary)' : 'var(--border-color)', transition: 'background 0.2s' }} />
                       ))}
                     </div>
-                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-                      Use ‹ › arrows to switch between lots
-                    </span>
                   </div>
                 )}
                 <div style={{ position: 'relative' }}>

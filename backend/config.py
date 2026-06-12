@@ -73,6 +73,13 @@ YOLO26_DETECT_RUN_DIR    = OUTPUT_DIR / "yolo26_detect"   / "run"
 CNN_INPUT_SIZE    = 224
 CNN_CONFIDENCE_THRESHOLD = 0.6
 
+# Occupancy decision threshold for the YOLO26 classify head: a spot is called
+# "occupied" when P(occupied) exceeds this. Set below the neutral 0.5 to bias
+# toward "occupied" and cut false negatives (taken spots reported as vacant).
+# Lower it further to catch more occupied spots (at the cost of more false
+# positives); raise toward 0.5 to be stricter. Override via env at runtime.
+OCCUPANCY_THRESHOLD = float(os.getenv("BERTH_OCCUPANCY_THRESHOLD", "0.40"))
+
 # ---------------------------------------------------------------------------
 # Training Hyperparameters
 # ---------------------------------------------------------------------------
