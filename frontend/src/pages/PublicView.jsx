@@ -301,9 +301,6 @@ export default function PublicView() {
                         background: i === safeIdx ? 'var(--accent-primary)' : 'rgba(255,255,255,0.2)', transition: 'background 0.2s' }} />
                   ))}
                 </div>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
-                  Use ‹ › arrows to switch between lots
-                </span>
               </div>
             )}
             <div style={{ position: 'relative' }}>

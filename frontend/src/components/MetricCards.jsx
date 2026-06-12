@@ -135,9 +135,11 @@ export default function MetricCards({ metrics, streams, showMisparked = true }) 
             <span style={labelStyle}>{card.label}</span>
             <div style={{ ...iconWrap, background: card.iconBg }}>{card.icon}</div>
           </div>
-          <div className="count-animate" style={{ ...bigNum, color: card.color }}>
-            {card.getValue(metrics, streams)}
-          </div>
+          {card.key !== 'streams' && (
+            <div className="count-animate" style={{ ...bigNum, color: card.color }}>
+              {card.getValue(metrics, streams)}
+            </div>
+          )}
           {card.key === 'occupancy' && (
             <div className="progress-bar" style={{ marginTop: 4 }}>
               <div

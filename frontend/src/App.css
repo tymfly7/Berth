@@ -39,7 +39,10 @@
 /* ── Metric Cards Row ──────────────────── */
 .metrics-row {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* One equal-width column per card, however many there are (4–6 depending on
+     streams/misparked), so the info panels always sit on a single line. */
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 8px;
 }
 
@@ -72,6 +75,7 @@
 
 @media (max-width: 768px) {
   .metrics-row {
+    grid-auto-flow: row;
     grid-template-columns: repeat(2, 1fr);
   }
 

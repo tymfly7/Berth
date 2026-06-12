@@ -103,6 +103,7 @@ function drawChart(canvas, data, tab = 'live') {
   ctx.clearRect(0, 0, w, h)
 
   const maxVal = Math.max(...data.map(d => d.occupied), ...data.map(d => d.available), 1)
+  const hasData = data.some(d => d.available > 0 || d.occupied > 0)
 
   // Grid lines + Y labels
   ctx.strokeStyle = 'rgba(255,255,255,0.05)'
@@ -164,7 +165,12 @@ function drawChart(canvas, data, tab = 'live') {
   const occData   = data.map(d => d.occupied)
   const isBars = tab === 'week' || tab === 'month'
 
-  if (isBars) {
+  if (!hasData) {
+    ctx.fillStyle = 'rgba(255,255,255,0.22)'
+    ctx.font = '12px Inter, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('No data available for this period', w / 2, pad.top + plotH / 2)
+  } else if (isBars) {
     const groupW = plotW / data.length
     const barPad = Math.max(2, groupW * 0.1)
     const gap    = Math.max(1, groupW * 0.05)
@@ -278,9 +284,9 @@ export default function AnalyticsChart({ connected = false, cameras = [] }) {
   useEffect(() => {
     const now = new Date().toISOString()
     const zeros = [{ timestamp: now, available: 0, occupied: 0 }, { timestamp: now, available: 0, occupied: 0 }]
-    let data = (tab === 'live' && !connected) ? zeros : (activeData.length > 0 ? activeData : zeros)
+    let data = activeData.length > 0 ? activeData : zeros
     if (tab === 'live') data = aggregateByMinutes(data, 15)
-    if (tab === 'day')  data = aggregateByMinutes(data, 60)
+    if (tab === 'day')  data = aggregateByMinutes(data, 15)
     if (tab === 'week') data = aggregateByDay(data, 7)
     if (tab === 'month') data = aggregateByMonth(data)
     data = data.map(d => ({ ...d, available: Math.round(d.available || 0), occupied: Math.round(d.occupied || 0) }))

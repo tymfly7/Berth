@@ -616,99 +616,108 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
         </div>
       )}
 
-      {/* ROI Editor Modal — fullscreen portal */}
+      {/* ROI Editor Modal — centered 770×433 dialog */}
       {roiModalOpen && createPortal(
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0,0,0,0.96)',
-          display: 'flex', flexDirection: 'column',
+          background: 'rgba(0,0,0,0.75)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            display: 'flex', alignItems: 'center',
-            padding: '10px 14px', borderBottom: '1px solid var(--border-color)',
-            background: 'var(--bg-card)', flexShrink: 0, gap: 8,
+            width: 770,
+            display: 'flex', flexDirection: 'column',
+            background: 'var(--bg-card)',
+            borderRadius: 'var(--radius-md)',
+            overflow: 'hidden',
+            boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
+            border: '1px solid var(--border-color)',
           }}>
-            <style>{`.roi-name-input::placeholder{color:rgba(200,210,225,0.6)}`}</style>
-            <input
-              type="text"
-              className="roi-name-input"
-              value={modalLotName}
-              onChange={e => setModalLotName(e.target.value)}
-              placeholder="ROI set name…"
-              style={{
-                ...inputStyle,
-                flex: 1,
-                fontSize: '0.85rem',
-                fontWeight: 700,
-              }}
-            />
-            <button
-              className="btn btn-primary btn-sm"
-              style={{ flexShrink: 0 }}
-              onClick={async () => {
-                const name = modalLotName.trim()
-                if (!name) { showRoiMsg('Enter a name for this ROI set'); return }
-                const existing = lots.find(l => l.name === name)
-                let targetId
-                if (existing) {
-                  targetId = existing.id
-                } else {
-                  targetId = slugify(name)
-                  const updated = [...lots, { name, id: targetId }]
-                  setLots(updated)
-                  localStorage.setItem(LOTS_KEY, JSON.stringify(updated))
-                }
-                setSelectedLotId(targetId)
-                try {
-                  await saveRoisToLot(targetId, rois)
-                } catch (e) {
-                  showRoiMsg(`Error: ${e.message}`)
-                }
-                setRoiModalOpen(false)
-              }}
-            >
-              Save
-            </button>
-            <button
-              onClick={() => setRoiModalOpen(false)}
-              title="Cancel"
-              style={{
-                flexShrink: 0,
-                background: 'rgba(255,255,255,0.07)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--radius-sm)',
-                color: 'var(--text-secondary)',
-                width: 30, height: 30,
-                cursor: 'pointer',
-                fontSize: '1rem', lineHeight: 1,
-              }}
-            >✕</button>
-          </div>
+            <div style={{
+              display: 'flex', alignItems: 'center',
+              padding: '8px 12px', borderBottom: '1px solid var(--border-color)',
+              flexShrink: 0, gap: 8,
+            }}>
+              <style>{`.roi-name-input::placeholder{color:rgba(200,210,225,0.6)}`}</style>
+              <input
+                type="text"
+                className="roi-name-input"
+                value={modalLotName}
+                onChange={e => setModalLotName(e.target.value)}
+                placeholder="ROI set name…"
+                style={{
+                  ...inputStyle,
+                  flex: 1,
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                }}
+              />
+              <button
+                className="btn btn-primary btn-sm"
+                style={{ flexShrink: 0 }}
+                onClick={async () => {
+                  const name = modalLotName.trim()
+                  if (!name) { showRoiMsg('Enter a name for this ROI set'); return }
+                  const existing = lots.find(l => l.name === name)
+                  let targetId
+                  if (existing) {
+                    targetId = existing.id
+                  } else {
+                    targetId = slugify(name)
+                    const updated = [...lots, { name, id: targetId }]
+                    setLots(updated)
+                    localStorage.setItem(LOTS_KEY, JSON.stringify(updated))
+                  }
+                  setSelectedLotId(targetId)
+                  try {
+                    await saveRoisToLot(targetId, rois)
+                  } catch (e) {
+                    showRoiMsg(`Error: ${e.message}`)
+                  }
+                  setRoiModalOpen(false)
+                }}
+              >
+                Save
+              </button>
+              <button
+                onClick={() => setRoiModalOpen(false)}
+                title="Cancel"
+                style={{
+                  flexShrink: 0,
+                  background: 'rgba(255,255,255,0.07)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--text-secondary)',
+                  width: 30, height: 30,
+                  cursor: 'pointer',
+                  fontSize: '1rem', lineHeight: 1,
+                }}
+              >✕</button>
+            </div>
 
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#000' }}>
-            <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%' }}>
+            {/* Canvas area: fixed 770×433 */}
+            <div style={{ position: 'relative', height: 433, background: '#000', flexShrink: 0 }}>
               {roiEditorBg && (
                 <img
                   src={roiEditorBg}
                   alt="ROI background"
-                  style={{ display: 'block', maxWidth: '100%', maxHeight: 'calc(100vh - 60px)', objectFit: 'contain', userSelect: 'none', pointerEvents: 'none' }}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', userSelect: 'none', pointerEvents: 'none' }}
                 />
               )}
               <div style={{ position: 'absolute', inset: 0 }}>
                 <RoiEditor rois={rois} onRoisChange={setRois} idPrefix="test" overlay />
               </div>
             </div>
-          </div>
 
-          {roiMsg && (
-            <div style={{
-              padding: '8px 20px', fontSize: '0.8rem', flexShrink: 0,
-              color: roiIsError ? 'var(--color-occupied)' : 'var(--color-vacant)',
-              background: 'var(--bg-card)',
-            }}>
-              {roiMsg}
-            </div>
-          )}
+            {roiMsg && (
+              <div style={{
+                padding: '6px 16px', fontSize: '0.8rem', flexShrink: 0,
+                color: roiIsError ? 'var(--color-occupied)' : 'var(--color-vacant)',
+                borderTop: '1px solid var(--border-color)',
+              }}>
+                {roiMsg}
+              </div>
+            )}
+          </div>
         </div>,
         document.body
       )}
