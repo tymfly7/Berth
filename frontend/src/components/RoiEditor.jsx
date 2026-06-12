@@ -85,7 +85,7 @@ export default function RoiEditor({
     }
 
     // Draw confirmed ROIs
-    rois.forEach((roi, idx) => {
+    rois.forEach((roi, _idx) => {
       const isSelected = roi.id === selectedId
       const isDrawing = inProgress.length > 0
       const spotType = roi.spotType || 'normal'
@@ -322,7 +322,7 @@ export default function RoiEditor({
 
   const acceptAllProposals = useCallback(() => {
     if (!onProposalsChange || proposals.length === 0) return
-    const newRois = proposals.map((prop, i) => {
+    const newRois = proposals.map((prop, _i) => {
       const { proposed: _omit, ...base } = prop
       return { ...base, color: ROI_COLOR }
     })

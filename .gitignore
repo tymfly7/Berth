@@ -253,6 +253,11 @@ thesis/
 # Runtime SQLite database
 backend/berth.db
 backend/berth.db-*
+backend/smartpark.db
+backend/smartpark.db-*
+
+# Stale/runtime camera spot config — auto-created, not deployable
+backend/spots_config.json
 
 #vscode settings
 .vscode/

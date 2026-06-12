@@ -80,7 +80,7 @@ def organize_pklot(source_root=None, target_root=None, max_per_class=0,):
             "   https://www.kaggle.com/datasets/blanderbuss/parking-lot-dataset\n"
             "   \n"
             "   Then set PKLOT_ROOT environment variable or edit config.py:\n"
-            f"   PKLOT_ROOT = 'path/to/PKLotSegmented'\n"
+            "   PKLOT_ROOT = 'path/to/PKLotSegmented'\n"
         )
         return {"occupied": 0, "vacant": 0}
 

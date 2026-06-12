@@ -38,10 +38,10 @@ if __name__ == "__main__":
     print("  BERTH - Train All Models (CPU)")
     print("=" * 65)
     print(f"  Dataset:    {config.PKLOT_ROOT}")
-    print(f"  Images:     1000/class = 2000 total (per model)")
+    print("  Images:     1000/class = 2000 total (per model)")
     print(f"  Epochs:     {config.EPOCHS}")
     print(f"  Batch Size: {config.BATCH_SIZE}")
-    print(f"  Device:     CPU")
+    print("  Device:     CPU")
     print("=" * 65)
 
     # ── Step 1: Organize Dataset ────────────────────────────
@@ -100,7 +100,7 @@ if __name__ == "__main__":
         train_results = trainer.train(data["train_loader"], data["val_loader"])
         model_time = time.time() - model_start
 
-        print(f"\n  Evaluating on test set...")
+        print("\n  Evaluating on test set...")
         eval_results = evaluate_model(model, data["test_loader"], device)
 
         plot_confusion_matrix(eval_results["confusion_matrix"], model_name=name)
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     best = max(all_results, key=lambda r: r["test_accuracy"])
 
     print(f"\n{'='*65}")
-    print(f"  TRAINING COMPLETE!")
+    print("  TRAINING COMPLETE!")
     print(f"{'='*65}")
     print(f"  Total time: {total_time:.1f}s ({total_time/60:.1f} min)")
     print(f"  Best model: {best['model']} ({best['test_accuracy']:.2f}% accuracy)")

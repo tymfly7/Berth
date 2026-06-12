@@ -92,13 +92,13 @@ def evaluate_model(model, test_loader, device=None):
 
     # Log results
     logger.info(f"\n{'='*50}")
-    logger.info(f"📊 Evaluation Results")
+    logger.info("📊 Evaluation Results")
     logger.info(f"{'='*50}")
     logger.info(f"  Accuracy:  {acc:.2f}%")
     logger.info(f"  Precision: {prec:.2f}%")
     logger.info(f"  Recall:    {rec:.2f}%")
     logger.info(f"  F1 Score:  {f1:.2f}%")
-    logger.info(f"\nConfusion Matrix:")
+    logger.info("\nConfusion Matrix:")
     logger.info(f"  {cm}")
     logger.info(f"\nClassification Report:\n{report}")
 

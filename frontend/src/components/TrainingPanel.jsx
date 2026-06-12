@@ -130,8 +130,6 @@ function DropZone({ label, files, onFiles, onClear }) {
     e.target.value = ''
   }
 
-  const icon = label === 'Occupied' ? '🚗' : '🟢'
-
   return (
     <div
       style={style.dropZone(dragOver)}
@@ -148,7 +146,6 @@ function DropZone({ label, files, onFiles, onClear }) {
         style={{ display: 'none' }}
         onChange={handleChange}
       />
-      <span style={{ fontSize: '1.4rem' }}>{icon}</span>
       <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>{label}</span>
       {files.length > 0 ? (
         <>
@@ -197,7 +194,6 @@ function YoloImagesZone({ files, onFiles, onClear }) {
       onClick={() => inputRef.current?.click()}
     >
       <input ref={inputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleChange} />
-      <span style={{ fontSize: '1.4rem' }}>🖼️</span>
       <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>Parking Images</span>
       {files.length > 0 ? (
         <>
@@ -237,7 +233,6 @@ function YoloAnnotationZone({ file, onFile, onClear }) {
       onClick={() => inputRef.current?.click()}
     >
       <input ref={inputRef} type="file" accept=".json" style={{ display: 'none' }} onChange={handleChange} />
-      <span style={{ fontSize: '1.4rem' }}>📋</span>
       <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>annotations.json</span>
       {file ? (
         <>
@@ -290,7 +285,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
       clearTimeout(msgTimer.current)
       clearTimeout(yoloTimer.current)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   const startTraining = async (modelName, compareAll = false) => {
     setTraining({ status: 'training', model_name: modelName })
@@ -368,7 +363,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
 
   return (
     <div style={style.container}>
-      <div className="section-title">🏋️ Training</div>
+      <div className="section-title">Training</div>
 
       {/* ── Classifier Images ────────────────────────────── */}
       <Collapsible label={
@@ -403,7 +398,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
               disabled={!canUpload}
               onClick={handleUpload}
             >
-              {uploading ? '⏳ Uploading…' : '⬆️ Upload'}
+              {uploading ? 'Uploading…' : 'Upload'}
             </button>
           </div>
 
@@ -449,7 +444,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
               disabled={!canYoloUpload}
               onClick={handleYoloUpload}
             >
-              {yoloUploading ? '⏳ Uploading…' : '⬆️ Upload'}
+              {yoloUploading ? 'Uploading…' : 'Upload'}
             </button>
           </div>
 
@@ -489,7 +484,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo, fetchMode
             disabled={isActive}
             onClick={() => startTraining(selectedModel)}
           >
-            🏋️ Train
+            Train
           </button>
         </div>
       </Collapsible>

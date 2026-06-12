@@ -1,4 +1,8 @@
 """Quick verification script for all project components."""
+# This script imports modules in stages (interleaved with progress prints) to
+# pinpoint which component fails to import, so module-level imports are
+# intentionally not all at the top.
+# ruff: noqa: E402
 import sys
 import os
 os.environ["PYTHONIOENCODING"] = "utf-8"

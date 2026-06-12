@@ -1,7 +1,6 @@
 import io
 from unittest.mock import MagicMock, patch
 
-import pytest
 from PIL import Image
 
 
@@ -72,7 +71,8 @@ def test_predict_no_model(test_client):
     data = _jpeg_bytes()
     # Force the "no trained model available" branch so the test doesn't depend
     # on which model weights happen to exist on the machine running it.
-    with patch("main._resolve_model_name", return_value=None):
+    from src.api.processor_service import processor_service
+    with patch.object(processor_service, "resolve_model_name", return_value=None):
         r = test_client.post(
             "/api/predict",
             files={"file": ("spot.jpg", data, "image/jpeg")},
@@ -90,7 +90,8 @@ def test_analyze_lot(test_client):
     ]
 
     data = _jpeg_bytes(64, 64)
-    with patch("main._resolve_model_name", return_value="cnn_scratch"), \
+    from src.api.processor_service import processor_service
+    with patch.object(processor_service, "resolve_model_name", return_value="cnn_scratch"), \
          patch("src.inference.classifier.ParkingClassifier", return_value=mock_clf):
         r = test_client.post(
             "/api/analyze-lot?rows=2&cols=2",
@@ -152,8 +153,17 @@ def test_upload_dataset(test_client, tmp_data_dir):
 
 # ── Training ──────────────────────────────────────────────────────────────────
 
-def test_train_start_no_dataset(test_client):
-    r = test_client.post("/api/train/start")
+def test_train_start_no_dataset(test_client, tmp_path, monkeypatch):
+    import config
+    # Point DATA_DIR at an empty temp dir so occupied/vacant are absent
+    # regardless of what exists on the machine running the suite, and stub
+    # TrainManager so a stray "already training" state can't shadow the check
+    # (and so the endpoint can never kick off a real training run).
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    mock_mgr = MagicMock()
+    mock_mgr.is_training.return_value = False
+    with patch("src.train.train_manager.TrainManager", return_value=mock_mgr):
+        r = test_client.post("/api/train/start")
     assert r.status_code == 400
 
 

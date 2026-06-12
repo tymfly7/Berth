@@ -79,8 +79,10 @@ def _snap_to_lines(box: list, frame_bgr: np.ndarray) -> list:
     h, w = frame_bgr.shape[:2]
     x1, y1, x2, y2 = [int(v) for v in box]
     pad = 20
-    rx1 = max(0, x1 - pad); ry1 = max(0, y1 - pad)
-    rx2 = min(w, x2 + pad); ry2 = min(h, y2 + pad)
+    rx1 = max(0, x1 - pad)
+    ry1 = max(0, y1 - pad)
+    rx2 = min(w, x2 + pad)
+    ry2 = min(h, y2 + pad)
     region = frame_bgr[ry1:ry2, rx1:rx2]
     if region.size == 0:
         return box
@@ -103,8 +105,10 @@ def _snap_to_lines(box: list, frame_bgr: np.ndarray) -> list:
     if not xs:
         return box
 
-    sx1 = max(rx1, min(xs)); sy1 = max(ry1, min(ys))
-    sx2 = min(rx2, max(xs)); sy2 = min(ry2, max(ys))
+    sx1 = max(rx1, min(xs))
+    sy1 = max(ry1, min(ys))
+    sx2 = min(rx2, max(xs))
+    sy2 = min(ry2, max(ys))
     if sx2 - sx1 < 10 or sy2 - sy1 < 10:
         return box
     return [float(sx1), float(sy1), float(sx2), float(sy2)]

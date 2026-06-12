@@ -122,7 +122,7 @@ const CARDS = [
   },
 ]
 
-export default function MetricCards({ metrics, streams }) {
+export default function MetricCards({ metrics, streams, showMisparked = true }) {
   return (
     <>
       {CARDS.filter(card => card.key !== 'streams' || Array.isArray(streams)).map((card, i) => (
@@ -154,7 +154,7 @@ export default function MetricCards({ metrics, streams }) {
           )}
         </div>
       ))}
-      {metrics.anomaly_enabled && (
+      {showMisparked && metrics.anomaly_enabled && (
         <div className="glass-card fade-in" style={cardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <span style={labelStyle}>Misparked</span>

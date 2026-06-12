@@ -15,19 +15,22 @@ const MOCK_METRICS = {
 
 describe('PublicView', () => {
   beforeEach(() => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(MOCK_METRICS),
+    // URL-aware mock: /api/public/metrics returns the metrics object, while
+    // /api/history and /api/cameras must return arrays (the component maps over
+    // them). A blanket object response would crash the render.
+    global.fetch = vi.fn((url) => {
+      const body = String(url).includes('/api/public/metrics') ? MOCK_METRICS : []
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) })
     })
   })
 
-  it('renders the Parking Availability heading', () => {
+  it('renders the Berth heading', () => {
     render(
       <MemoryRouter>
         <PublicView />
       </MemoryRouter>
     )
-    expect(screen.getByText('Parking Availability')).toBeTruthy()
+    expect(screen.getByText('Berth')).toBeTruthy()
   })
 
   it('displays available spot count after metrics load', async () => {
@@ -37,8 +40,9 @@ describe('PublicView', () => {
       </MemoryRouter>
     )
 
+    // '4' shows in both the hero number and the "Available" metric card.
     await waitFor(() => {
-      expect(screen.getByText('4')).toBeTruthy()
+      expect(screen.getAllByText('4').length).toBeGreaterThan(0)
     })
   })
 })

@@ -59,7 +59,8 @@ def mock_processor():
 
 @pytest.fixture(autouse=True)
 def patch_get_processor(mock_processor):
-    with patch("main._get_processor", return_value=mock_processor):
+    from src.api.processor_service import processor_service
+    with patch.object(processor_service, "get_processor", return_value=mock_processor):
         yield
 
 
@@ -76,5 +77,8 @@ def disable_auth(monkeypatch):
     # The endpoint tests assume auth is disabled. Force it off so a local
     # BERTH_API_KEY (e.g. from the developer's .env) doesn't turn every
     # protected endpoint into a 401 and make the suite environment-dependent.
+    # Router endpoints read config.API_KEY live via deps.verify_api_key; the
+    # WebSocket/health path reads main.API_KEY — patch both.
     import main
+    monkeypatch.setattr(config, "API_KEY", "")
     monkeypatch.setattr(main, "API_KEY", "")

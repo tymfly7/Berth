@@ -138,7 +138,7 @@ class Trainer:
         self.best_val_acc = 0.0
         self.best_epoch = 0
 
-        logger.info(f"🔧 Trainer initialized:")
+        logger.info("🔧 Trainer initialized:")
         logger.info(f"   Model: {model_name}")
         logger.info(f"   Device: {self.device}")
         logger.info(f"   LR: {self.learning_rate}, Weight Decay: {self.weight_decay}")
@@ -237,7 +237,7 @@ class Trainer:
         }
 
         logger.info(f"\n{'='*60}")
-        logger.info(f"✅ Training complete!")
+        logger.info("✅ Training complete!")
         logger.info(f"   Best epoch: {self.best_epoch}")
         logger.info(f"   Best val_loss: {self.best_val_loss:.4f}")
         logger.info(f"   Best val_acc: {self.best_val_acc:.2f}%")

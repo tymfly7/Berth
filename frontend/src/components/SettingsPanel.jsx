@@ -12,12 +12,14 @@ const toggleBtnStyle = {
   background: 'transparent',
   border: 'none',
   borderBottom: '1px solid var(--border-color)',
-  padding: '14px 20px',
+  padding: '12px 16px',
   textAlign: 'left',
   cursor: 'pointer',
   color: 'var(--text-primary)',
-  fontSize: '0.95rem',
+  fontSize: '0.78rem',
   fontWeight: 600,
+  textTransform: 'uppercase',
+  letterSpacing: '0.5px',
   display: 'flex',
   justifyContent: 'space-between',
   alignItems: 'center',
@@ -89,7 +91,7 @@ function TrainingDataBrowser({ apiBase }) {
         disabled={loading}
         style={{ marginTop: 10, fontSize: '0.75rem' }}
       >
-        {loading ? '⏳ Refreshing…' : '↻ Refresh'}
+        {loading ? 'Refreshing…' : '↻ Refresh'}
       </button>
     </div>
   )
@@ -103,7 +105,7 @@ function SubSection({ title, children, defaultOpen = true }) {
         <span>{title}</span>
         <span>{open ? '▲' : '▼'}</span>
       </button>
-      {open && <div style={{ padding: '16px 20px' }}>{children}</div>}
+      {open && <div style={{ padding: '14px 16px' }}>{children}</div>}
     </div>
   )
 }
@@ -114,7 +116,7 @@ export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchMode
   return (
     <div className="glass-card" style={{ overflow: 'hidden' }}>
       <button style={toggleBtnStyle} onClick={() => setOpen(o => !o)}>
-        <span>⚙️ Settings</span>
+        <span>Settings</span>
         <span>{open ? '▲' : '▼'}</span>
       </button>
 

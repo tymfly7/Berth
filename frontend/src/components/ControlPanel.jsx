@@ -182,6 +182,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     }
   }
 
+  // eslint-disable-next-line no-unused-vars -- half-wired "create lot" handler, kept for now
   const handleCreateLot = () => {
     const name = newLotName.trim()
     if (!name) return
@@ -317,7 +318,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       reader.onload = (ev) => setUploadedImage(ev.target.result)
       reader.readAsDataURL(file)
 
-      showStatus('Image ready — select a lot, draw ROIs, then click Analyze.', 6000)
+      showStatus('Select a lot, draw ROIs, then Analyze.', 6000)
     }
   }
 
@@ -382,14 +383,14 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
           style={{ flex: 1 }}
           onClick={() => setMode('camera')}
         >
-          📷 Camera
+          Camera
         </button>
         <button
           className={`btn ${mode === 'testing' ? 'btn-primary' : 'btn-ghost'} btn-sm`}
           style={{ flex: 1 }}
           onClick={() => setMode('testing')}
         >
-          🧪 Testing
+          Testing
         </button>
       </div>
 
@@ -432,7 +433,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
           style={{ flex: 1 }}
           onClick={() => fileRef.current?.click()}
         >
-          📁 Upload to Test
+          Upload
         </button>
         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
           image or video
@@ -502,7 +503,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 onMouseEnter={() => setRoiBtnHovered(true)}
                 onMouseLeave={() => setRoiBtnHovered(false)}
               >
-                ✏️ ROI
+                ROI
               </button>
               {roiBtnHovered && (
                 <div style={{
@@ -587,9 +588,9 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
           </div>
           {resultData && (
             <div style={style.resultStats}>
-              <span className="badge badge-vacant">🟢 {resultData.available} Available</span>
-              <span className="badge badge-occupied">🔴 {resultData.occupied} Occupied</span>
-              <span className="badge badge-info">📊 {resultData.occupancy_percent}%</span>
+              <span className="badge badge-vacant">{resultData.available} Available</span>
+              <span className="badge badge-occupied">{resultData.occupied} Occupied</span>
+              <span className="badge badge-info">{resultData.occupancy_percent}%</span>
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>

@@ -233,7 +233,7 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
       setForm({ name: '', source: '', type: 'usb', roi_camera_id: '' })
       setShowForm(false)
       await fetchCameras()
-    } catch (e) {
+    } catch {
       setError('Network error.')
     }
   }
@@ -297,10 +297,10 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
         editWsRef.current = ws
         const timeout = setTimeout(() => { ws.close(); resolve(null) }, 5000)
         ws.onmessage = (e) => {
-          try {
-            const d = JSON.parse(e.data)
-            if (d.frame) { clearTimeout(timeout); ws.close(); resolve(`data:image/jpeg;base64,${d.frame}`) }
-          } catch { /* ignore */ }
+          // First binary JPEG frame becomes the ROI editor background.
+          if (typeof e.data !== 'string') {
+            clearTimeout(timeout); ws.close(); resolve(URL.createObjectURL(e.data))
+          }
         }
         ws.onerror = () => { clearTimeout(timeout); resolve(null) }
       }).then(wsBg => { if (wsBg) setEditBg(wsBg) })

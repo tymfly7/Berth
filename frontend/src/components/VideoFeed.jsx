@@ -34,10 +34,13 @@ function PickerCell({ cameraId, name, apiBase, onClick }) {
     )
     wsRef.current = ws
     ws.onmessage = (e) => {
-      try {
-        const d = JSON.parse(e.data)
-        if (d.frame) setFrame(d.frame)
-      } catch { /* ignore */ }
+      // Frames now arrive as binary JPEG messages; ignore the JSON metrics.
+      if (typeof e.data !== 'string') {
+        setFrame(prev => {
+          if (prev) URL.revokeObjectURL(prev)
+          return URL.createObjectURL(e.data)
+        })
+      }
     }
     ws.onerror = () => ws.close()
     return () => ws.close()
@@ -60,7 +63,7 @@ function PickerCell({ cameraId, name, apiBase, onClick }) {
     >
       <div style={{ aspectRatio: '16/9', background: '#000', position: 'relative' }}>
         {frame
-          ? <img src={`data:image/jpeg;base64,${frame}`} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} alt={name} />
+          ? <img src={frame} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} alt={name} />
           : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.72rem' }}>Connecting…</div>
         }
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.32)' }}>
@@ -120,13 +123,11 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
     )
     editWsRef.current = ws
     ws.onmessage = (e) => {
-      try {
-        const d = JSON.parse(e.data)
-        if (d.frame) {
-          setEditBg(`data:image/jpeg;base64,${d.frame}`)
-          ws.close()
-        }
-      } catch { /* ignore */ }
+      // Use the first binary JPEG frame as the editor background.
+      if (typeof e.data !== 'string') {
+        setEditBg(URL.createObjectURL(e.data))
+        ws.close()
+      }
     }
     ws.onerror = () => ws.close()
   }, [apiBase])
