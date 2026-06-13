@@ -10,6 +10,8 @@ services:
       - BERTH_DEPLOYMENT=edge
       - BERTH_MODEL=mobilenetv4s
       - BERTH_API_KEY=${BERTH_API_KEY:-}
+      - BERTH_ADMIN_PASSWORD=${BERTH_ADMIN_PASSWORD:-}   # required for admin login (else /api/auth/login → 503)
+      - BERTH_AUTH_SECRET=${BERTH_AUTH_SECRET:-}         # optional: persist token signing across restarts
       - BERTH_PORT=8000
       - BERTH_DB_PATH=/app/edge_data/berth.db
     volumes:
@@ -17,7 +19,7 @@ services:
       - ${HOME}/roi_configs:/roi_configs   # per-camera ROI polygons (read at container root, not /app)
       - berth_rpi_data:/app/edge_data      # persistent SQLite database
     ports:
-      - "8000:8000"
+      - "8001:8000"   # match the Pi (host 8001 → container 8000)
     restart: unless-stopped
 
 volumes:

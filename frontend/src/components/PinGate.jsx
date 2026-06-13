@@ -3,9 +3,6 @@
 // against naive automated guessing; it is not real security since the check runs client-side.
 import { useState, useEffect } from 'react'
 
-const CORRECT_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD ?? 'password'
-const CORRECT_USERNAME = 'admin'
-
 const MAX_ATTEMPTS = 5
 const LOCKOUT_MS = 30_000
 const FAIL_KEY = 'admin_fail_count'
@@ -90,7 +87,7 @@ export default function PinGate({ children }) {
     resetChallenge()
   }
 
-  const submit = () => {
+  const submit = async () => {
     if (locked) return
 
     // Honeypot tripped — treat as a bot, reject without revealing why.
@@ -106,14 +103,29 @@ export default function PinGate({ children }) {
       return
     }
 
-    if (username === CORRECT_USERNAME && password === CORRECT_PASSWORD) {
-      localStorage.removeItem(FAIL_KEY)
-      localStorage.removeItem(LOCK_KEY)
-      sessionStorage.setItem('admin_authed', 'true')
-      setAuthed(true)
-    } else {
-      setError('Incorrect username or password')
-      registerFailure()
+    // Password is validated server-side; a successful login returns a signed,
+    // short-lived token used for subsequent admin requests.
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (res.ok) {
+        const { token } = await res.json()
+        localStorage.removeItem(FAIL_KEY)
+        localStorage.removeItem(LOCK_KEY)
+        sessionStorage.setItem('admin_token', token)
+        sessionStorage.setItem('admin_authed', 'true')
+        setAuthed(true)
+      } else if (res.status === 503) {
+        setError('Admin login is not configured on the server')
+      } else {
+        setError('Incorrect username or password')
+        registerFailure()
+      }
+    } catch {
+      setError('Could not reach the server')
     }
   }
 
