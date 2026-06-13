@@ -7,7 +7,9 @@ import so routers can depend on it without a circular import.
 """
 
 import base64
+import hashlib
 import hmac
+import time
 from urllib.parse import urlparse
 
 import cv2
@@ -23,9 +25,39 @@ import config
 limiter = Limiter(key_func=get_remote_address)
 
 
+# ── Admin session tokens (server-side login) ─────────────────────────────────
+# Stateless HMAC token: "<expiry_epoch>.<hex_sig>" signed with config.AUTH_SECRET.
+# No new dependencies — stdlib hmac/hashlib only.
+
+def create_token() -> tuple[str, int]:
+    """Issue a signed token valid for config.AUTH_TOKEN_TTL seconds."""
+    exp = int(time.time()) + config.AUTH_TOKEN_TTL
+    sig = hmac.new(config.AUTH_SECRET.encode(), str(exp).encode(), hashlib.sha256).hexdigest()
+    return f"{exp}.{sig}", config.AUTH_TOKEN_TTL
+
+
+def verify_token(token: str) -> bool:
+    """True if the token's signature is valid and it has not expired."""
+    try:
+        exp_str, sig = token.split(".", 1)
+        exp = int(exp_str)
+    except (ValueError, AttributeError):
+        return False
+    if exp < time.time():
+        return False
+    expected = hmac.new(config.AUTH_SECRET.encode(), exp_str.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(sig, expected)
+
+
 async def verify_api_key(request: Request) -> None:
     """FastAPI dependency. Reads config.API_KEY live so tests (and runtime
-    re-config) can toggle auth without re-importing. Empty key = auth disabled."""
+    re-config) can toggle auth without re-importing. Empty key = auth disabled.
+
+    Accepts either a valid admin session token (Authorization: Bearer <token>)
+    or the static service key (X-API-Key, used by the sync worker)."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and verify_token(auth[7:]):
+        return
     key_required = config.API_KEY
     if not key_required:
         return

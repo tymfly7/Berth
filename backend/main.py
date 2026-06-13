@@ -38,7 +38,7 @@ from slowapi.errors import RateLimitExceeded
 import config
 from src.api.deps import limiter
 from src.api.processor_service import processor_service
-from src.api.routers import analytics, cameras, inference, roi, training
+from src.api.routers import analytics, auth, cameras, inference, roi, training
 from src.cameras.camera_registry import camera_registry
 from src.db import database as db
 
@@ -58,6 +58,11 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "BERTH_API_KEY is not set — all protected endpoints are publicly accessible. "
             "Set this env var before any network-facing deployment."
+        )
+    if not config.ADMIN_PASSWORD:
+        logger.warning(
+            "BERTH_ADMIN_PASSWORD is not set — admin login is disabled (/api/auth/login returns 503). "
+            "Set this env var to enable the admin area."
         )
     from src.sync.sync_worker import SyncWorker
     SyncWorker().start()
@@ -133,6 +138,7 @@ app.include_router(analytics.router)
 app.include_router(training.router)
 app.include_router(cameras.router)
 app.include_router(roi.router)
+app.include_router(auth.router)
 
 
 # ═══════════════════════════════════════════════════════════════

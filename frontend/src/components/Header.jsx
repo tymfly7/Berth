@@ -72,6 +72,7 @@ export default function Header({ connected, model }) {
 
   const logout = () => {
     sessionStorage.removeItem('admin_authed')
+    sessionStorage.removeItem('admin_token')
     navigate('/')
   }
 

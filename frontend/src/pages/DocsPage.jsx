@@ -248,28 +248,29 @@ export default function DocsPage() {
       {/* ── Section 2: Admin Access ──────────────────────────── */}
       <SectionCard num={2} id="s2" title="Accessing the Admin Dashboard">
         <p style={s.body}>
-          The admin area is protected by a username and password login. To sign in:
+          The admin area is protected by a password login that is validated on
+          the server. To sign in:
         </p>
         <ol style={s.steps}>
           <li style={s.step}>
             Open a browser and navigate to <Code>/admin</Code>.
           </li>
           <li style={s.step}>
-            Enter the credentials when prompted. The defaults are username{' '}
-            <Code>admin</Code> and password <Code>password</Code>.
+            Enter the admin password when prompted. The password is checked by
+            the backend and is never embedded in the page.
           </li>
           <li style={s.step}>
-            The dashboard loads automatically once credentials are accepted.
-            Authentication is stored in <Code>sessionStorage</Code> — it
-            persists for the current browser tab and clears when the tab is
-            closed or you click <strong>Logout</strong>.
+            On success the backend returns a short-lived token, stored in{' '}
+            <Code>sessionStorage</Code> — it persists for the current browser
+            tab and clears when the tab is closed or you click{' '}
+            <strong>Logout</strong>.
           </li>
         </ol>
         <div style={s.calloutWarn}>
-          <span style={s.label}>Security note:</span> Change the default
-          password before deploying in a production environment. Set the{' '}
-          <Code>VITE_ADMIN_PASSWORD</Code> environment variable in your{' '}
-          <Code>.env</Code> file to override the default.
+          <span style={s.label}>Security note:</span> Set the{' '}
+          <Code>BERTH_ADMIN_PASSWORD</Code> environment variable on the server
+          (e.g. in <Code>docker-compose</Code>) to enable admin login. If it is
+          unset, login is disabled.
         </div>
       </SectionCard>
 

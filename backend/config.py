@@ -6,6 +6,7 @@ Override any setting via environment variables where noted.
 """
 
 import os
+import secrets
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -40,6 +41,12 @@ PORT = int(os.getenv("BERTH_PORT", "8001"))  # 8000 left free for other local se
 # ---------------------------------------------------------------------------
 API_KEY = os.getenv("BERTH_API_KEY", "")           # empty = auth disabled
 UPLOAD_RATE_LIMIT = os.getenv("BERTH_UPLOAD_RATE_LIMIT", "10/minute")
+
+# Admin login (server-side). The password is validated by the backend and never
+# shipped to the browser; a successful login returns a short-lived signed token.
+ADMIN_PASSWORD = os.getenv("BERTH_ADMIN_PASSWORD", "")   # empty = admin login disabled (503)
+AUTH_SECRET = os.getenv("BERTH_AUTH_SECRET", "") or secrets.token_urlsafe(32)  # token signing key
+AUTH_TOKEN_TTL = int(os.getenv("BERTH_AUTH_TTL", "28800"))  # admin session length, seconds (8h)
 
 # ---------------------------------------------------------------------------
 # Active model  ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26")

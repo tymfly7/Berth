@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PinGate from '../components/PinGate'
 
 // Read the operands from the "What is X + Y?" label and return their sum.
@@ -20,6 +20,15 @@ describe('PinGate', () => {
   beforeEach(() => {
     localStorage.clear()
     sessionStorage.clear()
+    // Server-side login is now validated by the backend; mock it: the correct
+    // password is "password", anything else is rejected.
+    global.fetch = vi.fn(async (_url, opts) => {
+      const { password } = JSON.parse(opts.body)
+      if (password === 'password') {
+        return { ok: true, status: 200, json: async () => ({ token: '9999999999.sig', expires_in: 28800 }) }
+      }
+      return { ok: false, status: 401, json: async () => ({ detail: 'Incorrect password' }) }
+    })
   })
 
   it('shows login form and hides children when not authenticated', () => {
@@ -42,7 +51,8 @@ describe('PinGate', () => {
 
     await signIn(user)
 
-    expect(screen.getByText('admin content')).toBeTruthy()
+    expect(await screen.findByText('admin content')).toBeTruthy()
+    expect(sessionStorage.getItem('admin_token')).toBe('9999999999.sig')
   })
 
   it('shows error message for incorrect credentials', async () => {
@@ -55,7 +65,7 @@ describe('PinGate', () => {
 
     await signIn(user, { username: 'wrong', password: '0000' })
 
-    expect(screen.getByText('Incorrect username or password')).toBeTruthy()
+    expect(await screen.findByText('Incorrect username or password')).toBeTruthy()
     expect(screen.queryByText('admin content')).toBeNull()
   })
 
@@ -74,6 +84,7 @@ describe('PinGate', () => {
 
     expect(screen.getByText('Incorrect answer to the challenge')).toBeTruthy()
     expect(screen.queryByText('admin content')).toBeNull()
+    expect(global.fetch).not.toHaveBeenCalled()
   })
 
   it('rejects when the honeypot field is filled (bot)', async () => {
@@ -92,6 +103,7 @@ describe('PinGate', () => {
     await user.click(screen.getByRole('button', { name: /sign in/i }))
 
     expect(screen.queryByText('admin content')).toBeNull()
+    expect(global.fetch).not.toHaveBeenCalled()
   })
 
   it('locks the form after 5 failed attempts', async () => {
@@ -102,11 +114,15 @@ describe('PinGate', () => {
       </PinGate>
     )
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 1; i <= 5; i++) {
       await user.clear(screen.getByPlaceholderText('admin'))
       await user.type(screen.getByPlaceholderText('admin'), 'wrong')
+      await user.type(screen.getByPlaceholderText('••••••••'), 'wrong-pass')
       await user.type(screen.getByPlaceholderText('Answer'), solveChallenge())
-      await user.click(screen.getByRole('button', { name: /sign in/i }))
+      await user.click(screen.getByRole('button', { name: /sign in|locked/i }))
+      // Wait for this attempt's failure to register before the next iteration,
+      // so the async login response settles and the challenge resets.
+      await waitFor(() => expect(Number(localStorage.getItem('admin_fail_count') || 0)).toBe(i))
     }
 
     expect(screen.getByText(/Too many attempts/)).toBeTruthy()
