@@ -80,6 +80,10 @@ CNN_CONFIDENCE_THRESHOLD = 0.6
 # positives); raise toward 0.5 to be stricter. Override via env at runtime.
 OCCUPANCY_THRESHOLD = float(os.getenv("BERTH_OCCUPANCY_THRESHOLD", "0.40"))
 
+# Minimum continuous vacant duration before a slot is declared free.
+# Prevents pedestrians or passing objects from triggering false vacancies.
+VACANT_CONFIRM_SECS = float(os.getenv("BERTH_VACANT_CONFIRM_SECS", "0.5"))
+
 # ---------------------------------------------------------------------------
 # Training Hyperparameters
 # ---------------------------------------------------------------------------

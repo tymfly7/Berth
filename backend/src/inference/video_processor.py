@@ -93,6 +93,7 @@ class VideoProcessor:
         self._cached_status_map: dict = {}
         self._cached_anomalies: list = []   # [{"bbox": (x1,y1,x2,y2), "label": str}]
         self._cached_status_lock = threading.Lock()
+        self._vacant_since: dict = {}       # slot_id → time.time() when first seen vacant
 
         self._frame = None
         self._frame_jpeg: bytes | None = None   # latest encoded JPEG (sent over WS as binary)
@@ -512,11 +513,45 @@ class VideoProcessor:
             except Exception as e:
                 logger.warning(f"Anomaly detection error: {e}")
 
+        _now = time.time()
         with self._cached_status_lock:
-            self._cached_status_map = new_status_map
+            # Hysteresis: a slot only becomes vacant after it has shown vacant
+            # continuously for VACANT_CONFIRM_SECS. Occupied transitions are
+            # immediate. This prevents pedestrians or passing objects from
+            # triggering false vacancy events.
+            confirmed: dict = {}
+            for slot_id, status in new_status_map.items():
+                if status == "vacant":
+                    if slot_id not in self._vacant_since:
+                        self._vacant_since[slot_id] = _now
+                    if _now - self._vacant_since[slot_id] >= config.VACANT_CONFIRM_SECS:
+                        confirmed[slot_id] = "vacant"
+                    else:
+                        confirmed[slot_id] = self._cached_status_map.get(slot_id, "occupied")
+                else:
+                    self._vacant_since.pop(slot_id, None)
+                    confirmed[slot_id] = status
+            self._cached_status_map = confirmed
             self._cached_anomalies = new_anomalies
 
-        metrics = self._result_to_metrics(result)
+        # Rebuild result aggregates from hysteresis-confirmed statuses so that
+        # metrics, history, and heatmap all reflect the debounced state.
+        patched_slots = [
+            {**s, "status": confirmed.get(s["id"], s["status"])}
+            for s in result.get("slots", [])
+        ]
+        _occ = sum(1 for s in patched_slots if s["status"] == "occupied")
+        _tot = len(patched_slots)
+        patched_result = {
+            **result,
+            "slots":             patched_slots,
+            "occupied":          _occ,
+            "available":         _tot - _occ,
+            "total":             _tot,
+            "occupancy_percent": round(100.0 * _occ / _tot, 1) if _tot > 0 else 0.0,
+        }
+
+        metrics = self._result_to_metrics(patched_result)
         metrics["misparked_count"] = len(new_anomalies)
         metrics["anomaly_enabled"] = self._anomaly_enabled
         ts = datetime.now(timezone.utc).isoformat()
@@ -530,7 +565,7 @@ class VideoProcessor:
                 "occupied": metrics["occupied"],
                 "occupancy_percent": metrics["occupancy_percent"],
             })
-            self._update_heatmap(result["slots"])
+            self._update_heatmap(patched_result["slots"])
             now_t = time.time()
             if now_t - self._last_db_write >= 60:
                 self._last_db_write = now_t
