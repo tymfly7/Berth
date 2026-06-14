@@ -275,3 +275,14 @@ backend/configs/cameras.json
 
 #docker images
 *.tar.gz
+*.tar
+
+# Runtime camera state (app writes this at backend root)
+backend/cameras.json
+
+# YOLO train/val outputs — regenerated every run
+runs/
+
+# Trained model weights — large binaries, distributed outside git
+backend/models/*.pth
+backend/models/*.pt
