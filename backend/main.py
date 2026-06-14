@@ -26,6 +26,19 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+# ── CPU thread budgeting (must run before cv2/torch/ncnn are imported) ─────────
+# This app is a single uvicorn process: the asyncio API loop shares cores with
+# every camera's decode + inference threads. By default OpenCV/OpenMP/BLAS each
+# fan a single op out to one thread per core, so a few active cameras
+# oversubscribe all cores, spike one core to 100%, and starve the event loop —
+# every HTTP/WS request then hangs. Pinning each native op to one thread lets the
+# OS spread camera work across cores and keep one free for the API. Explicit env
+# overrides are respected.
+for _t in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_t, "1")
+import cv2
+cv2.setNumThreads(1)
+
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware

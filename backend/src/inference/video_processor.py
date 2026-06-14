@@ -174,8 +174,15 @@ class VideoProcessor:
 
     def _load_yolo_detector(self) -> None:
         from src.models.yolo_detector import ParkingYOLO26
-        self._yolo_detector = ParkingYOLO26(str(config.YOLO26_DETECT_PATH))
-        logger.info("Anomaly detection: YOLO26 detector loaded")
+        # On edge use the NCNN-exported detect model (torch-free, ARM-fast); fall
+        # back to the torch .pt elsewhere. Mirrors classifier._load_yolo_detect —
+        # the .pt is not shipped in the edge image, so anomaly must use NCNN.
+        if config.DEPLOYMENT_PROFILE == "edge" and config.YOLO26_DETECT_NCNN_PATH.exists():
+            model_path = config.YOLO26_DETECT_NCNN_PATH
+        else:
+            model_path = config.YOLO26_DETECT_PATH
+        self._yolo_detector = ParkingYOLO26(str(model_path))
+        logger.info(f"Anomaly detection: YOLO26 detector loaded ({model_path.name})")
 
     def set_video_source(self, source, source_type="auto"):
         was_running = self.running
@@ -198,6 +205,9 @@ class VideoProcessor:
         )
 
     def _open_capture(self, force_refresh=False):
+        is_rtsp = self._source_type == "rtsp" or (
+            isinstance(self._source, str) and self._source.lower().startswith("rtsp")
+        )
         if self._is_youtube():
             from src.cameras.youtube_resolver import (
                 resolve_stream_url, YouTubeResolveError,
@@ -208,6 +218,12 @@ class VideoProcessor:
                 logger.error(f"YouTube resolve failed for '{self._source}': {e}")
                 return None
             cap = cv2.VideoCapture(stream_url)
+        elif is_rtsp:
+            # Force RTSP over TCP. UDP packet loss (common over Wi-Fi / a busy
+            # LAN) corrupts H264 macroblocks — the pixelation and "error while
+            # decoding MB" spam. TCP trades a little latency for a clean stream.
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+            cap = cv2.VideoCapture(self._source, cv2.CAP_FFMPEG)
         else:
             cap = cv2.VideoCapture(self._source)
 
@@ -215,7 +231,7 @@ class VideoProcessor:
             cap.release()
             return None
 
-        if self._is_youtube():
+        if self._is_youtube() or is_rtsp:
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         return cap
@@ -458,12 +474,22 @@ class VideoProcessor:
         """
         from src.inference.inference_pool import InferencePool
         pool = InferencePool.get()
+        infer_interval = 1.0 / config.INFER_FPS if config.INFER_FPS > 0 else 0.0
+        last_submit = 0.0
         while self.running:
             if not self._infer_event.wait(timeout=2.0):
                 continue
             self._infer_event.clear()
             if not self.running:
                 break
+            # Throttle inference: parking occupancy changes slowly, so running the
+            # model on every decoded frame (up to the source's full FPS) just burns
+            # CPU. Cap submissions to INFER_FPS. The display loop still streams at
+            # STREAM_FPS using the last result, so video stays smooth.
+            now = time.time()
+            if infer_interval and now - last_submit < infer_interval:
+                continue
+            last_submit = now
             with self._latest_raw_lock:
                 raw = self._latest_raw
             if raw is None:

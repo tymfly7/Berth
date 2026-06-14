@@ -7,9 +7,9 @@ from typing import Optional
 import cv2
 import numpy as np
 
-logger = logging.getLogger("berth.roi")
+import config
 
-_ROI_DIR = Path(__file__).resolve().parent.parent.parent.parent / "roi_configs"
+logger = logging.getLogger("berth.roi")
 
 # Only allow safe characters in camera IDs to prevent path traversal.
 _SAFE_CAM_ID = re.compile(r'^[a-zA-Z0-9_\-]{1,64}$')
@@ -23,8 +23,8 @@ def _validate_camera_id(camera_id: str) -> None:
 class RoiStore:
     @classmethod
     def _ensure_dir(cls) -> Path:
-        _ROI_DIR.mkdir(parents=True, exist_ok=True)
-        return _ROI_DIR
+        config.ROI_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        return config.ROI_CONFIG_DIR
 
     @classmethod
     def _roi_path(cls, camera_id: str) -> Path:

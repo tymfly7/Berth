@@ -8,19 +8,22 @@ services:
         - linux/arm64
     environment:
       - BERTH_DEPLOYMENT=edge
-      - BERTH_MODEL=mobilenetv4s
+      - BERTH_MODEL=cnn_scratch
       - BERTH_API_KEY=${BERTH_API_KEY:-}
       - BERTH_ADMIN_PASSWORD=${BERTH_ADMIN_PASSWORD:-}   # required for admin login (else /api/auth/login → 503)
       - BERTH_AUTH_SECRET=${BERTH_AUTH_SECRET:-}         # optional: persist token signing across restarts
       - BERTH_PORT=8000
       - BERTH_DB_PATH=/app/edge_data/berth.db
+      - BERTH_MAX_ACTIVE_CAMERAS=3        # cap concurrent decode+inference loops on the Pi
     volumes:
-      - ./backend/models:/app/models       # pre-populate with *_ncnn_model/ dirs before first run
-      - ${HOME}/roi_configs:/roi_configs   # per-camera ROI polygons (read at container root, not /app)
       - berth_rpi_data:/app/edge_data      # persistent SQLite database
+      - berth_rpi_config:/app/configs      # ROIs + camera registry — created on first run, survives rebuilds
+    devices:
+      - /dev/video0:/dev/video0            # USB webcam passthrough (only present on the Pi)
     ports:
       - "8001:8000"   # match the Pi (host 8001 → container 8000)
     restart: unless-stopped
 
 volumes:
   berth_rpi_data:
+  berth_rpi_config:

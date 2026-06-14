@@ -134,13 +134,35 @@ def model_info():
     if cached and (now - _model_info_cache["ts"]) < _MODEL_INFO_TTL and cached.get("active_model") == processor_service.active_mode:
         return cached
 
-    data_dir = config.DATA_DIR
-    occ_dir = data_dir / "occupied"
-    vac_dir = data_dir / "vacant"
-    dataset_ready = occ_dir.exists() and vac_dir.exists()
-    occupied_count = _count_images(occ_dir)
-    vacant_count = _count_images(vac_dir)
-    dataset_count = occupied_count + vacant_count
+    is_edge = config.DEPLOYMENT_PROFILE == "edge"
+
+    if is_edge:
+        def _ncnn_ready(path: Path) -> bool:
+            return (path / "model.ncnn.param").exists()
+        available_models = {
+            "cnn_scratch":     _ncnn_ready(config.EDGE_MODEL_DIR / "edge_cnn_scratch_ncnn_model"),
+            "resnet50":        _ncnn_ready(config.EDGE_MODEL_DIR / "edge_resnet50_ncnn_model"),
+            "mobilenetv4s":    _ncnn_ready(config.EDGE_MODEL_DIR / "edge_mobilenetv4s_ncnn_model"),
+            "yolo26_classify": _ncnn_ready(config.YOLO26_CLASSIFY_NCNN_PATH),
+            "yolo26":          _ncnn_ready(config.YOLO26_DETECT_NCNN_PATH),
+        }
+        dataset_ready = False
+        dataset_count = occupied_count = vacant_count = 0
+    else:
+        data_dir = config.DATA_DIR
+        occ_dir  = data_dir / "occupied"
+        vac_dir  = data_dir / "vacant"
+        dataset_ready  = occ_dir.exists() and vac_dir.exists()
+        occupied_count = _count_images(occ_dir)
+        vacant_count   = _count_images(vac_dir)
+        dataset_count  = occupied_count + vacant_count
+        available_models = {
+            "cnn_scratch":     config.CNN_SCRATCH_PATH.exists(),
+            "resnet50":        config.RESNET50_PATH.exists(),
+            "mobilenetv4s":    config.MOBILENETV4_PATH.exists(),
+            "yolo26_classify": config.YOLO26_CLASSIFY_PATH.exists(),
+            "yolo26":          config.YOLO26_DETECT_PATH.exists(),
+        }
 
     comparison_path = config.OUTPUT_DIR / "model_comparison.json"
     comparison = None
@@ -149,20 +171,15 @@ def model_info():
             comparison = json.load(f)
 
     result = {
-        "active_model": processor_service.active_mode,
-        "available_models": {
-            "cnn_scratch":     config.CNN_SCRATCH_PATH.exists(),
-            "resnet50":        config.RESNET50_PATH.exists(),
-            "mobilenetv4s":     config.MOBILENETV4_PATH.exists(),
-            "yolo26_classify": config.YOLO26_CLASSIFY_PATH.exists(),
-            "yolo26":          config.YOLO26_DETECT_PATH.exists(),
-        },
-        "dataset_ready": dataset_ready,
-        "dataset_count": dataset_count,
-        "occupied_count": occupied_count,
-        "vacant_count": vacant_count,
-        "comparison": comparison,
-        "model_details": load_model_training_details(),
+        "active_model":       processor_service.active_mode,
+        "deployment_profile": config.DEPLOYMENT_PROFILE,
+        "available_models":   available_models,
+        "dataset_ready":      dataset_ready,
+        "dataset_count":      dataset_count,
+        "occupied_count":     occupied_count,
+        "vacant_count":       vacant_count,
+        "comparison":         comparison,
+        "model_details":      load_model_training_details(),
     }
     _model_info_cache["data"] = result
     _model_info_cache["ts"] = now

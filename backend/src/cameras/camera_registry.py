@@ -7,7 +7,6 @@ import logging
 import os
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 import config
@@ -15,7 +14,7 @@ from src.inference.video_processor import VideoProcessor
 
 logger = logging.getLogger("berth.cameras")
 
-CAMERAS_FILE = Path(__file__).resolve().parent.parent.parent / "cameras.json"
+CAMERAS_FILE = config.CAMERAS_FILE
 
 
 def _redact_url_credentials(url: str) -> str:
@@ -166,6 +165,14 @@ class CameraRegistry:
             cam = self._cameras.get(id)
             if not cam:
                 return False
+            active_others = sum(
+                1 for c in self._cameras.values() if c.get("active") and c["id"] != id
+            )
+            if active_others >= config.MAX_ACTIVE_CAMERAS:
+                raise ValueError(
+                    f"Maximum of {config.MAX_ACTIVE_CAMERAS} active cameras reached. "
+                    "Deactivate one before activating another."
+                )
             self._deactivate(id)
             try:
                 mn = model_name or config.ACTIVE_MODEL

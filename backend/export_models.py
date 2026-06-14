@@ -45,7 +45,6 @@ for name, weights_path, fn in MODELS:
 
 print(f"\nDone. exported={len(ok)}  skipped={len(skip)}  failed={len(fail)}")
 if ok:
-    print("\nCopy these to backend/models/ on the Raspberry Pi 5:")
     for name in ok:
         if "yolo" in name:
             pt_stem = Path(config.YOLO26_CLASSIFY_PATH if "classify" in name else config.YOLO26_DETECT_PATH).stem

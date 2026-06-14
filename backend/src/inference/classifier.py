@@ -19,6 +19,10 @@ import config
 logger = logging.getLogger("berth.classifier")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
+# Keep torch single-threaded per op so several concurrent inference workers can't
+# each fan out to every core and starve the API event loop. See main.py.
+torch.set_num_threads(1)
+
 _EDGE_CNN_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4s"}
 
 
@@ -101,7 +105,7 @@ class ParkingClassifier:
                     raise FileNotFoundError(
                         f"YOLO26 classify weights not found at '{model_path}'. Train it first."
                     )
-            self._yolo_classify = YOLO(str(model_path))
+            self._yolo_classify = YOLO(str(model_path), task="classify")
             self._loaded = True
             logger.info(f"✅ Loaded YOLO26 classify model on {self.device}")
         except Exception as e:
@@ -121,7 +125,7 @@ class ParkingClassifier:
                     raise FileNotFoundError(
                         f"YOLO26 detect weights not found at '{model_path}'. Train it first."
                     )
-            self._yolo_detect = YOLO(str(model_path))
+            self._yolo_detect = YOLO(str(model_path), task="detect")
             self._loaded = True
             logger.info(f"✅ Loaded YOLO26 detect model on {self.device}")
         except Exception as e:
@@ -209,10 +213,10 @@ class ParkingClassifier:
                     for _ in images]
 
         if getattr(self, "_yolo_classify", None) is not None:
-            pil_images = [self._to_pil(img) for img in images]
-            with self._infer_lock:
-                results = self._yolo_classify.predict(pil_images, verbose=False)
-            return [self._yolo_result_to_dict(r) for r in results]
+            # NCNN backend can't batch a list of crops — Ultralytics throws
+            # "list index out of range" per frame. Loop one image at a time
+            # through the single-image path instead.
+            return [self.predict(img) for img in images]
 
         if getattr(self, "_yolo_detect", None) is not None:
             pil_images = [self._to_pil(img) for img in images]

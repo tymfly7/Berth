@@ -263,11 +263,15 @@ backend/spots_config.json
 #vscode settings
 .vscode/
 
-#roi config
-roi_configs/
+# ROI runtime data — JSON configs and snapshots stay off git (mounted at runtime)
+backend/configs/roi/*.json
+backend/configs/roi/*.jpg
 
-#cameras runtime state
-backend/cameras.json
+# Edge NCNN model exports — large binaries, baked into Docker image at build time
+backend/edge_models/
+
+#cameras runtime state — created on first run, persisted in a named volume
+backend/configs/cameras.json
 
 #docker images
 *.tar.gz

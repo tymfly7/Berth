@@ -44,7 +44,7 @@ class EdgeClassifier:
     # ── Loading ───────────────────────────────────────────────────────────────
 
     def load(self):
-        model_dir  = config.MODEL_DIR / f"edge_{self.model_name}_ncnn_model"
+        model_dir  = config.EDGE_MODEL_DIR / f"edge_{self.model_name}_ncnn_model"
         param_path = model_dir / "model.ncnn.param"
         bin_path   = model_dir / "model.ncnn.bin"
 
@@ -56,6 +56,10 @@ class EdgeClassifier:
             return
         try:
             net = ncnn.Net()
+            # One thread per inference: several pool workers run NCNN concurrently,
+            # so per-net multithreading would oversubscribe the few edge cores and
+            # starve the API loop. See main.py thread-budgeting note.
+            net.opt.num_threads = 1
             net.load_param(str(param_path))
             net.load_model(str(bin_path))
             self._net = net
@@ -85,7 +89,9 @@ class EdgeClassifier:
         )
         arr = np.array(pil, dtype=np.float32) / 255.0
         arr = (arr - _MEAN) / _STD
-        return arr.transpose(2, 0, 1).astype(np.float32)  # CHW float32
+        # ascontiguousarray is required: transpose returns a non-contiguous view,
+        # and ncnn.Mat reads it with scrambled strides → corrupted input.
+        return np.ascontiguousarray(arr.transpose(2, 0, 1), dtype=np.float32)  # CHW float32
 
     # ── Inference ─────────────────────────────────────────────────────────────
 

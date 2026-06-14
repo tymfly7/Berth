@@ -66,10 +66,9 @@ def patch_get_processor(mock_processor):
 
 @pytest.fixture(autouse=True)
 def patch_roi_dir(tmp_path, monkeypatch):
-    import src.roi.roi_store as roi_module
     roi_dir = tmp_path / "roi_configs"
     roi_dir.mkdir()
-    monkeypatch.setattr(roi_module, "_ROI_DIR", roi_dir)
+    monkeypatch.setattr(config, "ROI_CONFIG_DIR", roi_dir)
 
 
 @pytest.fixture(autouse=True)

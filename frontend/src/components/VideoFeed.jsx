@@ -89,7 +89,6 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
   const [proposals, setProposals]   = useState([])
   const [proposing, setProposing]   = useState(false)
   const [editBg, setEditBg]         = useState(null)
-  const editWsRef                   = useRef(null)
   const skipSnapshotUpload          = useRef(false)
 
   const activeCams = cameras.filter(c => c.active)
@@ -103,39 +102,29 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
 
   // Reload ROIs whenever the target camera changes.
   useEffect(() => {
-    if (!cameraId || !apiBase) { setRois([]); return }
+    if (!cameraId || apiBase == null) { setRois([]); return }
     apiFetch(`${apiBase}/api/roi/${cameraId}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setRois(Array.isArray(data) ? data : []))
       .catch(() => {})
   }, [cameraId, apiBase])
 
-  useEffect(() => () => { editWsRef.current?.close() }, [])
-
-  // Capture one live frame from camId to use as the ROI editor background.
+  // Grab one live frame from camId to use as the ROI editor background. Uses a
+  // single cheap HTTP request against the camera's already-running processor
+  // instead of opening a new WebSocket stream (which a loaded edge device may be
+  // too saturated to handshake).
   const captureEditFrame = useCallback((camId) => {
-    if (!camId || !apiBase) return
-    editWsRef.current?.close()
-    const apiKey = import.meta.env.VITE_API_KEY ?? ''
-    const wsToken = apiKey ? `?token=${apiKey}` : ''
-    const ws = new WebSocket(
-      WS_BASE + `/ws/cameras/${camId}${wsToken}`
-    )
-    editWsRef.current = ws
-    ws.onmessage = (e) => {
-      // Use the first binary JPEG frame as the editor background.
-      if (typeof e.data !== 'string') {
-        setEditBg(URL.createObjectURL(e.data))
-        ws.close()
-      }
-    }
-    ws.onerror = () => ws.close()
+    if (!camId || apiBase == null) return
+    apiFetch(`${apiBase}/api/cameras/${camId}/frame`)
+      .then(r => r.ok ? r.blob() : null)
+      .then(blob => { if (blob) setEditBg(URL.createObjectURL(blob)) })
+      .catch(() => { /* no live frame available */ })
   }, [apiBase])
 
   // Upload live-captured frames as the snapshot. Skipped when editBg was loaded
   // from the server (no point re-uploading what we just downloaded).
   useEffect(() => {
-    if (!editBg || !cameraId || !apiBase) return
+    if (!editBg || !cameraId || apiBase == null) return
     if (skipSnapshotUpload.current) { skipSnapshotUpload.current = false; return }
     apiFetch(editBg)
       .then(r => r.blob())

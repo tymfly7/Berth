@@ -81,6 +81,8 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
     )
   }
 
+  const isEdge = modelInfo.deployment_profile === 'edge'
+
   const models = [
     { name: 'cnn_scratch',     label: 'CNN Scratch',      available: modelInfo.available_models?.cnn_scratch     },
     { name: 'resnet50',        label: 'ResNet-50',        available: modelInfo.available_models?.resnet50        },
@@ -147,12 +149,14 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
     <div style={style.container}>
       <div className="section-title">Model Info</div>
 
-      <div style={{ ...style.modelRow, cursor: 'default' }}>
-        <span className="text-muted">Dataset Ready</span>
-        <span className={`badge ${modelInfo.dataset_ready ? 'badge-vacant' : 'badge-occupied'}`}>
-          {modelInfo.dataset_ready ? `Yes (${modelInfo.dataset_count} images)` : 'No'}
-        </span>
-      </div>
+      {!isEdge && (
+        <div style={{ ...style.modelRow, cursor: 'default' }}>
+          <span className="text-muted">Dataset Ready</span>
+          <span className={`badge ${modelInfo.dataset_ready ? 'badge-vacant' : 'badge-occupied'}`}>
+            {modelInfo.dataset_ready ? `Yes (${modelInfo.dataset_count} images)` : 'No'}
+          </span>
+        </div>
+      )}
 
       {/* Per-model rows */}
       {models.map((m) => {
@@ -189,7 +193,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                   className={`badge ${m.available ? 'badge-vacant' : 'badge-occupied'}`}
                   style={{ fontSize: '0.65rem', padding: '1px 6px' }}
                 >
-                  {m.available ? 'Trained' : 'Not trained'}
+                  {m.available ? (isEdge ? 'Deployed' : 'Trained') : (isEdge ? 'Not deployed' : 'Not trained')}
                 </span>
                 {hasDetails && (
                   <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', lineHeight: 1 }}>
@@ -231,26 +235,28 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
       })}
 
       {/* ── Evaluate All + Excel ────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
-        {hasComparison && (
+      {!isEdge && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
+          {hasComparison && (
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+              onClick={handleDownloadExcel}
+              title="Download results as Excel"
+            >
+              Excel
+            </button>
+          )}
           <button
-            className="btn btn-ghost btn-sm"
+            className="btn btn-ghost-blue btn-sm"
             style={{ fontSize: '0.72rem', padding: '3px 8px' }}
-            onClick={handleDownloadExcel}
-            title="Download results as Excel"
+            disabled={isEvaluating}
+            onClick={handleEvaluateAll}
           >
-            Excel
+            {isEvaluating ? 'Evaluating…' : 'Evaluate All'}
           </button>
-        )}
-        <button
-          className="btn btn-ghost-blue btn-sm"
-          style={{ fontSize: '0.72rem', padding: '3px 8px' }}
-          disabled={isEvaluating}
-          onClick={handleEvaluateAll}
-        >
-          {isEvaluating ? 'Evaluating…' : 'Evaluate All'}
-        </button>
-      </div>
+        </div>
+      )}
 
       {/* Evaluation progress */}
       {evalStatus && (

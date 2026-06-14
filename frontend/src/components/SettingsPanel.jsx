@@ -111,7 +111,7 @@ function SubSection({ title, children, defaultOpen = true }) {
   )
 }
 
-export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchModelInfo, onCamerasChange }) {
+export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchModelInfo, setActiveModel, onCamerasChange }) {
   const [open, setOpen] = useState(true)
 
   return (
@@ -130,11 +130,15 @@ export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchMode
           <div style={dividerStyle} />
 
           <SubSection title="Controls">
-            <ControlPanel apiAction={apiAction} apiBase={apiBase} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} />
+            <ControlPanel apiAction={apiAction} apiBase={apiBase} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} setActiveModel={setActiveModel} />
             <div style={{ height: 1, background: 'var(--border-color)', margin: '16px 0' }} />
             <AnomalyPanel apiBase={apiBase} />
-            <div style={{ height: 1, background: 'var(--border-color)', margin: '16px 0' }} />
-            <OccupancyPanel apiBase={apiBase} />
+            {modelInfo?.active_model?.startsWith('yolo') && (
+              <>
+                <div style={{ height: 1, background: 'var(--border-color)', margin: '16px 0' }} />
+                <OccupancyPanel apiBase={apiBase} />
+              </>
+            )}
           </SubSection>
 
           <div style={dividerStyle} />

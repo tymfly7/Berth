@@ -79,7 +79,9 @@ export default function HeatmapView({ cameras = [] }) {
         .catch(() => {})
     }
     load()
-    const t = setInterval(load, 10000)
+    // Heatmap changes slowly and the endpoint is comparatively heavy; poll at 30s
+    // and skip while the tab is hidden.
+    const t = setInterval(() => { if (!document.hidden) load() }, 30000)
     return () => clearInterval(t)
   }, [cam?.id])
 

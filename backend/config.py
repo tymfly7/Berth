@@ -19,7 +19,11 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = BASE_DIR / "uploads"
 MODEL_DIR = BASE_DIR / "models"
+EDGE_MODEL_DIR = BASE_DIR / "edge_models"   # NCNN exports for edge deployment
 OUTPUT_DIR = BASE_DIR / "outputs"
+CONFIG_DIR = BASE_DIR / "configs"           # runtime config (ROIs + camera registry)
+ROI_CONFIG_DIR = Path(os.getenv("BERTH_ROI_DIR", str(CONFIG_DIR / "roi")))
+CAMERAS_FILE = Path(os.getenv("BERTH_CAMERAS_FILE", str(CONFIG_DIR / "cameras.json")))
 DB_PATH = Path(os.getenv("BERTH_DB_PATH", str(BASE_DIR / "berth.db")))
 
 # PKLot dataset root — set this to your downloaded PKLot path
@@ -27,7 +31,7 @@ DB_PATH = Path(os.getenv("BERTH_DB_PATH", str(BASE_DIR / "berth.db")))
 PKLOT_ROOT = os.getenv("PKLOT_ROOT", "")
 
 # Ensure directories exist
-for d in (DATA_DIR, UPLOAD_DIR, MODEL_DIR, OUTPUT_DIR):
+for d in (DATA_DIR, UPLOAD_DIR, MODEL_DIR, EDGE_MODEL_DIR, CONFIG_DIR, ROI_CONFIG_DIR, OUTPUT_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
@@ -70,8 +74,8 @@ RESNET50_PATH         = MODEL_DIR / "best_resnet50.pth"
 MOBILENETV4_PATH      = MODEL_DIR / "best_mobilenetv4.pth"
 YOLO26_CLASSIFY_PATH      = MODEL_DIR / "best_yolo26_classify.pt"
 YOLO26_DETECT_PATH        = MODEL_DIR / "best_yolo26_detect.pt"
-YOLO26_CLASSIFY_NCNN_PATH = MODEL_DIR / "best_yolo26_classify_ncnn_model"
-YOLO26_DETECT_NCNN_PATH   = MODEL_DIR / "best_yolo26_detect_ncnn_model"
+YOLO26_CLASSIFY_NCNN_PATH = EDGE_MODEL_DIR / "best_yolo26_classify_ncnn_model"
+YOLO26_DETECT_NCNN_PATH   = EDGE_MODEL_DIR / "best_yolo26_detect_ncnn_model"
 YOLO_DATASET_DIR         = DATA_DIR  / "yolo_detect_dataset"
 YOLO_GOPRO_DIR           = DATA_DIR  / "yolo_data" / "parking_rois_gopro"
 CLASSIFY_YOLO_DATA_DIR   = BASE_DIR  / "classify_yolo_data"
@@ -136,10 +140,19 @@ EDGE_HUB_URL = os.getenv("BERTH_EDGE_HUB_URL", "")
 # Inference / streaming
 # ---------------------------------------------------------------------------
 # Edge profile uses lower resolution + FPS to stay within ARM CPU budget.
-FRAME_WIDTH   = 640  if DEPLOYMENT_PROFILE == "edge" else 1280
-FRAME_HEIGHT  = 480  if DEPLOYMENT_PROFILE == "edge" else 720
-STREAM_FPS    = 6    if DEPLOYMENT_PROFILE == "edge" else 20
-JPEG_QUALITY  = 80   # monitoring stream — 80 ~halves payload vs 92 with little visible loss
+FRAME_WIDTH   = 960  if DEPLOYMENT_PROFILE == "edge" else 1280
+FRAME_HEIGHT  = 540  if DEPLOYMENT_PROFILE == "edge" else 720
+STREAM_FPS    = 10   if DEPLOYMENT_PROFILE == "edge" else 20
+JPEG_QUALITY  = 90   if DEPLOYMENT_PROFILE == "edge" else 80  # edge raised for sharpness; server keeps bandwidth-optimised 80
+
+# Inference rate, decoupled from STREAM_FPS. Parking occupancy changes slowly, so
+# running the model on every decoded frame wastes CPU; the display loop reuses the
+# last result between inferences. Lower on edge to keep ARM cores free for the API.
+INFER_FPS = float(os.getenv("BERTH_INFER_FPS", "3" if DEPLOYMENT_PROFILE == "edge" else "8"))
+
+# Cap on concurrent active cameras. Each active camera runs its own decode +
+# inference loop; too many saturate a few-core edge box and starve the API.
+MAX_ACTIVE_CAMERAS = int(os.getenv("BERTH_MAX_ACTIVE_CAMERAS", "2" if DEPLOYMENT_PROFILE == "edge" else "8"))
 
 # Live YouTube HLS URLs expire; cache resolved stream URLs for this long.
 YOUTUBE_STREAM_CACHE_TTL = int(os.getenv("BERTH_YT_CACHE_TTL", "240"))  # seconds

@@ -62,9 +62,14 @@ def export_yolo_model(model_name: str, weights_path: Path) -> Path:
         from ultralytics import YOLO
         model = YOLO(str(weights_path))
         out = model.export(format="ncnn")
-        out_path = Path(out) if out else Path(str(weights_path).replace(".pt", "_ncnn_model"))
-        logger.info(f"YOLO NCNN export: {out_path}")
-        return out_path
+        export_path = Path(out) if out else Path(str(weights_path).replace(".pt", "_ncnn_model"))
+        dest = config.EDGE_MODEL_DIR / export_path.name
+        if export_path.resolve() != dest.resolve():
+            if dest.exists():
+                shutil.rmtree(dest)
+            shutil.move(str(export_path), str(dest))
+        logger.info(f"YOLO NCNN export: {dest}")
+        return dest
 
     except Exception as exc:
         logger.warning(f"YOLO NCNN export failed for {weights_path}: {exc}")
@@ -91,7 +96,7 @@ def _export_ncnn(model_name: str, weights_path: Path) -> Path:
         return None
 
     model = _load_model_for_export(model_name, weights_path)
-    out_dir = config.MODEL_DIR / f"edge_{model_name}_ncnn_model"
+    out_dir = config.EDGE_MODEL_DIR / f"edge_{model_name}_ncnn_model"
     out_dir.mkdir(exist_ok=True)
 
     tmp_pt = out_dir / "model.pt"

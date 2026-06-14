@@ -54,7 +54,7 @@ function aggregateByDay(data, days = 7) {
 
 function aggregateByMinutes(data, bucketMin) {
   // The live/day tabs are raw 60s snapshots (up to ~1440/day) — far too jagged as
-  // a line. Average into fixed time buckets (live = 15 min, day = 60 min). Buckets
+  // a line. Average into fixed time buckets (live = 1 min, day = 5 min). Buckets
   // are epoch-based so they align regardless of timezone; timestamps stay ISO/UTC
   // to match the rest of the chart's HH:MM labelling.
   const bucketMs = bucketMin * 60_000
@@ -285,8 +285,8 @@ export default function AnalyticsChart({ connected = false, cameras = [] }) {
     const now = new Date().toISOString()
     const zeros = [{ timestamp: now, available: 0, occupied: 0 }, { timestamp: now, available: 0, occupied: 0 }]
     let data = activeData.length > 0 ? activeData : zeros
-    if (tab === 'live') data = aggregateByMinutes(data, 15)
-    if (tab === 'day')  data = aggregateByMinutes(data, 15)
+    if (tab === 'live') data = aggregateByMinutes(data, 1)
+    if (tab === 'day')  data = aggregateByMinutes(data, 5)
     if (tab === 'week') data = aggregateByDay(data, 7)
     if (tab === 'month') data = aggregateByMonth(data)
     data = data.map(d => ({ ...d, available: Math.round(d.available || 0), occupied: Math.round(d.occupied || 0) }))
@@ -397,11 +397,11 @@ export default function AnalyticsChart({ connected = false, cameras = [] }) {
         </div>
       )}
 
-      {loading ? (
+      {loading && trendData === null ? (
         <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '40px 0' }}>
           Loading...
         </div>
-      ) : fetchError ? (
+      ) : fetchError && trendData === null ? (
         <div className="text-sm text-muted" style={{ textAlign: 'center', padding: '40px 0' }}>
           Could not load trend data. Retrying…
         </div>

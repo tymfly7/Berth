@@ -1,6 +1,11 @@
 backend/venv/
 backend/data/
 backend/outputs/
+backend/models/
+# Runtime config — created on first run / persisted in a named volume, never baked in
+backend/configs/roi/*.json
+backend/configs/roi/*.jpg
+backend/configs/cameras.json
 backend/__pycache__/
 backend/**/__pycache__/
 backend/**/*.pyc

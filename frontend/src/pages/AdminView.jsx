@@ -68,6 +68,12 @@ export default function AdminView() {
     } catch { /* silent */ }
   }, [])
 
+  // Optimistic UI: reflect a model switch immediately, before the activate +
+  // refetch round-trip lands. fetchModelInfo() reconciles with server truth after.
+  const setActiveModelOptimistic = useCallback((model) => {
+    setModelInfo(prev => (prev ? { ...prev, active_model: model } : prev))
+  }, [])
+
   const fetchRoiSlots = useCallback(async (camList) => {
     if (!camList?.length) return
     const results = await Promise.all(
@@ -238,7 +244,7 @@ export default function AdminView() {
         </div>
 
         <div className={`side-column ${menuOpen ? 'side-column--open' : ''}`}>
-          <SettingsPanel apiAction={apiAction} apiBase={API_BASE} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} onCamerasChange={setCameras} />
+          <SettingsPanel apiAction={apiAction} apiBase={API_BASE} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} setActiveModel={setActiveModelOptimistic} onCamerasChange={setCameras} />
         </div>
       </div>
 

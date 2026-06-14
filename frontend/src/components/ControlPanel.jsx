@@ -109,7 +109,7 @@ const style = {
   },
 }
 
-export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModelInfo }) {
+export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModelInfo, setActiveModel }) {
   const [status, setStatus]           = useState('')
   const [resultImage, setResultImage] = useState(null)
   const [resultData, setResultData]   = useState(null)
@@ -253,6 +253,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
 
   const handleActivateLive = () => {
     const label = MODELS.find(m => m.id === liveModel)?.label || liveModel
+    setActiveModel?.(liveModel)   // optimistic — flip YOLO-only panels instantly
     handleAction(`/api/use-model/${liveModel}`, `Activating ${label} on live feeds`)
   }
 

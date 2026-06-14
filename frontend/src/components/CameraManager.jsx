@@ -1,10 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { apiFetch } from '../api'
-import { API_BASE, WS_BASE } from '../config'
+import { API_BASE } from '../config'
 import { createPortal } from 'react-dom'
 import RoiEditor from './RoiEditor'
-
-const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
 
 const s = {
   card: {
@@ -193,7 +191,6 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
   const [roiMsg, setRoiMsg] = useState(null)
   const [proposing, setProposing] = useState(false)
   const [editProposals, setEditProposals] = useState([])
-  const editWsRef = useRef(null)
 
   const fetchCameras = async () => {
     try {
@@ -266,49 +263,41 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
   const openRoiEdit = async (cam) => {
     const cameraId = cam.roi_camera_id || cam.id
 
+    // Open the editor immediately so a slow or missing snapshot never blocks
+    // launch — the background loads in afterwards.
+    setEditRois([])
+    setEditBg(null)
+    setEditProposals([])
+    setRoiEditCam(cam)
+
     const blobToDataUrl = (blob) => new Promise(resolve => {
       const reader = new FileReader()
       reader.onload = e => resolve(e.target.result)
       reader.readAsDataURL(blob)
     })
 
-    // Fetch ROIs and snapshot in parallel
-    const [rois, bg] = await Promise.all([
-      apiFetch(`${API_BASE}/api/roi/${cameraId}`)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => Array.isArray(data) ? data : [])
-        .catch(() => []),
-      apiFetch(`${API_BASE}/api/roi/${cameraId}/snapshot`)
+    apiFetch(`${API_BASE}/api/roi/${cameraId}`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setEditRois(Array.isArray(data) ? data : []))
+      .catch(() => {})
+
+    // Background: saved snapshot first, otherwise grab one live frame over HTTP
+    // from the running processor (no extra WebSocket stream).
+    const snap = await apiFetch(`${API_BASE}/api/roi/${cameraId}/snapshot`)
+      .then(res => res.ok ? res.blob() : null)
+      .then(blob => blob ? blobToDataUrl(blob) : null)
+      .catch(() => null)
+    if (snap) { setEditBg(snap); return }
+
+    if (cam.active) {
+      apiFetch(`${API_BASE}/api/cameras/${cam.id}/frame`)
         .then(res => res.ok ? res.blob() : null)
-        .then(blob => blob ? blobToDataUrl(blob) : null)
-        .catch(() => null),
-    ])
-
-    setEditRois(rois)
-    setEditBg(bg)
-    setEditProposals([])
-    setRoiEditCam(cam)
-
-    // WebSocket fallback only if no snapshot — loads in async after editor is open
-    if (!bg && cam.active) {
-      new Promise(resolve => {
-        const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-        const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cam.id}${wsToken}`)
-        editWsRef.current = ws
-        const timeout = setTimeout(() => { ws.close(); resolve(null) }, 5000)
-        ws.onmessage = (e) => {
-          // First binary JPEG frame becomes the ROI editor background.
-          if (typeof e.data !== 'string') {
-            clearTimeout(timeout); ws.close(); resolve(URL.createObjectURL(e.data))
-          }
-        }
-        ws.onerror = () => { clearTimeout(timeout); resolve(null) }
-      }).then(wsBg => { if (wsBg) setEditBg(wsBg) })
+        .then(blob => { if (blob) setEditBg(URL.createObjectURL(blob)) })
+        .catch(() => {})
     }
   }
 
   const closeRoiEdit = () => {
-    editWsRef.current?.close()
     setRoiEditCam(null)
     setEditBg(null)
     setEditRois([])

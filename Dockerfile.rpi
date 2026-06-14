@@ -38,10 +38,10 @@ RUN pip install --no-cache-dir -r requirements.edge.txt
 COPY backend/ /app/
 COPY --from=frontend-build /app/frontend/dist ./static/
 
-RUN mkdir -p /app/edge_data /app/models
+RUN mkdir -p /app/edge_data /app/configs/roi
 
 ENV BERTH_DEPLOYMENT=edge \
-    BERTH_MODEL=mobilenetv4s \
+    BERTH_MODEL=cnn_scratch \
     BERTH_HOST=0.0.0.0 \
     BERTH_PORT=8000
 

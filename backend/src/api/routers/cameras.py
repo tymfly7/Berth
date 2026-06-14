@@ -5,7 +5,7 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 
 import config
 from src.api.deps import limiter, validate_camera_source, verify_api_key
@@ -116,6 +116,20 @@ def list_cameras():
     return camera_registry.get_all()
 
 
+@router.get("/api/cameras/{camera_id}/frame", dependencies=[Depends(verify_api_key)])
+def get_camera_frame(camera_id: str):
+    """Return the latest in-memory JPEG frame from a camera's running processor.
+    One cheap HTTP grab for the ROI editor background — avoids opening a new
+    WebSocket stream just to capture a single still frame."""
+    proc = camera_registry.get_processor(camera_id)
+    if proc is None:
+        raise HTTPException(404, "Camera is not active")
+    jpeg, _ = proc.get_frame_jpeg_and_seq()
+    if not jpeg:
+        raise HTTPException(404, "No frame available yet")
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
 @router.post("/api/cameras", status_code=201, dependencies=[Depends(verify_api_key)])
 async def add_camera(request: Request):
     body = await request.json()
@@ -181,7 +195,10 @@ def remove_camera(camera_id: str):
 def activate_camera(camera_id: str):
     if camera_registry.get(camera_id) is None:
         raise HTTPException(404, f"Camera '{camera_id}' not found")
-    ok = camera_registry.activate(camera_id, model_name=processor_service.resolve_model_name())
+    try:
+        ok = camera_registry.activate(camera_id, model_name=processor_service.resolve_model_name())
+    except ValueError as e:
+        raise HTTPException(409, str(e))
     if not ok:
         raise HTTPException(500, "Failed to activate camera")
     if processor_service.anomaly_enabled:

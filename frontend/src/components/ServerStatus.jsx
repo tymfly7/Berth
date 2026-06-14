@@ -1,21 +1,31 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { apiFetch } from '../api'
 import { API_BASE } from '../config'
 
 export default function ServerStatus() {
   const [status, setStatus] = useState({ busy: false, operations: [] })
+  const busyRef = useRef(false)
 
   useEffect(() => {
+    let timer
     const poll = async () => {
-      try {
-        const res = await apiFetch(`${API_BASE}/api/status`)
-        if (res.ok) setStatus(await res.json())
-      } catch { /* silent */ }
+      // Skip while the tab is hidden; nothing is watching the progress bar.
+      if (!document.hidden) {
+        try {
+          const res = await apiFetch(`${API_BASE}/api/status`)
+          if (res.ok) {
+            const data = await res.json()
+            setStatus(data)
+            busyRef.current = data.busy
+          }
+        } catch { /* silent */ }
+      }
+      // Poll quickly only while an operation runs (responsive progress); when the
+      // backend is idle, check rarely so we don't hammer a constrained edge box.
+      timer = setTimeout(poll, busyRef.current ? 2000 : 15000)
     }
-
     poll()
-    const id = setInterval(poll, 2000)
-    return () => clearInterval(id)
+    return () => clearTimeout(timer)
   }, [])
 
   const { busy, operations } = status
