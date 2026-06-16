@@ -18,8 +18,9 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
-ARG VITE_API_KEY="d2eaa86be9f8d9e618b93139246648d88e86096f00be4eea3b184b5a43e9ac09"
-ENV VITE_API_KEY=$VITE_API_KEY
+# No VITE_API_KEY: the browser authenticates with the admin session token from
+# PIN login, never a baked-in static key. Backend BERTH_API_KEY is a runtime
+# (compose) env, server-side only — see docker-compose.rpi.yml.
 RUN npm run build
 
 # ── Stage 2: ARM64 backend + static frontend ─────────────

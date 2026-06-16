@@ -1,13 +1,11 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { apiFetch } from '../api'
-import { API_BASE, WS_BASE } from '../config'
+import { API_BASE } from '../config'
 import { Link } from 'react-router-dom'
 import MetricCards from '../components/MetricCards'
 import LotMap from '../components/LotMap'
 import AnalyticsChart from '../components/AnalyticsChart'
 import { roiToSlot } from '../utils/roiUtils'
-
-const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
 
 export default function PublicView() {
   const [metrics, setMetrics] = useState({
@@ -15,13 +13,11 @@ export default function PublicView() {
     occupancy_percent: 0, avg_confidence: 0, slots: [],
   })
   const [time, setTime] = useState(new Date())
-  const [, setHistory] = useState([])
   const [allCameraSlots, setAllCameraSlots] = useState([])
   const [lotMapIdx, setLotMapIdx] = useState(0)
   const [liveSlotsMap, setLiveSlotsMap] = useState({})
   const [liveCamMetrics, setLiveCamMetrics] = useState({})
   const [lastUpdate, setLastUpdate] = useState(null)
-  const camWsRefs = useRef({})
 
   const displayMetrics = useMemo(() => {
     const entries = Object.values(liveCamMetrics)
@@ -47,117 +43,53 @@ export default function PublicView() {
       } catch { /* silent */ }
     }
 
-    const fetchHistory = async () => {
-      try {
-        const res = await apiFetch(`${API_BASE}/api/history`)
-        if (res.ok) setHistory(await res.json())
-      } catch { /* silent */ }
-    }
-
     fetchMetrics()
-    fetchHistory()
     const pollInterval = setInterval(fetchMetrics, 30000)
-    const historyInterval = setInterval(fetchHistory, 60000)
     const clockInterval = setInterval(() => setTime(new Date()), 1000)
 
     return () => {
       clearInterval(pollInterval)
-      clearInterval(historyInterval)
       clearInterval(clockInterval)
     }
   }, [])
 
   useEffect(() => {
-    const fetchCameraSlots = async () => {
+    // Single unauthenticated poll: slot geometry + live occupancy for every
+    // active lot, replacing the old /api/cameras + /api/roi calls and the
+    // per-camera WebSocket (the public page needs no live frames).
+    const fetchLots = async () => {
       try {
-        const res = await apiFetch(`${API_BASE}/api/cameras`)
+        const res = await apiFetch(`${API_BASE}/api/public/lots`)
         if (!res.ok) return
-        const cams = await res.json()
-        const results = await Promise.all(
-          cams.map(async cam => {
-            try {
-              const cameraId = cam.roi_camera_id || cam.id
-              const r = await apiFetch(`${API_BASE}/api/roi/${cameraId}`)
-              if (!r.ok) return null
-              const rois = await r.json()
-              const slots = Array.isArray(rois)
-                ? rois.filter(roi => roi.polygon?.length >= 3).map(roiToSlot)
-                : []
-              return slots.length > 0 ? { cameraId: cam.id, name: cam.name, slots } : null
-            } catch { return null }
-          })
-        )
-        setAllCameraSlots(results.filter(Boolean))
+        const lots = await res.json()
+        const cams = []
+        const metricsById = {}
+        const slotsById = {}
+        lots.forEach(l => {
+          const slots = Array.isArray(l.rois)
+            ? l.rois.filter(roi => roi.polygon?.length >= 3).map(roiToSlot)
+            : []
+          if (slots.length === 0) return
+          cams.push({ cameraId: l.cameraId, name: l.name, slots })
+          if (l.metrics) {
+            metricsById[l.cameraId] = l.metrics
+            if (Array.isArray(l.metrics.slots)) slotsById[l.cameraId] = l.metrics.slots
+          }
+        })
+        setAllCameraSlots(cams)
+        setLiveCamMetrics(metricsById)
+        setLiveSlotsMap(slotsById)
+        if (Object.keys(metricsById).length) setLastUpdate(Date.now())
       } catch { /* silent */ }
     }
-    fetchCameraSlots()
-    const interval = setInterval(fetchCameraSlots, 30000)
+    fetchLots()
+    const interval = setInterval(fetchLots, 5000)
     return () => clearInterval(interval)
   }, [])
 
   useEffect(() => {
     setLotMapIdx(i => Math.min(i, Math.max(0, allCameraSlots.length - 1)))
   }, [allCameraSlots.length])
-
-  useEffect(() => {
-    const activeIds = new Set(allCameraSlots.map(c => c.cameraId))
-
-    Object.entries(camWsRefs.current).forEach(([id, ws]) => {
-      if (!activeIds.has(id)) { ws.close(); delete camWsRefs.current[id] }
-    })
-
-    // Drop stale metrics/slots for cameras that are gone, so the aggregate
-    // stops summing ghost lots (metric hallucination).
-    const pruneStale = prev => {
-      const next = Object.fromEntries(Object.entries(prev).filter(([id]) => activeIds.has(id)))
-      return Object.keys(next).length === Object.keys(prev).length ? prev : next
-    }
-    setLiveCamMetrics(pruneStale)
-    setLiveSlotsMap(pruneStale)
-
-    allCameraSlots.forEach(cam => {
-      if (camWsRefs.current[cam.cameraId]) return
-
-      const connect = () => {
-        const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-        const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cam.cameraId}${wsToken}`)
-        camWsRefs.current[cam.cameraId] = ws
-        ws.onmessage = (e) => {
-          // Public view only consumes metrics — skip binary frame messages.
-          if (typeof e.data !== 'string') return
-          try {
-            const d = JSON.parse(e.data)
-            if (d.type === 'feed_unavailable') {
-              // Feed stopped/deactivated — drop its metrics so it stops
-              // counting toward the aggregate.
-              setLiveCamMetrics(({ [cam.cameraId]: _drop, ...rest }) => rest)
-              setLiveSlotsMap(({ [cam.cameraId]: _drop, ...rest }) => rest)
-              return
-            }
-            if (d.metrics) {
-              setLastUpdate(Date.now())
-              setLiveCamMetrics(prev => ({ ...prev, [cam.cameraId]: d.metrics }))
-              if (Array.isArray(d.metrics.slots))
-                setLiveSlotsMap(prev => ({ ...prev, [cam.cameraId]: d.metrics.slots }))
-            }
-          } catch { /* ignore */ }
-        }
-        ws.onerror = () => ws.close()
-        ws.onclose = () => {
-          delete camWsRefs.current[cam.cameraId]
-          setTimeout(() => {
-            if (activeIds.has(cam.cameraId) && !camWsRefs.current[cam.cameraId]) connect()
-          }, 3000)
-        }
-      }
-      connect()
-    })
-
-    return () => {
-      Object.values(camWsRefs.current).forEach(ws => ws.close())
-      camWsRefs.current = {}
-    }
-  }, [allCameraSlots])
 
   const availableColor =
     displayMetrics.available === 0
@@ -320,7 +252,7 @@ export default function PublicView() {
 
       {/* Trends chart */}
       <div style={{ width: '100%', maxWidth: 800, marginBottom: 32 }}>
-        <AnalyticsChart cameras={allCameraSlots.map(c => ({ id: c.cameraId, name: c.name }))} />
+        <AnalyticsChart cameras={allCameraSlots.map(c => ({ id: c.cameraId, name: c.name }))} trendsUrl="/api/public/trends" />
       </div>
 
       {/* Admin link — bottom-right corner */}

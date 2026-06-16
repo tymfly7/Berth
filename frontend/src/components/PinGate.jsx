@@ -2,6 +2,7 @@
 // Bot protection here (honeypot, math challenge, attempt lockout) only raises the bar
 // against naive automated guessing; it is not real security since the check runs client-side.
 import { useState, useEffect } from 'react'
+import { API_BASE } from '../config'
 
 const MAX_ATTEMPTS = 5
 const LOCKOUT_MS = 30_000
@@ -40,6 +41,7 @@ export default function PinGate({ children }) {
   const [authed, setAuthed] = useState(sessionStorage.getItem('admin_authed') === 'true')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [company, setCompany] = useState('') // honeypot
   const [challenge, setChallenge] = useState(newChallenge)
   const [answer, setAnswer] = useState('')
@@ -106,7 +108,7 @@ export default function PinGate({ children }) {
     // Password is validated server-side; a successful login returns a signed,
     // short-lived token used for subsequent admin requests.
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password }),
@@ -188,16 +190,38 @@ export default function PinGate({ children }) {
           <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Password
           </label>
-          <input
-            type="password"
-            value={password}
-            onChange={e => { setPassword(e.target.value); clearError() }}
-            onKeyDown={handleKey}
-            placeholder="••••••••"
-            disabled={locked}
-            autoComplete="current-password"
-            style={inputStyle}
-          />
+          <div style={{ position: 'relative' }}>
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={password}
+              onChange={e => { setPassword(e.target.value); clearError() }}
+              onKeyDown={handleKey}
+              placeholder="••••••••"
+              disabled={locked}
+              autoComplete="current-password"
+              style={{ ...inputStyle, paddingRight: 56 }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(s => !s)}
+              tabIndex={-1}
+              style={{
+                position: 'absolute',
+                right: 10,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: 'var(--text-secondary)',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                padding: 4,
+              }}
+            >
+              {showPassword ? 'Hide' : 'Show'}
+            </button>
+          </div>
         </div>
 
         {/* Honeypot — hidden from real users; bots that auto-fill forms will trip it. */}

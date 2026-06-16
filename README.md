@@ -717,7 +717,6 @@ School Project/
 ├── Dockerfile                           # Server image (frontend build + Python backend)
 ├── Dockerfile.rpi                       # ARM64 / Raspberry Pi 5 edge image
 ├── docker-compose.yml                   # Server stack
-├── docker-compose.edge.yml              # Edge node
 ├── docker-compose.rpi.yml               # Raspberry Pi 5 edge node
 └── README.md
 ```
@@ -836,9 +835,6 @@ app is reachable on a single origin/port.
 ### Edge / Raspberry Pi 5
 
 ```bash
-# Generic edge node
-docker-compose -f docker-compose.edge.yml up -d
-
 # Raspberry Pi 5 (ARM64) — uses Dockerfile.rpi, NCNN models, edge profile
 docker-compose -f docker-compose.rpi.yml up -d
 ```

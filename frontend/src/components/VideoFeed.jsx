@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { apiFetch } from '../api'
+import { apiFetch, wsAuthParam } from '../api'
 import { WS_BASE } from '../config'
 import RoiEditor from './RoiEditor'
 import MultiCameraGrid from './MultiCameraGrid'
@@ -27,10 +27,8 @@ function PickerCell({ cameraId, name, apiBase, onClick }) {
   const wsRef = useRef(null)
 
   useEffect(() => {
-    const apiKey = import.meta.env.VITE_API_KEY ?? ''
-    const wsToken = apiKey ? `?token=${apiKey}` : ''
     const ws = new WebSocket(
-      WS_BASE + `/ws/cameras/${cameraId}${wsToken}`
+      WS_BASE + `/ws/cameras/${cameraId}${wsAuthParam()}`
     )
     wsRef.current = ws
     ws.onmessage = (e) => {

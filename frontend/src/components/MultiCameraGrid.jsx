@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, memo } from 'react'
 import CameraFeedCell from './CameraFeedCell'
 import { WS_BASE } from '../config'
-const _API_KEY = import.meta.env.VITE_API_KEY ?? ''
+import { wsAuthParam } from '../api'
 
 // Owns one camera's WebSocket + state. Re-renders only when its own data changes.
 const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onUnavailable, onClick, mini }) {
@@ -22,8 +22,7 @@ const CameraFeed = memo(function CameraFeed({ cam, onMetrics, onUnavailable, onC
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
-    const wsToken = _API_KEY ? `?token=${_API_KEY}` : ''
-    const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cam.id}${wsToken}`)
+    const ws = new WebSocket(`${WS_BASE}/ws/cameras/${cam.id}${wsAuthParam()}`)
     wsRef.current = ws
 
     ws.onopen = () => { stopReconnect.current = false; setConnected(true); setUnavailable(null) }

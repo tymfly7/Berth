@@ -238,7 +238,7 @@ function drawChart(canvas, data, tab = 'live') {
   ctx.fillText('Occupied', pad.left + 106, legendY)
 }
 
-export default function AnalyticsChart({ connected = false, cameras = [] }) {
+export default function AnalyticsChart({ connected = false, cameras = [], trendsUrl = '/api/trends' }) {
   const canvasRef = useRef(null)
   const chartDataRef = useRef({ data: [], tab: 'live' })
   const [tab, setTab] = useState('live')
@@ -260,7 +260,7 @@ export default function AnalyticsChart({ connected = false, cameras = [] }) {
     setFetchError(false)
     try {
       const camParam = camId ? `&camera_id=${camId}` : ''
-      const res = await apiFetch(`${API_BASE}/api/trends?range=${range}${camParam}`)
+      const res = await apiFetch(`${API_BASE}${trendsUrl}?range=${range}${camParam}`)
       if (res.ok) {
         setTrendData(await res.json())
       } else {
@@ -270,7 +270,7 @@ export default function AnalyticsChart({ connected = false, cameras = [] }) {
       setFetchError(true)
     }
     setLoading(false)
-  }, [])
+  }, [trendsUrl])
 
   useEffect(() => {
     const range = tab === 'live' ? 'today' : tab

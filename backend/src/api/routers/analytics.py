@@ -9,6 +9,7 @@ from src.api.deps import verify_api_key
 from src.api.processor_service import processor_service
 from src.cameras.camera_registry import camera_registry
 from src.db import database as db
+from src.roi.roi_store import RoiStore
 
 logger = logging.getLogger("berth.analytics")
 router = APIRouter()
@@ -44,6 +45,33 @@ def get_public_metrics():
         "anomaly_enabled": any(m.get("anomaly_enabled") for m in metrics),
         "slots": [s for m in metrics for s in m.get("slots", [])],
     }
+
+
+@router.get("/api/public/lots")
+def get_public_lots():
+    """Unauthenticated per-lot view for the public page: slot geometry plus
+    current occupancy for each active camera. Only non-sensitive fields are
+    exposed (no camera source / credentials)."""
+    out = []
+    for cam in camera_registry.get_all():
+        if not cam.get("active"):
+            continue
+        proc = camera_registry.get_processor(cam["id"])
+        roi_cam_id = cam.get("roi_camera_id") or cam["id"]
+        out.append({
+            "cameraId": cam["id"],
+            "name": cam.get("name"),
+            "rois": RoiStore.get_rois(roi_cam_id),
+            "metrics": proc.get_metrics() if proc else None,
+        })
+    return out
+
+
+@router.get("/api/public/trends")
+def get_public_trends(range: str = "day", camera_id: str = None):
+    if range not in ("today", "day", "week", "month"):
+        raise HTTPException(400, "range must be today, day, week, or month")
+    return db.query_trends(range, camera_id)
 
 
 # ── Metrics / Heatmap / History ──────────────────────────

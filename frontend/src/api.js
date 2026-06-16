@@ -1,6 +1,11 @@
-const _KEY = import.meta.env.VITE_API_KEY ?? ''
-
 const DEFAULT_TIMEOUT_MS = 15000
+
+// WebSockets can't send headers, so the admin session token rides as a query
+// param instead. Empty when not logged in — public pages open no authed sockets.
+export const wsAuthParam = () => {
+  const token = sessionStorage.getItem('admin_token')
+  return token ? `?token=${encodeURIComponent(token)}` : ''
+}
 
 export const apiFetch = (url, opts = {}) => {
   const token = sessionStorage.getItem('admin_token')
@@ -8,7 +13,6 @@ export const apiFetch = (url, opts = {}) => {
   const headers = {
     ...opts.headers,
     ...(token && { Authorization: `Bearer ${token}` }),
-    ...(_KEY && { 'X-API-Key': _KEY }),
   }
 
   // Abort hung requests so a saturated backend yields a fast failure instead of a

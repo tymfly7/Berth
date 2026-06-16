@@ -49,7 +49,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 import config
-from src.api.deps import limiter
+from src.api.deps import limiter, verify_token
 from src.api.processor_service import processor_service
 from src.api.routers import analytics, auth, cameras, inference, roi, training
 from src.cameras.camera_registry import camera_registry
@@ -195,9 +195,12 @@ def get_status():
 def _ws_token_valid(token: str) -> bool:
     """Return True if the token is acceptable for WebSocket auth.
     When API_KEY is unset the check is skipped (open deployment).
-    Set VITE_API_KEY in the frontend .env to pass the token automatically.
+    The browser passes the admin session token (from PIN login); the static
+    service key is still accepted for any server-side client.
     """
     if not API_KEY:
+        return True
+    if verify_token(token):
         return True
     return hmac.compare_digest(token.encode(), API_KEY.encode())
 
