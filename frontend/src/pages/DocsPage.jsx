@@ -200,6 +200,52 @@ export default function DocsPage() {
         </p>
       </div>
 
+      {/* Project Status */}
+      <section id="status" style={s.card}>
+        <div style={s.sectionNum}>Project Status · June 2026</div>
+        <h2 style={s.sectionTitle}>Where the Project Stands</h2>
+        <p style={s.body}>
+          Berth runs in two deployment modes today:
+        </p>
+        <ul style={{ ...s.steps, listStyleType: 'disc' }}>
+          <li style={s.step}>
+            <span style={s.label}>Server</span> — the full stack: live
+            dashboard, multi-camera inference, training, evaluation, and
+            analytics.
+          </li>
+          <li style={s.step}>
+            <span style={s.label}>Edge</span> (<Code>BERTH_DEPLOYMENT=edge</Code>)
+            — an inference-only node (currently the Raspberry Pi 5 / ARM64). It
+            runs lighter <Code>NCNN</Code> models at reduced resolution and frame
+            rate, and a background sync worker pushes occupancy and alerts to a
+            central hub every 60 seconds, buffering locally if the hub is
+            unreachable.
+          </li>
+        </ul>
+        <p style={{ ...s.body, marginBottom: 8 }}>
+          <span style={s.label}>Edge profile limits</span>
+        </p>
+        <ul style={{ ...s.steps, listStyleType: 'disc' }}>
+          <li style={s.step}>
+            Stream 960×540 @ 10 FPS, inference at 3 FPS (server: 1280×720 @ 20 /
+            8 FPS).
+          </li>
+          <li style={s.step}>
+            Up to <span style={s.label}>2 active cameras</span> (server allows 8).
+          </li>
+          <li style={s.step}>
+            Training and evaluation are disabled — those endpoints return{' '}
+            <Code>403</Code>; use the hub server instead.
+          </li>
+        </ul>
+        <div style={s.callout}>
+          <span style={s.label}>Next phase:</span> extending the edge
+          deployment beyond the Raspberry Pi 5 to lower-power, neural-net-capable
+          devices — starting with the Raspberry Pi Zero 2 W and similar
+          accelerated edge boards (targeted mid-2026).
+        </div>
+      </section>
+
       {/* Table of Contents */}
       <div style={s.toc}>
         <div style={s.tocTitle}>On this page</div>
@@ -239,7 +285,8 @@ export default function DocsPage() {
         </ul>
         <div style={s.callout}>
           <span style={s.label}>Architecture at a glance:</span> Browser
-          connects via WebSocket to the Python backend (port 8000). The backend
+          connects via WebSocket to the Python backend (port 8000 in Docker,
+          8001 for bare-metal runs). The backend
           runs inference on camera frames and pushes metrics back in real time.
           No page refresh is needed.
         </div>
@@ -285,6 +332,12 @@ export default function DocsPage() {
           {['USB', 'RTSP', 'YouTube'].map(t => (
             <span key={t} style={s.chip}>{t}</span>
           ))}
+        </div>
+        <div style={s.callout}>
+          <span style={s.label}>Capacity:</span> a server node runs up to 8
+          active cameras at once; an edge node is capped at 2 (configurable via{' '}
+          <Code>BERTH_MAX_ACTIVE_CAMERAS</Code>). Activating beyond the limit is
+          refused until you deactivate another camera.
         </div>
 
         <hr style={s.divider} />
@@ -527,6 +580,13 @@ export default function DocsPage() {
           the header shows WebSocket state — green (Live) means metrics are
           streaming; red (Offline) means the backend is unreachable. The
           dashboard will attempt to reconnect automatically.
+        </div>
+        <div style={s.callout}>
+          <span style={s.label}>Why the map doesn't flicker:</span> a slot only
+          switches to <em>vacant</em> after it has read vacant continuously for
+          about half a second; it flips to <em>occupied</em> immediately. This
+          hysteresis stops pedestrians and passing objects from briefly blanking
+          out a spot.
         </div>
       </SectionCard>
 

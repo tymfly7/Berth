@@ -49,7 +49,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 |---------|-------------|
 | 4 Classifier Architectures | CNN from scratch, ResNet-50, MobileNetV4-Small, YOLO26 Classify |
 | YOLO26 Detector | Bounding-box vehicle detector used for misparked-vehicle (anomaly) detection |
-| Real-Time Detection | Per-camera WebSocket video stream (~20 FPS server / ~6 FPS edge) with slot-wise occupancy overlay |
+| Real-Time Detection | Per-camera WebSocket video stream (~20 FPS server / ~10 FPS edge) with slot-wise occupancy overlay |
 | ROI Editor | Draw, edit, and manage custom parking slot polygons per camera |
 | Polygon Editing | Vertex drag, edge-midpoint insertion, duplicate, scale, undo/redo |
 | Multi-Camera Registry | USB, RTSP, file, and YouTube sources; one WebSocket feed per camera; cameras can share an ROI config |
@@ -740,6 +740,7 @@ environment variables.
 | `BERTH_DEPLOYMENT` | `server` | `server` (full) or `edge` (inference-only) |
 | `BERTH_EDGE_HUB_URL` | _(empty)_ | Hub URL for edge→hub sync (edge profile only) |
 | `BERTH_INFERENCE_WORKERS` | `min(cpu-1, 4)` | Shared inference pool worker count |
+| `BERTH_MAX_ACTIVE_CAMERAS` | `8` server / `2` edge | Max cameras allowed active at once |
 | `BERTH_OCCUPANCY_THRESHOLD` | `0.40` | YOLO-classify "occupied" decision threshold |
 | `PKLOT_ROOT` | _(empty)_ | Path to downloaded PKLot dataset |
 | `BERTH_YT_CACHE_TTL` | `240` | YouTube HLS URL cache lifetime (seconds) |
@@ -752,8 +753,10 @@ Training-specific variables are listed under [Training Models](#training-models)
 
 | Setting | Server | Edge |
 |---------|--------|------|
-| Frame size | 1280×720 | 640×480 |
-| Stream FPS | 20 | 6 |
+| Frame size | 1280×720 | 960×540 |
+| Stream FPS | 20 | 10 |
+| Inference FPS | 8 | 3 |
+| JPEG quality | 80 | 90 |
 
 ### Alert thresholds
 
