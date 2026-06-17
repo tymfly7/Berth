@@ -18,6 +18,34 @@ const DEFAULT_LOTS = []
 const slugify = (name) =>
   'lot-' + name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
+// slugify lowercases, so case-only-different names (e.g. "t10" and "T10") collide
+// on one id — which makes them share a backend ROI file and makes the dropdown
+// unable to switch between them. Append a numeric suffix until the id is unique.
+const uniqueLotId = (name, existing) => {
+  const base = slugify(name)
+  let id = base
+  let n = 2
+  while (existing.some(l => l.id === id)) id = `${base}-${n++}`
+  return id
+}
+
+// Repair already-saved lots that collided on id (from before uniqueLotId), so
+// each becomes independently selectable. The first keeps the original id (and its
+// ROI file); later collisions get a unique id and start empty.
+const dedupeLotIds = (lotList) => {
+  const seen = new Set()
+  return lotList.map(l => {
+    let id = l.id
+    if (seen.has(id)) {
+      const base = id
+      let n = 2
+      while (seen.has(id)) id = `${base}-${n++}`
+    }
+    seen.add(id)
+    return id === l.id ? l : { ...l, id }
+  })
+}
+
 async function rotateImageDataUrl(dataUrl, degrees) {
   const img = new Image()
   img.src = dataUrl
@@ -60,7 +88,13 @@ const loadLots = () => {
       localStorage.setItem(LOTS_KEY, JSON.stringify(DEFAULT_LOTS))
       return [...DEFAULT_LOTS]
     }
-    return JSON.parse(raw) || []
+    const parsed = JSON.parse(raw) || []
+    const deduped = dedupeLotIds(parsed)
+    // Persist once if migration changed any id, so the repair sticks across reloads.
+    if (deduped.some((l, i) => l.id !== parsed[i]?.id)) {
+      localStorage.setItem(LOTS_KEY, JSON.stringify(deduped))
+    }
+    return deduped
   } catch { return [...DEFAULT_LOTS] }
 }
 
@@ -99,14 +133,6 @@ const style = {
     borderRadius: 'var(--radius-sm)',
     marginTop: 10,
   },
-  resultStats: {
-    display: 'flex',
-    gap: 12,
-    marginTop: 10,
-    fontSize: '0.8rem',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
-  },
 }
 
 export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModelInfo, setActiveModel }) {
@@ -126,6 +152,9 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   const [roiMsg, setRoiMsg]           = useState(null)
   const [videoUploaded, setVideoUploaded] = useState(false)
   const [roiEditorBg, setRoiEditorBg] = useState(null)
+  const [proposals, setProposals]     = useState([])
+  const [proposing, setProposing]     = useState(false)
+  const [mainRect, setMainRect]       = useState(null)
   const fileRef                       = useRef(null)
   const uploadedFileRef               = useRef(null)
 
@@ -152,6 +181,19 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       .then(data => setRois(Array.isArray(data) ? data : []))
       .catch(() => {})
   }, [apiBase, selectedLotId])
+
+  // Measure the main column so the enlarged result viewer can sit over it while
+  // leaving the Settings sidebar visible and clickable.
+  useEffect(() => {
+    if (!resultImage) return
+    const update = () => {
+      const el = document.querySelector('.main-column')
+      if (el) setMainRect(el.getBoundingClientRect())
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [resultImage])
 
   const showStatus = (msg, delay = 4000) => {
     setStatus(msg)
@@ -216,6 +258,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   }
 
   const openLotRoiEditor = async (lotId) => {
+    setProposals([])
     setModalLotName(lots.find(l => l.id === lotId)?.name || '')
     try {
       const res = await apiFetch(`${apiBase}/api/roi/${lotId}`)
@@ -244,6 +287,34 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     setRoiModalOpen(true)
   }
 
+  const handleAutoDetect = async () => {
+    if (!roiEditorBg) { showRoiMsg('No image to analyze'); return }
+    setProposing(true)
+    try {
+      const blob = await (await fetch(roiEditorBg)).blob()
+      const form = new FormData()
+      form.append('file', blob, 'roi.jpg')
+      const camId = selectedLotId || 'default'
+      const res = await apiFetch(`${apiBase}/api/roi/${camId}/propose`, { method: 'POST', body: form })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        showRoiMsg(`Auto-detect failed: ${err.detail || res.statusText}`)
+        return
+      }
+      const data = await res.json()
+      if (data.proposals?.length > 0) {
+        setProposals(data.proposals)
+        showRoiMsg(`${data.proposals.length} candidate spot(s) — review and accept below`)
+      } else {
+        showRoiMsg('No candidate spots detected. Try a clearer image.')
+      }
+    } catch (err) {
+      showRoiMsg(`Auto-detect error: ${err.message}`)
+    } finally {
+      setProposing(false)
+    }
+  }
+
   const handleAction = async (endpoint, label) => {
     setStatus(`${label}...`)
     const res = await apiAction(endpoint)
@@ -265,6 +336,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     setStatus('')
     setVideoUploaded(false)
     setRoiEditorBg(null)
+    setProposals([])
   }
 
   const handleRotate = async (direction) => {
@@ -449,7 +521,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       </div>
 
       {/* Raw uploaded image + lot selector + ROI controls */}
-      {(uploadedImage || videoUploaded) && !resultImage && (
+      {(uploadedImage || videoUploaded) && (
         <div style={{ marginTop: 12 }}>
           {uploadedImage && (
             <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
@@ -497,6 +569,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 className="btn btn-ghost btn-sm"
                 onClick={() => {
                   setRois([])
+                  setProposals([])
                   setModalLotName('')
                   setRoiEditorBg(uploadedImage)
                   setRoiModalOpen(true)
@@ -566,44 +639,38 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
         </div>
       )}
 
-      {/* Annotated result image */}
-      {resultImage && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
-            <img
-              src={`data:image/jpeg;base64,${resultImage}`}
-              alt="Analyzed"
-              style={style.resultImg}
-            />
-            <button
-              onClick={handleClear}
-              title="Clear"
-              style={{
-                position: 'absolute', top: 6, right: 6,
-                background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%',
-                color: '#fff', width: 24, height: 24, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '0.75rem', lineHeight: 1,
-              }}
-            >✕</button>
-          </div>
-          {resultData && (
-            <div style={style.resultStats}>
-              <span className="badge badge-vacant">{resultData.available} Available</span>
-              <span className="badge badge-occupied">{resultData.occupied} Occupied</span>
-              <span className="badge badge-info">{resultData.occupancy_percent}%</span>
+      {/* Enlarged annotated result — floats over the main column, leaving the
+          Settings sidebar visible so models/ROIs stay switchable. */}
+      {resultImage && mainRect && createPortal(
+        <div style={{
+          position: 'fixed',
+          top: 12, bottom: 12,
+          left: mainRect.left, width: mainRect.width,
+          zIndex: 1000,
+          display: 'flex', flexDirection: 'column',
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-color)',
+          borderRadius: 'var(--radius-md)',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 12px', borderBottom: '1px solid var(--border-color)',
+            flexShrink: 0,
+          }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flex: 1 }}>
+              {resultData && (
+                <>
+                  <span className="badge badge-vacant">{resultData.available} Available</span>
+                  <span className="badge badge-occupied">{resultData.occupied} Occupied</span>
+                  <span className="badge badge-info">{resultData.occupancy_percent}%</span>
+                </>
+              )}
             </div>
-          )}
-          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
             <button
               className="btn btn-ghost btn-sm"
-              style={{ flex: 1 }}
-              onClick={() => { setResultImage(null); setResultData(null) }}
-            >
-              ← Back
-            </button>
-            <button
-              className="btn btn-ghost btn-sm"
+              style={{ flexShrink: 0 }}
               onClick={() => {
                 const a = document.createElement('a')
                 a.href = `data:image/jpeg;base64,${resultImage}`
@@ -611,10 +678,31 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 a.click()
               }}
             >
-              ⬇ Save
+              Save
             </button>
+            <button
+              onClick={() => { setResultImage(null); setResultData(null) }}
+              title="Close"
+              style={{
+                flexShrink: 0,
+                background: 'rgba(255,255,255,0.07)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--radius-sm)',
+                color: 'var(--text-secondary)',
+                width: 30, height: 30, cursor: 'pointer',
+                fontSize: '1rem', lineHeight: 1,
+              }}
+            >✕</button>
           </div>
-        </div>
+          <div style={{ flex: 1, minHeight: 0, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <img
+              src={`data:image/jpeg;base64,${resultImage}`}
+              alt="Analyzed"
+              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }}
+            />
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* ROI Editor Modal — centered 770×433 dialog */}
@@ -625,7 +713,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            width: 770,
+            width: 'min(92vw, 1200px)',
+            maxHeight: '92vh',
             display: 'flex', flexDirection: 'column',
             background: 'var(--bg-card)',
             borderRadius: 'var(--radius-md)',
@@ -652,6 +741,17 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                   fontWeight: 700,
                 }}
               />
+              {roiEditorBg && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ flexShrink: 0 }}
+                  disabled={proposing}
+                  onClick={handleAutoDetect}
+                  title="Auto-detect candidate parking spots from this image"
+                >
+                  {proposing ? 'Detecting…' : 'Auto-detect'}
+                </button>
+              )}
               <button
                 className="btn btn-primary btn-sm"
                 style={{ flexShrink: 0 }}
@@ -674,13 +774,14 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                   } catch (e) {
                     showRoiMsg(`Error: ${e.message}`)
                   }
+                  setProposals([])
                   setRoiModalOpen(false)
                 }}
               >
                 Save
               </button>
               <button
-                onClick={() => setRoiModalOpen(false)}
+                onClick={() => { setProposals([]); setRoiModalOpen(false) }}
                 title="Cancel"
                 style={{
                   flexShrink: 0,
@@ -695,17 +796,24 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               >✕</button>
             </div>
 
-            {/* Canvas area: fixed 770×433 */}
-            <div style={{ position: 'relative', height: 433, background: '#000', flexShrink: 0 }}>
+            {/* Canvas area: responsive 16:9, capped to viewport so the whole lot stays visible */}
+            <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', maxHeight: '78vh', background: '#000', flexShrink: 0 }}>
               {roiEditorBg && (
                 <img
                   src={roiEditorBg}
                   alt="ROI background"
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', userSelect: 'none', pointerEvents: 'none' }}
+                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', userSelect: 'none', pointerEvents: 'none' }}
                 />
               )}
               <div style={{ position: 'absolute', inset: 0 }}>
-                <RoiEditor rois={rois} onRoisChange={setRois} idPrefix="test" overlay />
+                <RoiEditor
+                  rois={rois}
+                  onRoisChange={setRois}
+                  proposals={proposals}
+                  onProposalsChange={setProposals}
+                  idPrefix="test"
+                  overlay
+                />
               </div>
             </div>
 

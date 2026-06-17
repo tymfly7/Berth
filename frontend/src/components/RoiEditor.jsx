@@ -37,6 +37,181 @@ function ptDistPx(ax, ay, bx, by, W, H) {
   return Math.sqrt(dx * dx + dy * dy)
 }
 
+// Split a 4-corner quad into n stalls along its longer axis. Returns an array
+// of n polygons, or null if the input isn't a quad / n < 2. Interpolating along
+// the drawn edges keeps dividers converging toward the vanishing point, so
+// stalls stay even on an oblique (trapezoidal) row. `aspect` is canvas H/W, used
+// only to compare edge lengths in pixel space (normalized x/y scale differently).
+export function divideQuad(polygon, n, aspect = 1) {
+  if (!polygon || polygon.length !== 4 || n < 2) return null
+  const len = (a, b) => Math.hypot(a[0] - b[0], (a[1] - b[1]) * aspect)
+  const [p0, p1, p2, p3] = polygon
+  // opposite-edge pairs: X = (p0-p1, p2-p3), Y = (p1-p2, p3-p0)
+  const pairX = len(p0, p1) + len(p2, p3)
+  const pairY = len(p1, p2) + len(p3, p0)
+  // rotate so the long axis is the a0->a1 / a3->a2 pair
+  const [a0, a1, a2, a3] = pairX >= pairY ? [p0, p1, p2, p3] : [p1, p2, p3, p0]
+  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+  const A = (t) => lerp(a0, a1, t)
+  const B = (t) => lerp(a3, a2, t)
+  const stalls = []
+  for (let i = 0; i < n; i++) {
+    const t0 = i / n
+    const t1 = (i + 1) / n
+    stalls.push([A(t0), A(t1), B(t1), B(t0)])
+  }
+  return stalls
+}
+
+// "Magic smooth": weld corners of *different* ROIs that sit within `thresh` of
+// each other to their shared average, so adjacent stalls end up sharing one clean
+// straight edge (like Divide output). `thresh` is a fraction of image width;
+// `aspect` (canvas H/W) corrects the y distance. Returns a new rois array, or
+// null if nothing was close enough to change.
+export function smoothRois(rois, thresh = 0.015, aspect = 1) {
+  const nodes = []
+  rois.forEach((roi, ri) => roi.polygon.forEach((p, vi) => nodes.push({ ri, vi, x: p[0], y: p[1] })))
+  const dist = (a, b) => Math.hypot(a.x - b.x, (a.y - b.y) * aspect)
+
+  const parent = nodes.map((_, i) => i)
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      if (nodes[i].ri === nodes[j].ri) continue // never weld a polygon to itself
+      if (dist(nodes[i], nodes[j]) <= thresh) parent[find(i)] = find(j)
+    }
+  }
+
+  const groups = new Map()
+  nodes.forEach((_, i) => {
+    const r = find(i)
+    if (!groups.has(r)) groups.set(r, [])
+    groups.get(r).push(i)
+  })
+
+  const newPolys = rois.map(r => r.polygon.map(p => [...p]))
+  let changed = false
+  for (const idxs of groups.values()) {
+    if (idxs.length < 2) continue
+    const counts = {}
+    idxs.forEach(i => { counts[nodes[i].ri] = (counts[nodes[i].ri] || 0) + 1 })
+    const rois_ = Object.keys(counts)
+    // require >1 ROI and skip clusters that would collapse an edge of one ROI
+    if (rois_.length < 2 || rois_.some(r => counts[r] > 1)) continue
+    const cx = idxs.reduce((s, i) => s + nodes[i].x, 0) / idxs.length
+    const cy = idxs.reduce((s, i) => s + nodes[i].y, 0) / idxs.length
+    idxs.forEach(i => { newPolys[nodes[i].ri][nodes[i].vi] = [cx, cy] })
+    changed = true
+  }
+  return changed ? rois.map((r, i) => ({ ...r, polygon: newPolys[i] })) : null
+}
+
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b)
+  const n = s.length
+  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2
+}
+
+// Least-squares fit v = a*u + b over [u,v] points. Well-conditioned because the
+// baselines run roughly along u (the row direction), so v varies slowly with u.
+function fitLine(pts) {
+  const n = pts.length
+  let su = 0, sv = 0, suu = 0, suv = 0
+  for (const [u, v] of pts) { su += u; sv += v; suu += u * u; suv += u * v }
+  const denom = n * suu - su * su
+  if (Math.abs(denom) < 1e-12) return [0, sv / n]
+  const a = (n * suv - su * sv) / denom
+  return [a, (sv - a * su) / n]
+}
+
+// Regularize auto-detected quads into clean rows. Each detected quad is sized to
+// a car, not a stall, and neighbours don't share corners — so instead of welding
+// we: estimate the row direction (PCA over centers), group items into rows by
+// their cross-row offset, fit a top + bottom baseline per row, and rebuild each
+// item as a uniform-width quad sitting between the baselines at its detected
+// position. Same id/label kept; only polygons change. Returns null if no row had
+// >= 2 items to align. `aspect` = canvas H/W (y is scaled so distances are
+// pixel-proportional). No gaps are filled — one stall per detected item.
+export function regularizeRows(items, aspect = 1) {
+  if (!items || items.length < 2) return null
+  const toP = ([x, y]) => [x, y * aspect]
+  const clamp = (n) => Math.max(0, Math.min(1, n))
+  const dot = (p, w) => p[0] * w[0] + p[1] * w[1]
+
+  const centers = items.map(it => {
+    const ps = it.polygon.map(toP)
+    return [
+      ps.reduce((s, p) => s + p[0], 0) / ps.length,
+      ps.reduce((s, p) => s + p[1], 0) / ps.length,
+    ]
+  })
+
+  // principal axis (row direction) via PCA over centers
+  const mean = [
+    centers.reduce((s, c) => s + c[0], 0) / centers.length,
+    centers.reduce((s, c) => s + c[1], 0) / centers.length,
+  ]
+  let sxx = 0, sxy = 0, syy = 0
+  for (const c of centers) {
+    const dx = c[0] - mean[0], dy = c[1] - mean[1]
+    sxx += dx * dx; sxy += dx * dy; syy += dy * dy
+  }
+  const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy)
+  const u = [Math.cos(theta), Math.sin(theta)]
+  const v = [-Math.sin(theta), Math.cos(theta)]
+
+  const meta = items.map((it, i) => {
+    const ps = it.polygon.map(toP)
+    const us = ps.map(p => dot(p, u))
+    const vs = ps.map(p => dot(p, v))
+    return {
+      i,
+      cu: dot(centers[i], u),
+      cv: dot(centers[i], v),
+      width: Math.max(...us) - Math.min(...us),
+      depth: Math.max(...vs) - Math.min(...vs),
+      us, vs,
+    }
+  })
+  const medianDepth = median(meta.map(m => m.depth))
+
+  // cluster into rows by cross-row offset: sort by v, split on a full-depth gap
+  const sorted = [...meta].sort((a, b) => a.cv - b.cv)
+  const rows = [[sorted[0]]]
+  for (let k = 1; k < sorted.length; k++) {
+    if (sorted[k].cv - sorted[k - 1].cv > medianDepth) rows.push([])
+    rows[rows.length - 1].push(sorted[k])
+  }
+
+  const newPolys = items.map(it => it.polygon)
+  let changed = false
+  for (const row of rows) {
+    if (row.length < 2) continue
+    const topPts = [], botPts = []
+    for (const m of row) {
+      const byV = m.vs.map((vv, k) => [vv, k]).sort((a, b) => a[0] - b[0]).map(p => p[1])
+      ;[byV[0], byV[1]].forEach(k => topPts.push([m.us[k], m.vs[k]]))
+      ;[byV[byV.length - 1], byV[byV.length - 2]].forEach(k => botPts.push([m.us[k], m.vs[k]]))
+    }
+    const [at, bt] = fitLine(topPts)
+    const [ab, bb] = fitLine(botPts)
+    const W = median(row.map(m => m.width))
+    for (const m of row) {
+      const uL = m.cu - W / 2, uR = m.cu + W / 2
+      const quadUV = [
+        [uL, at * uL + bt], [uR, at * uR + bt],
+        [uR, ab * uR + bb], [uL, ab * uL + bb],
+      ]
+      newPolys[m.i] = quadUV.map(([uu, vv]) => [
+        clamp(uu * u[0] + vv * v[0]),
+        clamp((uu * u[1] + vv * v[1]) / aspect),
+      ])
+      changed = true
+    }
+  }
+  return changed ? items.map((it, i) => ({ ...it, polygon: newPolys[i] })) : null
+}
+
 export default function RoiEditor({
   backgroundImage = null,
   rois,
@@ -61,6 +236,7 @@ export default function RoiEditor({
   const [editPolygon, setEditPolygon] = useState(null)
   const [past, setPast] = useState([])
   const [future, setFuture] = useState([])
+  const [divideN, setDivideN] = useState(4)
 
   const getPoint = useCallback((e) => {
     const canvas = canvasRef.current
@@ -374,6 +550,42 @@ export default function RoiEditor({
     ))
   }, [selectedId, rois, commitChange])
 
+  const divideSelected = useCallback((n) => {
+    if (!selectedId) return
+    const roi = rois.find(r => r.id === selectedId)
+    if (!roi) return
+    const canvas = canvasRef.current
+    const aspect = canvas && canvas.width ? canvas.height / canvas.width : 1
+    const parts = divideQuad(roi.polygon, n, aspect)
+    if (!parts) return
+    const base = rois.length - 1 // the selected box is being replaced
+    const stalls = parts.map((polygon, i) => ({
+      id: `${idPrefix}_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
+      label: `Slot ${base + i + 1}`,
+      polygon,
+      color: ROI_COLOR,
+      spotType: roi.spotType || 'normal',
+      owner: roi.owner || '',
+    }))
+    commitChange([...rois.filter(r => r.id !== selectedId), ...stalls])
+    setSelectedId(null)
+  }, [selectedId, rois, commitChange, idPrefix])
+
+  const smoothAll = useCallback(() => {
+    const canvas = canvasRef.current
+    const aspect = canvas && canvas.width ? canvas.height / canvas.width : 1
+    const result = smoothRois(rois, 0.015, aspect)
+    if (result) commitChange(result)
+  }, [rois, commitChange])
+
+  const smoothProposals = useCallback(() => {
+    if (!onProposalsChange || proposals.length < 2) return
+    const canvas = canvasRef.current
+    const aspect = canvas && canvas.width ? canvas.height / canvas.width : 1
+    const result = regularizeRows(proposals, aspect)
+    if (result) onProposalsChange(result)
+  }, [proposals, onProposalsChange])
+
   const setSpotType = useCallback((type) => {
     if (!selectedId) return
     commitChange(rois.map(r => r.id === selectedId ? { ...r, spotType: type } : r))
@@ -600,6 +812,7 @@ export default function RoiEditor({
   const selProp = selectedProposalId ? proposals.find(p => p.id === selectedProposalId) : null
   const selectedRoi = selectedId ? rois.find(r => r.id === selectedId) : null
   const selectedSpotType = selectedRoi?.spotType || 'normal'
+  const canDivide = selectedRoi?.polygon.length === 4
   const typeBtnStyle = (active, accent) => ({
     padding: '4px 10px',
     borderRadius: 4,
@@ -612,9 +825,13 @@ export default function RoiEditor({
   })
 
   return (
-    <div style={overlay ? { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' } : {}}>
+    <div style={overlay ? { position: 'absolute', inset: 0 } : {}}>
+      {/* ── Floating toolbar layer: in overlay it sits above the full-box canvas.
+          pointerEvents:none lets clicks fall through to the canvas; each
+          interactive toolbar re-enables pointerEvents on itself. ── */}
+      <div style={overlay ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2, pointerEvents: 'none' } : {}}>
       {/* ── ROI drawing toolbar ── */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' } : {}) }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', pointerEvents: 'auto' } : {}) }}>
         <button style={btnStyle(mode === 'polygon')} onClick={() => changeMode('polygon')}>
           Polygon
         </button>
@@ -649,6 +866,28 @@ export default function RoiEditor({
         >
           Scale −
         </button>
+        <input
+          type="number"
+          min={2}
+          value={divideN}
+          onChange={e => setDivideN(Math.max(2, parseInt(e.target.value, 10) || 2))}
+          style={{
+            width: 42, padding: '4px 6px', borderRadius: 4, fontSize: '0.78rem',
+            border: '1px solid rgba(255,255,255,0.2)',
+            background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted,#aaa)', outline: 'none',
+          }}
+          title="Number of stalls to split the selected box into"
+        />
+        <button
+          style={{ ...btnStyle(false), opacity: canDivide ? 1 : 0.4 }}
+          disabled={!canDivide}
+          onClick={() => divideSelected(divideN)}
+          title={canDivide
+            ? 'Split the selected 4-corner box into N even stalls (perspective-aware)'
+            : 'Select a 4-corner box (Rectangle, or a 4-point polygon) to divide'}
+        >
+          Divide
+        </button>
         <button
           style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
           disabled={!selectedId}
@@ -658,6 +897,14 @@ export default function RoiEditor({
           }}
         >
           Delete Selected
+        </button>
+        <button
+          style={{ ...btnStyle(false), opacity: rois.length >= 2 ? 1 : 0.4 }}
+          disabled={rois.length < 2}
+          onClick={smoothAll}
+          title="Magic smooth — snap nearby corners of adjacent boxes together so shared edges line up cleanly"
+        >
+          ✨ Smooth
         </button>
         <button
           style={btnStyle(false)}
@@ -677,6 +924,7 @@ export default function RoiEditor({
           borderRadius: overlay ? 0 : 4,
           border: overlay ? 'none' : '1px solid rgba(255,255,255,0.1)',
           backdropFilter: overlay ? 'blur(4px)' : undefined,
+          pointerEvents: overlay ? 'auto' : undefined,
         }}>
           <input
             value={selectedRoi.label}
@@ -714,10 +962,19 @@ export default function RoiEditor({
           background: overlay ? 'rgba(0,0,0,0.6)' : 'rgba(100,200,255,0.06)',
           backdropFilter: overlay ? 'blur(4px)' : undefined,
           borderBottom: overlay ? '1px solid rgba(100,200,255,0.2)' : undefined,
+          pointerEvents: overlay ? 'auto' : undefined,
         }}>
           <span style={{ fontSize: '0.75rem', color: '#64c8ff', marginRight: 2 }}>
             {proposals.length} proposal{proposals.length > 1 ? 's' : ''} — dashed blue
           </span>
+          <button
+            style={proposalBtnStyle(proposals.length < 2)}
+            disabled={proposals.length < 2}
+            onClick={smoothProposals}
+            title="Tidy auto-detected spots — align each row to clean baselines with a uniform stall size"
+          >
+            ✨ Tidy rows
+          </button>
           <button
             style={proposalBtnStyle(!selProp)}
             disabled={!selProp}
@@ -769,9 +1026,10 @@ export default function RoiEditor({
         </div>
       )}
 
+      </div>
       {/* ── Canvas ── */}
       <div ref={containerRef} style={overlay
-        ? { flex: 1, position: 'relative' }
+        ? { position: 'absolute', inset: 0, zIndex: 1 }
         : { position: 'relative', width: '100%', minHeight: 300, background: 'rgba(0,0,0,0.25)', borderRadius: 4 }
       }>
         <canvas

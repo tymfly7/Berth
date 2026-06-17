@@ -166,3 +166,164 @@ YOLO detect explicitly looks for vehicle shapes as objects rather than classifyi
 ## How to Fix It
 
 The only reliable fix is to collect training samples specifically from camera 3 under market-day conditions — labelled images of occupied and vacant slots with overcast lighting and pedestrian activity present. Adding 100–200 such examples per class and fine-tuning would dramatically close the gap. Data augmentation during training (random brightness reduction, crowd overlay, shadow removal) would also improve robustness without needing entirely new real images.
+
+---
+
+# Bulk Auto-Annotator for 70k Raw Parking Images (`/admin/annotate`)
+
+Research and implementation plan for a model-assisted annotation / cropping pipeline
+that turns raw full parking-lot images into the two training formats the project already
+consumes.
+
+## Problem / scenario
+
+- ~70,000 **raw, unlabeled** full parking-lot images.
+- Organized in **per-camera subfolders** (mix of fixed cameras and some varied scenes).
+- Goal: crop/annotate them into the formats the training pipeline already uses —
+  PKLot-style CNN crops and gopro-style YOLO `annotations.json` — ready to train.
+
+Today nothing *creates* these labels. The converters only **consume** an already-authored
+`annotations.json`:
+
+- **PKLot-style CNN dataset** — `occupied/` + `vacant/` crop folders, loaded by
+  `ParkingDataset` (`backend/src/data_prep/dataset.py:45`) via `prepare_dataset`
+  (`backend/src/data_prep/preprocessor.py:26`).
+- **gopro-style YOLO detect dataset** — `annotations.json`
+  (`file_names`/`rois_list`/`occupancy_list`) in `config.YOLO_GOPRO_DIR`
+  (`backend/config.py:80`), converted by `build_yolo_detect_dataset`
+  (`backend/src/data_prep/yolo_converter.py:64`).
+
+## Confirmed requirements
+
+- Output **both** CNN crops and YOLO annotations.
+- **Auto + sampled QA**: model labels everything; admin reviews a sample. No per-image
+  manual labeling (infeasible at 70k).
+- Ingest via **both** a server folder path and an optional archive upload.
+- **Segmentation** = scaffolded but **disabled** (no YOLO-seg model in config yet).
+
+## Core technique — per-camera consensus layout
+
+For a fixed camera the parking spots occupy the same pixels every frame. So per camera
+subfolder:
+
+1. Run the trained **YOLO26 detect** model (`ParkingYOLO26.predict_frame`,
+   `backend/src/models/yolo_detector.py:44` → `bbox`, `confidence`, `class_id`;
+   vacant=0 / occupied=1) over the folder's frames and pool all boxes.
+2. **Cluster boxes across frames** → the consensus spot layout. A spot empty in one frame
+   was occupied (and detected) in another, so clustering recovers the *full* layout,
+   including spots empty in any single frame. This is the standard PKLot/CNRPark
+   construction and is what fixes the empty-spot recall weakness of naive per-image
+   detection. Reuses `_cluster_boxes` (`roi_proposer.py:43`) and `_iou`
+   (`roi_proposer.py:29`).
+3. For each frame, label each consensus ROI **occupied/vacant** by IoU-matching that
+   frame's detections to the template (cheap; reuses step-1 detections).
+
+## Honest caveats
+
+- Vacant-spot quality depends on how well the detect model generalizes to new scenes;
+  QA must measure **vacant recall**, not just overall accuracy. (Directly related to the
+  domain-shift findings in the KromC section above.)
+- 70k detect inferences is heavy → effectively GPU-only, long-running background job.
+  Hub-only (edge returns 403, like the other dataset endpoints).
+- 70k frames × spots ⇒ potentially millions of crops → apply a **per-class cap** to keep
+  the CNN set balanced and disk-bounded.
+- Consensus assumes each subfolder ≈ one fixed camera; genuinely varied folders fall back
+  to per-image detection (per-frame layout).
+
+## Backend design
+
+### New engine: `backend/src/data_prep/auto_annotator.py` (headless, CLI-runnable)
+Pure functions (no FastAPI deps) so it runs from CLI or a job thread:
+- `discover_camera_layout(frames, detector, conf, iou) -> list[quad]` — pool detections,
+  `_cluster_boxes`, convert to normalized quads via `_box_corners`
+  (`roi_proposer.py:146`) + `_quad_to_polygon` (`roi_proposer.py:166`).
+- `label_frame_occupancy(frame_dets, rois, iou_thresh) -> list[bool]` — IoU-match a
+  frame's detections to the consensus ROIs.
+- `annotate_camera(cam_dir, outputs, conf, ...)` — orchestrates per folder; returns
+  consensus layout + per-frame occupancy + low-confidence frames flagged for QA.
+- `export(...)` — writes both targets:
+  - **CNN**: crop each ROI bbox per frame → `config.DATA_DIR/{occupied|vacant}`, reusing
+    crop math in `build_yolo_classify_dataset` (`yolo_converter.py:231-251`); honor the
+    per-class cap.
+  - **YOLO**: copy frames to `config.YOLO_GOPRO_DIR/images`, merge per-frame entries into
+    `annotations.json` (shared `rois_list` per camera, per-frame `occupancy_list`),
+    assigned to train/valid/test splits (schema: `yolo_converter.py:12-29`). Then
+    `build_yolo_detect_dataset` produces the trainable dataset unchanged.
+
+### New router: `backend/src/api/routers/annotate.py`
+Register in `backend/main.py` (import at line 54; `include_router` near 149-154).
+All endpoints: `Depends(verify_api_key)`, edge 403 guard,
+`@limiter.limit(config.UPLOAD_RATE_LIMIT)`.
+- `POST /api/annotate/ingest` — server `path` **or** uploaded `.tar/.zip` (extract safely
+  into `config.ANNOTATE_INGEST_DIR`, guard zip-slip). Returns per-camera subfolders +
+  counts.
+- `POST /api/annotate/start` — launch background job with
+  `register_op`/`update_op_progress`/`finish_op` (`src/api/operations.py`), mirroring
+  `start_training` (`training.py:190`). Params: confidence threshold, outputs
+  (cnn/yolo/both), split ratios, per-class cap.
+- `GET /api/annotate/status` — progress.
+- `GET /api/annotate/qa` — consensus layout per camera + random frame sample (occupancy
+  overlay) + low-confidence flagged frames.
+- `POST /api/annotate/qa/apply` — persist admin's corrected layout per camera and
+  re-derive occupancy/export for it.
+- Export runs after QA acceptance; invalidate `training._model_info_cache["data"]` so
+  dashboard counts refresh.
+
+New config: `ANNOTATE_INGEST_DIR = DATA_DIR / "annotate_ingest"` (add to the auto-created
+dirs list at `config.py:34`).
+
+No changes to converters, `ParkingDataset`, or training code — the job only produces
+inputs they already accept.
+
+## Frontend design
+
+### New page: `frontend/src/pages/AnnotatePage.jsx`
+Route in `frontend/src/App.jsx` (line 13):
+`<Route path="/admin/annotate" element={<PinGate><AnnotatePage/></PinGate>} />`; link from
+the admin header/settings (mirror the `/admin/docs` link). Uses `apiFetch`/`API_BASE`.
+
+Stepwise flow:
+1. **Mode**: `CNN crops` · `YOLO detect` · `Both`; plus a **Segmentation** option
+   rendered **disabled** ("requires a YOLO-seg model — coming soon").
+2. **Ingest**: server folder path **or** upload one `.tar/.zip`; show discovered
+   per-camera folders + counts.
+3. **Configure & start**: confidence threshold, outputs, split ratios, per-class cap →
+   `start`; poll `status` (reuse the operations-progress UI).
+4. **Sampled QA**: per camera, render the consensus layout on a representative frame using
+   the existing `RoiEditor` canvas (`frontend/src/components/RoiEditor.jsx` — edits
+   `{id,polygon,label}` quads, has `regularizeRows`/`divideQuad` helpers). Plus a random
+   frame strip with occupancy overlay and a visible **vacant-recall** check.
+   `qa/apply` saves layout fixes.
+5. **Export & finish**: show crop/annotation counts and a link to train.
+
+## Out of scope (this phase)
+- YOLO-seg model and mask export — Segmentation mode is UI-scaffolded and disabled.
+- Changing the annotation format or the existing converters.
+- Fully manual per-image review.
+
+## Reuse map (don't rebuild)
+- Clustering / geometry: `_cluster_boxes`, `_iou`, `_box_corners`, `_quad_to_polygon`
+  (`backend/src/inference/roi_proposer.py`).
+- Detector: `ParkingYOLO26.predict_frame` (`backend/src/models/yolo_detector.py`).
+- Crop math + `annotations.json` schema + converters
+  (`backend/src/data_prep/yolo_converter.py`).
+- Upload validation, op-job pattern, model-info cache invalidation, edge guard, limiter
+  (`backend/src/api/routers/training.py`, `backend/src/api/operations.py`).
+- Review canvas: `RoiEditor` (`frontend/src/components/RoiEditor.jsx`).
+
+## Verification
+1. **Backend wiring**: app starts; `annotate.router` included; `/docs` lists
+   `/api/annotate/*`; edge profile → 403; missing detect model → clear 400.
+2. **Engine unit check (CLI)**: run `auto_annotator` over a small fixture (10–20 frames of
+   one camera) — assert a consensus layout is produced, occupancy flips between an empty
+   and occupied frame, and a known empty spot is labeled `vacant`.
+3. **Frontend build**: `npm run build` in `frontend/` — no orphaned imports / missing
+   modules.
+4. **End-to-end (hub, GPU)**: ingest a 2-camera sample (path and archive), start job,
+   watch progress, review one camera's layout (fix a spot) + sampled occupancy, export
+   **both**:
+   - CNN: balanced crops in `backend/data/occupied/` + `vacant/`; dashboard
+     `dataset_count` grows.
+   - YOLO: frames copied to `parking_rois_gopro/images/`, `annotations.json` splits grew;
+     `build_yolo_detect_dataset(force=True)` emits matching `.txt` labels.
+   - Segmentation mode visible but not selectable.

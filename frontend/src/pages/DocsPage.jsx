@@ -285,8 +285,9 @@ export default function DocsPage() {
         </ul>
         <div style={s.callout}>
           <span style={s.label}>Architecture at a glance:</span> Browser
-          connects via WebSocket to the Python backend (port 8000 in Docker,
-          8001 for bare-metal runs). The backend
+          connects via WebSocket to the Python backend (container port 8000,
+          published on host 8001 on the Raspberry Pi and 9000 on the server
+          stack). The backend
           runs inference on camera frames and pushes metrics back in real time.
           No page refresh is needed.
         </div>

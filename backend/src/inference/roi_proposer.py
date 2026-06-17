@@ -13,6 +13,8 @@ candidates requiring admin review — never as authoritative ROI definitions.
 
 import uuid
 import logging
+from typing import Optional
+
 import numpy as np
 import cv2
 
@@ -70,11 +72,14 @@ def _cluster_boxes(boxes: list, iou_threshold: float = 0.3) -> list:
 
 # ── Optional line-snapping ───────────────────────────────────────────────────
 
-def _snap_to_lines(box: list, frame_bgr: np.ndarray) -> list:
+def _snap_to_lines(box: list, frame_bgr: np.ndarray) -> Optional[list]:
     """
     Attempt to snap a bounding box to painted parking-lot markings via
-    Canny edge detection + HoughLinesP. Returns the original box if no
-    usable lines are found in the neighbourhood.
+    Canny edge detection + HoughLinesP, returning an ORIENTED quad that
+    follows the marking angle (important for angled stalls).
+
+    Returns a list of 4 pixel corners [[x, y], ...], or None if no usable
+    markings are found in the neighbourhood (caller falls back to the AABB).
     """
     h, w = frame_bgr.shape[:2]
     x1, y1, x2, y2 = [int(v) for v in box]
@@ -85,7 +90,7 @@ def _snap_to_lines(box: list, frame_bgr: np.ndarray) -> list:
     ry2 = min(h, y2 + pad)
     region = frame_bgr[ry1:ry2, rx1:rx2]
     if region.size == 0:
-        return box
+        return None
 
     gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
@@ -93,38 +98,74 @@ def _snap_to_lines(box: list, frame_bgr: np.ndarray) -> list:
         edges, 1, np.pi / 180,
         threshold=30, minLineLength=20, maxLineGap=5,
     )
-    if lines is None:
-        return box
+    if lines is None or len(lines) < 2:
+        return None
 
-    xs, ys = [], []
+    pts = []
     for ln in lines:
         lx1, ly1, lx2, ly2 = ln[0]
-        xs += [lx1 + rx1, lx2 + rx1]
-        ys += [ly1 + ry1, ly2 + ry1]
+        pts.append([lx1 + rx1, ly1 + ry1])
+        pts.append([lx2 + rx1, ly2 + ry1])
 
-    if not xs:
-        return box
+    pts = np.array(pts, dtype=np.float32)
+    # minAreaRect yields a rotated rectangle, preserving the stall angle.
+    rect = cv2.minAreaRect(pts)
+    (rw, rh) = rect[1]
+    if rw < 10 or rh < 10:
+        return None
 
-    sx1 = max(rx1, min(xs))
-    sy1 = max(ry1, min(ys))
-    sx2 = min(rx2, max(xs))
-    sy2 = min(ry2, max(ys))
-    if sx2 - sx1 < 10 or sy2 - sy1 < 10:
-        return box
-    return [float(sx1), float(sy1), float(sx2), float(sy2)]
+    corners = cv2.boxPoints(rect)
+    return [[float(np.clip(px, 0, w)), float(np.clip(py, 0, h))] for px, py in corners]
+
+
+# ── Angled-layout estimation (no markings) ───────────────────────────────────
+
+def _estimate_layout_angle(boxes: list, min_boxes: int = 3) -> Optional[float]:
+    """
+    Estimate the dominant row orientation (radians) from the arrangement of box
+    centers via PCA. Angled stalls repeat along a row, so the principal axis of
+    the cluster centers approximates the row direction.
+
+    Returns None when there are too few boxes or no clearly dominant axis (a
+    blob rather than a row), so the caller keeps axis-aligned output.
+    """
+    if len(boxes) < min_boxes:
+        return None
+    centers = np.array([[(b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0] for b in boxes])
+    centered = centers - centers.mean(axis=0)
+    cov = np.cov(centered, rowvar=False)
+    eigvals, eigvecs = np.linalg.eigh(cov)  # ascending; largest axis last
+    if eigvals[-1] <= 1e-6 or eigvals[-1] / max(eigvals[0], 1e-6) < 3.0:
+        return None
+    vx, vy = eigvecs[:, -1]
+    return float(np.arctan2(vy, vx))
 
 
 # ── Coordinate conversion ────────────────────────────────────────────────────
 
-def _box_to_polygon(box: list, w: int, h: int) -> list:
-    """Convert pixel [x1,y1,x2,y2] box to a normalised [[x,y],...] quad (0–1)."""
+def _box_corners(box: list) -> list:
+    """Convert pixel [x1,y1,x2,y2] box to its 4 axis-aligned pixel corners."""
     x1, y1, x2, y2 = box
-    return [
-        [round(x1 / w, 6), round(y1 / h, 6)],
-        [round(x2 / w, 6), round(y1 / h, 6)],
-        [round(x2 / w, 6), round(y2 / h, 6)],
-        [round(x1 / w, 6), round(y2 / h, 6)],
-    ]
+    return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+
+
+def _oriented_quad(box: list, angle: float, frame_w: int, frame_h: int) -> list:
+    """Rotate a box's corners by `angle` (radians) about its center, clamped."""
+    x1, y1, x2, y2 = box
+    cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+    hw, hh = (x2 - x1) / 2.0, (y2 - y1) / 2.0
+    ca, sa = np.cos(angle), np.sin(angle)
+    quad = []
+    for dx, dy in ((-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)):
+        px = cx + dx * ca - dy * sa
+        py = cy + dx * sa + dy * ca
+        quad.append([float(np.clip(px, 0, frame_w)), float(np.clip(py, 0, frame_h))])
+    return quad
+
+
+def _quad_to_polygon(quad: list, w: int, h: int) -> list:
+    """Convert a pixel quad [[x,y],...] to a normalised [[x,y],...] quad (0–1)."""
+    return [[round(px / w, 6), round(py / h, 6)] for px, py in quad]
 
 
 # ── Contour fallback ─────────────────────────────────────────────────────────
@@ -174,9 +215,15 @@ def propose_from_frames(
          call; ~6 MB for yolo11n). Falls back to contour detection if ultralytics
          is not installed or all model candidates fail to load.
       2. Detections are accumulated across all frames and clustered by IoU.
-      3. Optionally, each cluster box is snapped to painted line markings via
-         Canny + HoughLinesP (gate with use_line_detection=True).
-      4. Boxes are normalised to [0,1] and returned as ROI dicts.
+      3. Angled-parking handling:
+           - use_line_detection=True: each cluster is snapped to painted
+             markings via Canny + HoughLinesP + minAreaRect, yielding an
+             ORIENTED quad that follows the stall angle (AABB fallback when no
+             markings are found).
+           - use_line_detection=False: the dominant row angle is estimated
+             from the cluster layout (PCA over box centers) and applied to all
+             boxes; axis-aligned when no clear row is detected.
+      4. Quads are normalised to [0,1] and returned as editable ROI dicts.
 
     NOTE: Proposals reliably cover OCCUPIED spots. Empty spots are detected
     only when use_line_detection=True and stall markings are clearly visible.
@@ -216,7 +263,12 @@ def propose_from_frames(
 
         if yolo_model is not None:
             for frame in frames:
-                results = yolo_model(frame, verbose=False, conf=conf_threshold)
+                # Match the resolution the detect model was trained at (960) —
+                # the default 640 drops small/distant cars (far rows over asphalt).
+                results = yolo_model(
+                    frame, verbose=False, conf=conf_threshold,
+                    imgsz=cfg.YOLO_DETECT_IMG_SIZE,
+                )
                 for r in results:
                     for box in r.boxes:
                         if int(box.cls[0]) in _VEHICLE_CLASSES:
@@ -240,15 +292,26 @@ def propose_from_frames(
     # ── 3. Cluster overlapping boxes across frames ────────────────
     clusters = _cluster_boxes(all_boxes, iou_threshold=iou_threshold)
 
-    # ── 4. Optional line snapping ─────────────────────────────────
+    # ── 4. Build oriented pixel quads (angled-parking aware) ──────
+    quads: list = []
     if use_line_detection and clusters:
+        # Snap each box to painted markings; oriented quad or AABB fallback.
         ref = frames[0]
-        clusters = [_snap_to_lines(box, ref) for box in clusters]
+        for box in clusters:
+            snapped = _snap_to_lines(box, ref)
+            quads.append(snapped if snapped is not None else _box_corners(box))
+    else:
+        # No markings: infer the row angle from the cluster layout, if any.
+        angle = _estimate_layout_angle(clusters)
+        if angle is not None:
+            quads = [_oriented_quad(box, angle, fw, fh) for box in clusters]
+        else:
+            quads = [_box_corners(box) for box in clusters]
 
     # ── 5. Convert to normalised polygon ROI dicts ────────────────
     proposals = []
-    for i, box in enumerate(clusters):
-        polygon = _box_to_polygon(box, fw, fh)
+    for i, quad in enumerate(quads):
+        polygon = _quad_to_polygon(quad, fw, fh)
         if all(0.0 <= pt[0] <= 1.0 and 0.0 <= pt[1] <= 1.0 for pt in polygon):
             proposals.append({
                 "id": f"prop_{uuid.uuid4().hex[:8]}",

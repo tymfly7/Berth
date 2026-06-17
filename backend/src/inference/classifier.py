@@ -146,6 +146,19 @@ class ParkingClassifier:
             return Image.fromarray(image)
         return image  # assume PIL already
 
+    @staticmethod
+    def _letterbox_square(pil_img):
+        """Pad a PIL image to a square with neutral gray so YOLO's resize doesn't
+        squash non-square ROI crops. Aspect distortion of angled/perspective slots
+        is the main source of occupied→vacant false negatives."""
+        w, h = pil_img.size
+        if w == h:
+            return pil_img
+        side = max(w, h)
+        canvas = Image.new("RGB", (side, side), (114, 114, 114))
+        canvas.paste(pil_img, ((side - w) // 2, (side - h) // 2))
+        return canvas
+
     def _yolo_result_to_dict(self, result) -> dict:
         """Convert a single Ultralytics classify result to a prediction dict."""
         probs = result.probs.data.cpu().numpy()
@@ -172,7 +185,7 @@ class ParkingClassifier:
             return {"status": "unknown", "confidence": 0.0, "probability": 0.5}
 
         if getattr(self, "_yolo_classify", None) is not None:
-            pil_img = self._to_pil(image)
+            pil_img = self._letterbox_square(self._to_pil(image))
             with self._infer_lock:
                 results = self._yolo_classify.predict(pil_img, verbose=False)
             return self._yolo_result_to_dict(results[0])

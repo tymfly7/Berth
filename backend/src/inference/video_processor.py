@@ -105,6 +105,10 @@ class VideoProcessor:
         self._fps: float = 0.0
         self._fps_frames: int = 0
         self._fps_ts: float = time.time()
+        self._infer_fps = 0.0
+        self._infer_frames = 0
+        self._infer_ts = time.time()
+        self._infer_ms = 0.0          # rolling mean submit->result latency (ms)
 
         self._detector = self._load_detector()
         self._roi_cache: list = []
@@ -496,16 +500,33 @@ class VideoProcessor:
                 continue
             frame = cv2.resize(raw, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
             gen = self._generation
+            t_sub = time.time()
             pool.submit(
                 self._detector, frame, self.camera_id,
-                lambda result, f=frame, g=gen: self._on_inference_result(result, f, g),
+                lambda result, f=frame, g=gen, t=t_sub: self._on_inference_result(result, f, g, t),
             )
 
-    def _on_inference_result(self, result: dict, frame: np.ndarray, generation: int | None = None) -> None:
+    def _on_inference_result(self, result: dict, frame: np.ndarray, generation: int | None = None,
+                             submit_ts: float | None = None) -> None:
         """Called by a pool worker after detect() completes. Updates overlay cache, metrics, DB."""
         # Drop results from a previous source/run that finished after a restart.
         if generation is not None and generation != self._generation:
             return
+
+        # Track real inference rate + latency (where inferences actually complete),
+        # mirroring the display-fps logic in the read loop.
+        _t = time.time()
+        with self._lock:
+            self._infer_frames += 1
+            infer_elapsed = _t - self._infer_ts
+            if infer_elapsed >= 1.0:
+                self._infer_fps = round(self._infer_frames / infer_elapsed, 1)
+                self._infer_frames = 0
+                self._infer_ts = _t
+            if submit_ts is not None:
+                sample_ms = (_t - submit_ts) * 1000.0
+                self._infer_ms = sample_ms if self._infer_ms == 0.0 \
+                    else 0.7 * self._infer_ms + 0.3 * sample_ms
         new_status_map = {s["id"]: s["status"] for s in result.get("slots", [])}
 
         # Anomaly detection (optional YOLO26 detect pass).
@@ -627,6 +648,9 @@ class VideoProcessor:
                 for s in result["slots"]
             ],
             "fps": self._fps,
+            "infer_fps": self._infer_fps,
+            "infer_ms": round(self._infer_ms, 1),
+            "infer_cap": float(config.INFER_FPS),
             "source_type": self._source_type,
             "mode": self.model_name,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -691,7 +715,9 @@ class VideoProcessor:
         return {
             "total": 0, "available": 0, "occupied": 0,
             "occupancy_percent": 0.0, "avg_confidence": 0.0,
-            "slots": [], "fps": 0.0, "source_type": "auto", "mode": "unknown",
+            "slots": [], "fps": 0.0, "infer_fps": 0.0, "infer_ms": 0.0,
+            "infer_cap": float(config.INFER_FPS),
+            "source_type": "auto", "mode": "unknown",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "misparked_count": 0,
             "anomaly_enabled": False,

@@ -842,6 +842,9 @@ app is reachable on a single origin/port.
 docker-compose -f docker-compose.rpi.yml up -d
 ```
 
+The app is then reachable at `http://<pi-ip>:8001` — the compose file maps host
+`8001` → container `8000`.
+
 Pre-populate `backend/models/` with the exported `*_ncnn_model/` directories
 (see [Edge / Hub Deployment](#edge--hub-deployment)) before the first edge run,
 and set `BERTH_EDGE_HUB_URL` to point edge nodes at the hub.

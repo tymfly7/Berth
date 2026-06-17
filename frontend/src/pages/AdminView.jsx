@@ -54,6 +54,14 @@ export default function AdminView() {
     }
   }, [allCameraMetrics, metrics])
 
+  // Metrics for the camera currently shown in the lot map — drives the
+  // Model Confidence card so it reflects the selected lot, not the aggregate.
+  const lotCamMetrics = useMemo(() => {
+    if (!allCameraSlots.length) return displayMetrics
+    const safeIdx = Math.min(lotMapIdx, allCameraSlots.length - 1)
+    return allCameraMetrics[allCameraSlots[safeIdx].cameraId] || displayMetrics
+  }, [allCameraSlots, lotMapIdx, allCameraMetrics, displayMetrics])
+
   const fetchHistory = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/history`)
@@ -203,6 +211,7 @@ export default function AdminView() {
             const liveForCam = liveSlotsMap[cam.cameraId] || displayMetrics.slots
             const statusById = Object.fromEntries(liveForCam.map(s => [s.id, s.status]))
             const slots = cam.slots.map(s => ({ ...s, status: statusById[s.id] ?? null }))
+            const camMetrics = lotCamMetrics
             const multi = allCameraSlots.length > 1
             return (
               <>
@@ -215,6 +224,11 @@ export default function AdminView() {
                             background: i === safeIdx ? 'var(--accent-primary)' : 'var(--border-color)', transition: 'background 0.2s' }} />
                       ))}
                     </div>
+                  </div>
+                )}
+                {(camMetrics.avg_confidence || 0) > 0 && (
+                  <div style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 6 }}>
+                    Confidence: {Math.round(camMetrics.avg_confidence * 100)}%
                   </div>
                 )}
                 <div style={{ position: 'relative' }}>
@@ -237,7 +251,10 @@ export default function AdminView() {
           />
 
           <div className="analytics-row">
-            <ConfidenceGauge confidence={displayMetrics.avg_confidence} />
+            <ConfidenceGauge confidence={lotCamMetrics.avg_confidence} inferFps={lotCamMetrics.infer_fps} inferMs={lotCamMetrics.infer_ms} inferCap={lotCamMetrics.infer_cap}
+              showNav={allCameraSlots.length > 1}
+              onPrev={() => setLotMapIdx(i => (i - 1 + allCameraSlots.length) % allCameraSlots.length)}
+              onNext={() => setLotMapIdx(i => (i + 1) % allCameraSlots.length)} />
             <HeatmapView cameras={cameras} />
           </div>
 

@@ -1,5 +1,9 @@
 const style = {
-  container: { padding: '20px', textAlign: 'center' },
+  container: { padding: '20px', textAlign: 'center', position: 'relative' },
+  nav: {
+    position: 'absolute', top: '50%', transform: 'translateY(-50%)',
+    zIndex: 2, fontSize: '1.1rem', padding: '4px 10px',
+  },
   gauge: {
     position: 'relative',
     width: 100,
@@ -15,6 +19,11 @@ const style = {
     fontSize: '0.75rem',
     color: 'var(--text-secondary)',
   },
+  tag: {
+    marginLeft: 6,
+    opacity: 0.7,
+    fontStyle: 'italic',
+  },
 }
 
 function getColor(conf) {
@@ -23,7 +32,7 @@ function getColor(conf) {
   return 'var(--color-occupied)'
 }
 
-export default function ConfidenceGauge({ confidence }) {
+export default function ConfidenceGauge({ confidence, inferFps, inferMs, inferCap, showNav, onPrev, onNext }) {
   const hasData = (confidence || 0) > 0
   const pct = hasData ? Math.round(confidence * 100) : 0
   const color = hasData ? getColor(confidence) : 'rgba(255,255,255,0.18)'
@@ -35,6 +44,10 @@ export default function ConfidenceGauge({ confidence }) {
 
   return (
     <div className="glass-card" style={style.container}>
+      {showNav && <>
+        <button className="btn btn-ghost btn-sm" style={{ ...style.nav, left: 8 }} onClick={onPrev}>‹</button>
+        <button className="btn btn-ghost btn-sm" style={{ ...style.nav, right: 8 }} onClick={onNext}>›</button>
+      </>}
       <div className="section-title">🎯 Model Confidence</div>
 
       <div style={style.gauge}>
@@ -63,6 +76,14 @@ export default function ConfidenceGauge({ confidence }) {
 
       <div style={{ ...style.value, color }}>{hasData ? `${pct}%` : '–'}</div>
       <div style={style.label}>{hasData ? 'Average prediction confidence' : 'No inference data'}</div>
+      {(inferFps || 0) > 0 && (
+        <div style={style.label}>
+          {inferFps} inf/s · {inferMs} ms/frame
+          {(inferCap || 0) > 0 && (
+            <span style={style.tag}>{inferFps >= inferCap * 0.9 ? 'keeping up' : 'throttled'}</span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
