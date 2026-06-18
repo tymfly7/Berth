@@ -102,7 +102,7 @@ describe('regularizeRows', () => {
     polygon: [[cx - halfw, top], [cx + halfw, top], [cx + halfw, bot], [cx - halfw, bot]],
   })
 
-  it('aligns a jittered row to common baselines with uniform width', () => {
+  it('aligns a jittered row to common baselines, keeping each stall width', () => {
     const items = [
       mk('a', 0.2, 0.40, 0.60, 0.06),
       mk('b', 0.5, 0.42, 0.62, 0.08),
@@ -113,13 +113,31 @@ describe('regularizeRows', () => {
     // top corners now lie on one near-horizontal line
     const topYs = out.map(o => o.polygon[0][1])
     expect(Math.max(...topYs) - Math.min(...topYs)).toBeLessThan(0.02)
-    // all stalls share one width
-    const widths = out.map(o => Math.hypot(
-      o.polygon[1][0] - o.polygon[0][0], o.polygon[1][1] - o.polygon[0][1]))
-    expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(1e-6)
+    // each stall keeps its own (differing) width — not forced uniform
+    const width = o => Math.hypot(
+      o.polygon[1][0] - o.polygon[0][0], o.polygon[1][1] - o.polygon[0][1])
+    expect(width(out[0])).toBeCloseTo(0.12, 2)
+    expect(width(out[1])).toBeCloseTo(0.16, 2)
+    expect(width(out[2])).toBeCloseTo(0.10, 2)
     // id / order / extra fields preserved
     expect(out.map(o => o.id)).toEqual(['a', 'b', 'c'])
     expect(out[0].proposed).toBe(true)
+  })
+
+  it('preserves each divider slant on an angled row (no flattening)', () => {
+    // two adjacent slanted stalls sharing an edge; bottoms shifted right of tops
+    const slant = (id, tl, tr) => ({
+      id, label: id, proposed: true,
+      polygon: [[tl, 0.40], [tr, 0.40], [tr + 0.05, 0.60], [tl + 0.05, 0.60]],
+    })
+    const items = [slant('a', 0.20, 0.40), slant('b', 0.40, 0.60)]
+    const out = regularizeRows(items, 1)
+    expect(out).not.toBeNull()
+    // tops aligned on one line
+    expect(out[0].polygon[0][1]).toBeCloseTo(out[1].polygon[1][1], 3)
+    // slant kept: each stall's top-left x differs from its bottom-left x
+    expect(Math.abs(out[0].polygon[0][0] - out[0].polygon[3][0])).toBeGreaterThan(0.02)
+    expect(Math.abs(out[1].polygon[0][0] - out[1].polygon[3][0])).toBeGreaterThan(0.02)
   })
 
   it('keeps detected gaps (no fill): stall centers stay put', () => {

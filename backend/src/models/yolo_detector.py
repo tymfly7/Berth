@@ -9,6 +9,13 @@ There is no forward() or sigmoid head. Training uses the Ultralytics CLI, not tr
 
 import numpy as np
 
+# Painted bay-marking edges occasionally fire as phantom "vehicle" detections.
+# They differ from real cars in shape: tiny area and/or a long thin sliver. Drop
+# any detection below the minimum area or above the maximum aspect ratio so the
+# anomaly/OUTSIDE path never sees them. Real vehicle boxes clear both bars.
+_MIN_BOX_AREA     = 1500   # px²; smaller than the smallest plausible car box
+_MAX_ASPECT_RATIO = 4.0    # longer:shorter side; a car box stays well under this
+
 
 class ParkingYOLO26:
     """
@@ -58,8 +65,17 @@ class ParkingYOLO26:
         detections = []
         for r in results:
             for box in r.boxes:
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                w, h = x2 - x1, y2 - y1
+                if w <= 0 or h <= 0:
+                    continue
+                # Reject phantom detections off painted bay-marking edges.
+                if w * h < _MIN_BOX_AREA:
+                    continue
+                if max(w, h) / min(w, h) > _MAX_ASPECT_RATIO:
+                    continue
                 detections.append({
-                    "bbox":       box.xyxy[0].tolist(),
+                    "bbox":       [x1, y1, x2, y2],
                     "confidence": float(box.conf[0]),
                     "class_id":   int(box.cls[0]),
                 })

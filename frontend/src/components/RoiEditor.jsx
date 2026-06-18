@@ -124,14 +124,15 @@ function fitLine(pts) {
   return [a, (sv - a * su) / n]
 }
 
-// Regularize auto-detected quads into clean rows. Each detected quad is sized to
-// a car, not a stall, and neighbours don't share corners — so instead of welding
-// we: estimate the row direction (PCA over centers), group items into rows by
-// their cross-row offset, fit a top + bottom baseline per row, and rebuild each
-// item as a uniform-width quad sitting between the baselines at its detected
-// position. Same id/label kept; only polygons change. Returns null if no row had
-// >= 2 items to align. `aspect` = canvas H/W (y is scaled so distances are
-// pixel-proportional). No gaps are filled — one stall per detected item.
+// Regularize roughly-drawn / detected stalls into clean rows while keeping the
+// perspective fan. We estimate a row direction (PCA over centers), split items
+// into depth-rows by their cross-row offset, then per row fit the two long curb
+// lines and snap every top corner onto the front curb and every bottom corner
+// onto the back curb. Each stall keeps its own width and each divider keeps its
+// own slope, so an oblique lot's converging stalls are aligned, not flattened
+// into parallel rectangles. Same id/label kept; only polygons change. Returns
+// null if no row had >= 2 items to align. `aspect` = canvas H/W (y is scaled so
+// distances are pixel-proportional). No gaps are filled — one stall per item.
 export function regularizeRows(items, aspect = 1) {
   if (!items || items.length < 2) return null
   const toP = ([x, y]) => [x, y * aspect]
@@ -166,20 +167,20 @@ export function regularizeRows(items, aspect = 1) {
     const vs = ps.map(p => dot(p, v))
     return {
       i,
-      cu: dot(centers[i], u),
       cv: dot(centers[i], v),
-      width: Math.max(...us) - Math.min(...us),
       depth: Math.max(...vs) - Math.min(...vs),
       us, vs,
     }
   })
   const medianDepth = median(meta.map(m => m.depth))
 
-  // cluster into rows by cross-row offset: sort by v, split on a full-depth gap
+  // cluster into depth-rows by cross-row offset: sort by v, split on a gap. Two
+  // depth-rows of a lot share their middle curb, so their depths overlap and their
+  // centers sit only ~half a depth apart — split on half-depth, not full depth.
   const sorted = [...meta].sort((a, b) => a.cv - b.cv)
   const rows = [[sorted[0]]]
   for (let k = 1; k < sorted.length; k++) {
-    if (sorted[k].cv - sorted[k - 1].cv > medianDepth) rows.push([])
+    if (sorted[k].cv - sorted[k - 1].cv > medianDepth * 0.5) rows.push([])
     rows[rows.length - 1].push(sorted[k])
   }
 
@@ -187,22 +188,34 @@ export function regularizeRows(items, aspect = 1) {
   let changed = false
   for (const row of rows) {
     if (row.length < 2) continue
+    // per stall, split its corners into a top half (low v) and a bottom half
+    // (high v); record each side seam's along-row position at top and at bottom.
     const topPts = [], botPts = []
+    const seams = []
     for (const m of row) {
-      const byV = m.vs.map((vv, k) => [vv, k]).sort((a, b) => a[0] - b[0]).map(p => p[1])
-      ;[byV[0], byV[1]].forEach(k => topPts.push([m.us[k], m.vs[k]]))
-      ;[byV[byV.length - 1], byV[byV.length - 2]].forEach(k => botPts.push([m.us[k], m.vs[k]]))
+      const order = m.vs.map((vv, k) => [vv, k]).sort((a, b) => a[0] - b[0]).map(p => p[1])
+      const half = Math.max(1, Math.floor(order.length / 2))
+      const topK = order.slice(0, half), botK = order.slice(order.length - half)
+      topK.forEach(k => topPts.push([m.us[k], m.vs[k]]))
+      botK.forEach(k => botPts.push([m.us[k], m.vs[k]]))
+      const topU = topK.map(k => m.us[k]), botU = botK.map(k => m.us[k])
+      seams.push({
+        i: m.i,
+        uTL: Math.min(...topU), uTR: Math.max(...topU),
+        uBL: Math.min(...botU), uBR: Math.max(...botU),
+      })
     }
+    // fit the row's two long curbs; snap every top corner onto the front curb and
+    // every bottom corner onto the back curb, keeping each stall's own width and
+    // each divider's own slope (uTL != uBL stays slanted -> perspective fan kept).
     const [at, bt] = fitLine(topPts)
     const [ab, bb] = fitLine(botPts)
-    const W = median(row.map(m => m.width))
-    for (const m of row) {
-      const uL = m.cu - W / 2, uR = m.cu + W / 2
+    for (const s of seams) {
       const quadUV = [
-        [uL, at * uL + bt], [uR, at * uR + bt],
-        [uR, ab * uR + bb], [uL, ab * uL + bb],
+        [s.uTL, at * s.uTL + bt], [s.uTR, at * s.uTR + bt],
+        [s.uBR, ab * s.uBR + bb], [s.uBL, ab * s.uBL + bb],
       ]
-      newPolys[m.i] = quadUV.map(([uu, vv]) => [
+      newPolys[s.i] = quadUV.map(([uu, vv]) => [
         clamp(uu * u[0] + vv * v[0]),
         clamp((uu * u[1] + vv * v[1]) / aspect),
       ])

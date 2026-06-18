@@ -763,7 +763,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                   if (existing) {
                     targetId = existing.id
                   } else {
-                    targetId = slugify(name)
+                    targetId = uniqueLotId(name, lots)
                     const updated = [...lots, { name, id: targetId }]
                     setLots(updated)
                     localStorage.setItem(LOTS_KEY, JSON.stringify(updated))
