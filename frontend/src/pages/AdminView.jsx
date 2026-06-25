@@ -101,6 +101,11 @@ export default function AdminView() {
     setAllCameraSlots(results.filter(Boolean))
   }, [])
 
+  // Re-fetch slot geometry on demand (after an ROI edit/save) — the camera-set
+  // poll only refetches when the camera set changes, so polygon edits would
+  // otherwise stay stale until a page reload.
+  const refreshRoiSlots = useCallback(() => fetchRoiSlots(cameras), [fetchRoiSlots, cameras])
+
   const fetchCameras = useCallback(async () => {
     try {
       const res = await apiFetch(`${API_BASE}/api/cameras`)
@@ -194,6 +199,7 @@ export default function AdminView() {
             cameras={cameras}
             onCameraMetrics={handleCamMetrics}
             onCameraUnavailable={handleCamUnavailable}
+            onRoisSaved={refreshRoiSlots}
           />
           <div className="metrics-row fade-in">
             <MetricCards
@@ -261,7 +267,7 @@ export default function AdminView() {
         </div>
 
         <div className={`side-column ${menuOpen ? 'side-column--open' : ''}`}>
-          <SettingsPanel apiAction={apiAction} apiBase={API_BASE} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} setActiveModel={setActiveModelOptimistic} onCamerasChange={setCameras} />
+          <SettingsPanel apiAction={apiAction} apiBase={API_BASE} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} setActiveModel={setActiveModelOptimistic} onCamerasChange={setCameras} onRoisSaved={refreshRoiSlots} />
         </div>
       </div>
 

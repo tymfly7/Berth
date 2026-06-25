@@ -133,7 +133,7 @@ const s = {
   },
 }
 
-export default function CameraManager({ onCamerasChange, compact = false }) {
+export default function CameraManager({ onCamerasChange, onRoisSaved, compact = false }) {
   const [cameras, setCameras] = useState([])
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState(null)
@@ -317,6 +317,7 @@ export default function CameraManager({ onCamerasChange, compact = false }) {
       if (!res.ok) throw new Error('Save failed')
       const data = await res.json()
       showRoiMsg(`Saved ${data.saved} ROI${data.saved !== 1 ? 's' : ''}`)
+      onRoisSaved?.()
     } catch (e) { showRoiMsg(`Error: ${e.message}`) }
   }
 

@@ -111,7 +111,7 @@ function SubSection({ title, children, defaultOpen = true }) {
   )
 }
 
-export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchModelInfo, setActiveModel, onCamerasChange }) {
+export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchModelInfo, setActiveModel, onCamerasChange, onRoisSaved }) {
   const [open, setOpen] = useState(true)
 
   return (
@@ -124,7 +124,7 @@ export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchMode
       {open && (
         <>
           <SubSection title="Camera Registry" defaultOpen={false}>
-            <CameraManager compact onCamerasChange={onCamerasChange} />
+            <CameraManager compact onCamerasChange={onCamerasChange} onRoisSaved={onRoisSaved} />
           </SubSection>
 
           <div style={dividerStyle} />

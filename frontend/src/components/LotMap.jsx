@@ -1,6 +1,7 @@
 const STATUS_STYLE = {
   vacant:    { fill: 'rgba(16,185,129,0.38)',  stroke: '#10b981', label: 'Vacant'    },
   occupied:  { fill: 'rgba(244,63,94,0.48)',   stroke: '#f43f5e', label: 'Occupied'  },
+  unavailable: { fill: 'rgba(244,63,94,0.48)', stroke: '#f43f5e', label: 'Unavailable' },
   misparked: { fill: 'rgba(245,158,11,0.42)',  stroke: '#f59e0b', label: 'Misparked' },
 }
 const NO_STATUS_STYLE = { fill: 'rgba(100,116,139,0.13)', stroke: 'rgba(100,116,139,0.38)', label: 'No Data' }

@@ -77,7 +77,7 @@ function PickerCell({ cameraId, name, apiBase, onClick }) {
   )
 }
 
-export default function VideoFeed({ connected, activeCamera, apiBase, cameras = [], onCameraMetrics, onCameraUnavailable }) {
+export default function VideoFeed({ connected, activeCamera, apiBase, cameras = [], onCameraMetrics, onCameraUnavailable, onRoisSaved }) {
   const [roiOpen, setRoiOpen]       = useState(false)
   const [picking, setPicking]       = useState(false)
   const [selectedCamId, setSelectedCamId] = useState(null)
@@ -204,6 +204,7 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
       if (res.ok) {
         const d = await res.json()
         showMsg(`Saved ${d.saved} ROI${d.saved !== 1 ? 's' : ''}`)
+        onRoisSaved?.()
       } else {
         showMsg('Save failed')
       }
@@ -218,6 +219,7 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
       const res = await apiFetch(`${apiBase}/api/roi/${cameraId}/${roiId}`, { method: 'DELETE' })
       if (res.ok) {
         setRois(prev => prev.filter(r => r.id !== roiId))
+        onRoisSaved?.()
       } else {
         showMsg('Delete failed')
       }

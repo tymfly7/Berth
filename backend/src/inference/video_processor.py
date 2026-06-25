@@ -95,6 +95,7 @@ class VideoProcessor:
         self._cached_anomalies: list = []   # [{"bbox": (x1,y1,x2,y2), "label": str}]
         self._cached_status_lock = threading.Lock()
         self._vacant_since: dict = {}       # slot_id → time.time() when first seen vacant
+        self._straddle_last_seen: dict = {} # slot_id → time.time() last seen straddled
 
         self._frame = None
         self._frame_jpeg: bytes | None = None   # latest encoded JPEG (sent over WS as binary)
@@ -540,6 +541,7 @@ class VideoProcessor:
 
         # Anomaly detection (optional YOLO26 detect pass).
         new_anomalies = []
+        straddled_ids = set()
         if self._anomaly_enabled and self._yolo_detector is not None and self._roi_cache:
             h, w = frame.shape[:2]
             try:
@@ -553,6 +555,7 @@ class VideoProcessor:
                     )
                     if clf["status"] == "misparked":
                         if clf["reason"] == "straddling":
+                            straddled_ids.update(clf["intruded_rois"])
                             polygons = []
                             for rid in clf["intruded_rois"]:
                                 roi = roi_by_id.get(rid)
@@ -596,13 +599,31 @@ class VideoProcessor:
             {**s, "status": confirmed.get(s["id"], s["status"])}
             for s in result.get("slots", [])
         ]
+        # Bays straddled by a double-parked car are blocked → mark them
+        # unavailable so they are not offered as free spots. Like the vacant
+        # transition, the unavailable state is held for VACANT_CONFIRM_SECS after
+        # the straddle clears, so a brief detection gap doesn't flip the bay back.
+        for sid in straddled_ids:
+            self._straddle_last_seen[sid] = _now
+        held_unavail = {
+            sid for sid, t in self._straddle_last_seen.items()
+            if _now - t < config.VACANT_CONFIRM_SECS
+        }
+        # Drop expired entries so the dict doesn't grow unbounded.
+        self._straddle_last_seen = {
+            sid: t for sid, t in self._straddle_last_seen.items() if sid in held_unavail
+        }
+        for s in patched_slots:
+            if s["id"] in held_unavail:
+                s["status"] = "unavailable"
         _occ = sum(1 for s in patched_slots if s["status"] == "occupied")
+        _unavail = sum(1 for s in patched_slots if s["status"] == "unavailable")
         _tot = len(patched_slots)
         patched_result = {
             **result,
             "slots":             patched_slots,
             "occupied":          _occ,
-            "available":         _tot - _occ,
+            "available":         _tot - _occ - _unavail,
             "total":             _tot,
             "occupancy_percent": round(100.0 * _occ / _tot, 1) if _tot > 0 else 0.0,
         }
