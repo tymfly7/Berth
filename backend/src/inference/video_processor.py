@@ -73,6 +73,7 @@ class VideoProcessor:
 
         # Latest raw frame for the inference thread (always the newest).
         self._latest_raw: np.ndarray | None = None
+        self._last_capture = 0.0
         self._latest_raw_lock = threading.Lock()
         self._infer_event = threading.Event()
 
@@ -498,6 +499,14 @@ class VideoProcessor:
                 raw = self._latest_raw
             if raw is None:
                 continue
+            if config.DATA_GATHERING and now - self._last_capture >= config.CAPTURE_INTERVAL_SECS:
+                self._last_capture = now
+                day = datetime.now().strftime("%d-%m-%y")          # e.g. 12-06-26
+                out = config.CAPTURE_DIR / day
+                out.mkdir(parents=True, exist_ok=True)
+                idx = len(list(out.glob("*.jpg"))) + 1
+                ts = datetime.now().strftime("%H%M%S")
+                cv2.imwrite(str(out / f"img_{idx:03d}_{ts}.jpg"), raw)
             frame = cv2.resize(raw, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
             gen = self._generation
             t_sub = time.time()

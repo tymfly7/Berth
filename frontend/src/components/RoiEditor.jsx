@@ -489,14 +489,16 @@ export default function RoiEditor({
   useEffect(() => { redraw() }, [redraw])
 
   const makeRoi = useCallback((polygon) => {
-    commitChange([...rois, {
+    const newRoi = {
       id: `${idPrefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       label: `Slot ${rois.length + 1}`,
       polygon,
       color: ROI_COLOR,
       spotType: 'normal',
       owner: '',
-    }])
+    }
+    commitChange([...rois, newRoi])
+    setSelectedId(newRoi.id)   // auto-select so Divide activates on a freshly drawn box
   }, [rois, commitChange, idPrefix])
 
   const acceptProposal = useCallback((propId) => {

@@ -23,11 +23,15 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 - [API Reference](#api-reference)
 - [Project Structure](#project-structure)
 - [Configuration](#configuration)
+- [Environment & Secrets (.env)](#environment--secrets-env)
 - [Model Comparison](#model-comparison)
 - [Common Errors](#common-errors)
 - [Docker Deployment](#docker-deployment)
 - [Contributing](#contributing)
 - [Acknowledgements](#acknowledgements)
+
+> Operator tips, camera/ROI field notes, and hardening recommendations live in
+> [OPERATIONS.md](OPERATIONS.md).
 
 ---
 
@@ -54,7 +58,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 | Polygon Editing | Vertex drag, edge-midpoint insertion, duplicate, scale, undo/redo |
 | Multi-Camera Registry | USB, RTSP, file, and YouTube sources; one WebSocket feed per camera; cameras can share an ROI config |
 | Anomaly Detection | YOLO26 Detect flags misparked vehicles (straddling or outside markings) |
-| Public / Admin Views | Public board shows live availability; Admin dashboard is PIN-protected |
+| Public / Admin Views | Public board shows live availability (no auth); Admin dashboard requires server-side password login |
 | ROI Proposals | Auto-propose candidate slot regions from an uploaded reference image (optional line-snapping) |
 | Lot Map | SVG canvas color-coded by occupancy (vacant = green, occupied = red, misparked = amber) |
 | Analytics Chart | Occupancy trend over configurable time ranges (today / day / week / month) |
@@ -63,7 +67,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 | Model Comparison | Train all models, evaluate side-by-side, export to Excel |
 | Edge / Hub Mode | Inference-only edge nodes run NCNN models and sync occupancy/alerts to a central hub |
 | SQLite Persistence | Trends, alerts, and training runs stored across restarts |
-| API Key Auth | Optional header (`X-API-Key`) / WebSocket token auth for production |
+| Backend Auth | Admin password validated server-side → short-lived signed Bearer token; static `X-API-Key` for machine clients (edge→hub sync) |
 
 ---
 
@@ -73,7 +77,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 ┌─────────────────────────────┐
 │   Browser                   │
 │  /            → PublicView  │  REST polling (30 s) + per-camera WS (metrics only)
-│  /admin       → AdminView   │  WebSocket + REST  (PIN-gated)
+│  /admin       → AdminView   │  WebSocket + REST  (Bearer token from login)
 │  /admin/docs  → DocsPage    │
 └────────────┬────────────────┘
              │ HTTP / WebSocket
@@ -103,13 +107,18 @@ In production (Docker) the backend serves the built frontend from `static/`, so
 the whole app runs on a single origin. In local dev, Vite serves the frontend on
 `:5173` and talks to the backend on `:8001`.
 
+All authentication is handled by the backend. The admin password is validated
+server-side (`POST /api/auth/login`) and never shipped to the browser; on success
+the backend returns a short-lived signed Bearer token the frontend stores and
+sends on subsequent requests. See [Authentication](#authentication).
+
 ### Views
 
 | Route | Access | Purpose |
 |-------|--------|---------|
-| `/` | Public | Live availability count, per-lot breakdown, lot map, occupancy trend |
-| `/admin` | PIN-gated | Full dashboard: video feed, ROI editor, camera manager, training, settings |
-| `/admin/docs` | PIN-gated | In-app documentation page |
+| `/` | Public (no auth) | Live availability count, per-lot breakdown, lot map, occupancy trend |
+| `/admin` | Login required | Full dashboard: video feed, ROI editor, camera manager, training, settings |
+| `/admin/docs` | Login required | In-app documentation page |
 
 ---
 
@@ -176,6 +185,10 @@ npm run dev
 ```
 
 Open `http://localhost:5173` for the public view, or `http://localhost:5173/admin` for the admin dashboard.
+
+> **Admin login:** the dashboard requires a password. Set `BERTH_ADMIN_PASSWORD`
+> (and ideally `BERTH_AUTH_SECRET`) in `backend/.env` before starting, or admin
+> login returns `503`. See [Environment & Secrets](#environment--secrets-env).
 
 > **Port note:** the backend defaults to **8001** (8000 is left free for other
 > local services / Docker). Override with `BERTH_PORT`.
@@ -338,9 +351,9 @@ curl -X POST "http://localhost:8001/api/roi/default/propose?use_line_detection=t
   -F "file=@parking_lot_snapshot.jpg"
 ```
 
-Proposals are based on vehicle detections (occupied spots). Empty spots are only
-reliably detected with `use_line_detection=true` and visible markings. Review and
-edit all proposals before saving — they are **not** persisted automatically.
+Proposals are returned for review and are **not** persisted automatically — saving
+is a separate step. See [OPERATIONS.md](OPERATIONS.md#roi-editor-workflow) for
+when auto-propose works well.
 
 ---
 
@@ -360,51 +373,31 @@ own `VideoProcessor`; detection work is dispatched to a shared `InferencePool`.
 
 ### Connecting a camera
 
-Pick the source type based on where the camera physically lives.
+Add a camera from **Admin > Settings > Camera Registry** (or via the API below),
+choosing the source type for where the camera physically lives:
 
-**USB — camera wired into the backend machine**
+| Type | Source value | Notes |
+|------|--------------|-------|
+| `usb` | device index (`0`, `1`, …) | Read server-side; camera must be on the backend host |
+| `rtsp` | `rtsp://user:pass@<camera-ip>:554/<stream-path>` | `<stream-path>` is vendor-specific |
+| `file` | path to an uploaded video file | |
+| `youtube` | YouTube live URL | Resolved to an HLS stream, cached `BERTH_YT_CACHE_TTL` s |
 
-OpenCV reads the device **server-side**, so the camera must be plugged into the
-host running the backend (not the laptop where you open the browser).
+A camera's `roi_camera_id` can point at another camera's ROI config to share one
+layout across feeds.
 
-- The Source is the integer **device index**: `0` for the first/built-in camera, `1`, `2`, … for additional ones.
-- Add Camera → Type **USB** → Source `0` → **Activate**.
-- If the index is wrong nothing opens and the camera shows offline — try the next index. Only one app can hold a given camera at a time.
-
-**RTSP — CCTV / IP camera on the network**
-
-Most CCTV and IP cameras expose an RTSP URL:
-
-```
-rtsp://user:pass@<camera-ip>:554/<stream-path>
-```
-
-- The `<stream-path>` is vendor-specific — e.g. Hikvision `/Streaming/Channels/101`, Dahua `/cam/realmonitor?channel=1&subtype=0`. Check the camera's manual or its ONVIF/app settings.
-- Test the URL in **VLC** first (*Media → Open Network Stream*). If VLC plays it, the backend will too (both use FFmpeg).
-- Add Camera → Type **RTSP** → Source the `rtsp://…` URL → **Activate**.
-- **Tip:** prefer the camera's lower-resolution **sub-stream** (e.g. Hikvision `Channels/102`, Dahua `subtype=1`). Parking detection doesn't need full resolution, and it's far lighter on CPU and bandwidth.
-
-**YouTube Live — public live feed**
-
-Paste a YouTube live URL; the backend resolves it to an HLS stream (cached for
-`BERTH_YT_CACHE_TTL` seconds).
-
-**Sharing an ROI config across cameras**
-
-When adding a camera you can set `roi_camera_id` to point at another camera's ROI
-config — useful when several feeds cover the same lot layout.
-
-**Keeping RTSP credentials out of `cameras.json`**
-
-Instead of saving the password in the stored source, set it as an environment
-variable named `BERTH_CAM_SOURCE_<CAMERA_ID>` (uppercase, hyphens → underscores).
-If present, the registry uses it at runtime and the on-disk config stays
-credential-free.
+**Keeping RTSP credentials out of `cameras.json`** — set the source as an
+environment variable named `BERTH_CAM_SOURCE_<CAMERA_ID>` (uppercase, hyphens →
+underscores). If present, the registry uses it at runtime and the on-disk config
+stays credential-free:
 
 ```
 # camera id "lot-a-1f3c2d" →
 BERTH_CAM_SOURCE_LOT_A_1F3C2D=rtsp://user:pass@192.168.1.10:554/Streaming/Channels/102
 ```
+
+> Camera selection tips (VLC testing, sub-streams, USB index troubleshooting) are
+> in [OPERATIONS.md](OPERATIONS.md#camera-connection-tips).
 
 ### Manage cameras via API
 
@@ -517,6 +510,12 @@ image.
 
 ## API Reference
 
+### Auth
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/auth/login` | Validate admin password → returns `{token, expires_in}` (Bearer session token); `503` if `BERTH_ADMIN_PASSWORD` is unset, `401` if wrong |
+
 ### Core / meta
 
 | Method | Endpoint | Description |
@@ -530,6 +529,8 @@ image.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/public/metrics` | Aggregated occupancy metrics (no auth) |
+| GET | `/api/public/lots` | Per-camera lot geometry + live occupancy for the public board (no auth) |
+| GET | `/api/public/trends` | Occupancy trends for the public board (`?range=`, no auth) |
 | GET | `/api/metrics` | Default-processor metrics (auth) |
 | GET | `/api/heatmap` | Usage heatmap for the active camera |
 | GET | `/api/heatmap/{camera_id}` | Heatmap for a specific camera |
@@ -621,7 +622,9 @@ School Project/
 ├── backend/
 │   ├── main.py                          # FastAPI app assembly, WebSockets, SPA fallback
 │   ├── config.py                        # Centralized config (paths, env vars, profiles)
-│   ├── requirements.txt
+│   ├── .env                             # Local secrets (gitignored) — loaded by config.py
+│   ├── requirements.txt                 # Full server deps
+│   ├── requirements.edge.txt            # Slim edge deps (used by Dockerfile.rpi)
 │   ├── train_all.py                     # CLI: train all models in sequence
 │   ├── export_models.py                 # CLI: export trained models to NCNN for edge
 │   ├── verify.py                        # CLI: environment / structure sanity check
@@ -682,11 +685,11 @@ School Project/
 │   │   ├── config.js                    # API_BASE / WS_BASE resolution (dev vs prod)
 │   │   ├── pages/
 │   │   │   ├── PublicView.jsx           # Public availability board (no auth)
-│   │   │   ├── AdminView.jsx            # Full operator dashboard (PIN-gated)
+│   │   │   ├── AdminView.jsx            # Full operator dashboard (login-gated)
 │   │   │   ├── DocsPage.jsx             # In-app documentation
 │   │   │   └── NotFoundPage.jsx         # 404
 │   │   ├── components/
-│   │   │   ├── PinGate.jsx              # PIN prompt protecting /admin
+│   │   │   ├── PinGate.jsx              # Login form; password verified server-side via /api/auth/login
 │   │   │   ├── Header.jsx               # App header + connection indicator
 │   │   │   ├── VideoFeed.jsx            # WebSocket video frame display
 │   │   │   ├── MultiCameraGrid.jsx      # Grid of CameraFeedCell for active cameras
@@ -715,9 +718,11 @@ School Project/
 ├── configs/
 │   └── model_configs.yaml
 ├── Dockerfile                           # Server image (frontend build + Python backend)
-├── Dockerfile.rpi                       # ARM64 / Raspberry Pi 5 edge image
-├── docker-compose.yml                   # Server stack
-├── docker-compose.rpi.yml               # Raspberry Pi 5 edge node
+├── Dockerfile.rpi                       # ARM64 / Raspberry Pi edge image
+├── docker-compose.yml                   # Server stack (127.0.0.1:9000 → 8000)
+├── docker-compose.rpi.yml               # Raspberry Pi edge node (8001 → 8000)
+├── .env_edge                            # Secrets template for compose (gitignored)
+├── OPERATIONS.md                        # Operator tips, field notes, hardening
 └── README.md
 ```
 
@@ -732,7 +737,10 @@ environment variables.
 |----------|---------|-------------|
 | `BERTH_HOST` | `0.0.0.0` | Backend bind host |
 | `BERTH_PORT` | `8001` | Backend port |
-| `BERTH_API_KEY` | _(empty — auth off)_ | API key for protected endpoints + WS token |
+| `BERTH_ADMIN_PASSWORD` | _(empty — login returns 503)_ | Admin password, validated server-side by `/api/auth/login` |
+| `BERTH_AUTH_SECRET` | _(random per start)_ | Signing key for session tokens; set it to keep logins valid across restarts |
+| `BERTH_AUTH_TTL` | `28800` | Admin session token lifetime in seconds (8 h) |
+| `BERTH_API_KEY` | _(empty — static-key path open)_ | Static service key (`X-API-Key`) for machine clients (edge→hub sync) + WS token |
 | `BERTH_ALLOWED_ORIGIN` | _(empty)_ | Extra explicit CORS origin (LAN ranges allowed by default) |
 | `BERTH_UPLOAD_RATE_LIMIT` | `10/minute` | Rate limit on upload endpoints |
 | `BERTH_MODEL` | `yolo26_classify` | Default active model on startup |
@@ -766,16 +774,74 @@ Training-specific variables are listed under [Training Models](#training-models)
 | Warning | ≥ 85% |
 | Critical | ≥ 95% |
 
-### Security model & limitations
+### Authentication
 
-Auth is intentionally coarse: a single shared `BERTH_API_KEY` gates every
-protected REST endpoint and the WebSocket stream (there is no per-user identity,
-roles, or audit trail). The `/admin` PIN gate is a client-side convenience, not a
-security boundary — the API key is what actually protects the backend. When
-`BERTH_API_KEY` is empty, **all** protected endpoints are open (the server logs a
-warning on startup). CORS allows localhost and private LAN ranges by default. Set
-the API key (and serve over TLS via a reverse proxy) before any network-facing
-deployment.
+All authentication is handled by the backend; the frontend holds no secrets.
+
+- **Admin login.** The `/admin` password is sent to `POST /api/auth/login`, which
+  compares it (constant-time) against `BERTH_ADMIN_PASSWORD`. On success the
+  backend returns a short-lived HMAC-signed Bearer token (signed with
+  `BERTH_AUTH_SECRET`, valid `BERTH_AUTH_TTL` seconds). The frontend sends it as
+  `Authorization: Bearer <token>` on REST calls and as `?token=` on the admin
+  WebSocket. If `BERTH_ADMIN_PASSWORD` is unset, login returns `503` and the
+  dashboard is unreachable.
+- **Service key.** Protected endpoints also accept a static `X-API-Key` equal to
+  `BERTH_API_KEY`. This is for machine-to-machine clients — chiefly the edge→hub
+  sync worker — not the browser. When `BERTH_API_KEY` is empty, the static-key
+  path is open (any request without a valid Bearer token still passes); set it for
+  network-facing deployments.
+- **Public endpoints** (`/api/public/*`) require no auth, so the public board
+  works without logging in. They expose whitelisted fields only — never camera
+  sources or credentials.
+- **CORS** allows localhost and private LAN ranges by default; add a public origin
+  with `BERTH_ALLOWED_ORIGIN`.
+
+For hardening recommendations (TLS, strong secrets) see
+[OPERATIONS.md](OPERATIONS.md#security-hardening).
+
+---
+
+## Environment & Secrets (.env)
+
+There are **two separate `.env` mechanisms** — don't confuse them:
+
+| File | Used by | When it's read |
+|------|---------|----------------|
+| `backend/.env` | bare-metal `python main.py` | Loaded by `python-dotenv` in `config.py` at startup |
+| `.env` in the compose dir (project root) | `docker compose` | Interpolated into `${BERTH_*}` placeholders in the compose files, then passed to the container |
+
+All `.env*` files are **gitignored** (`.env`, `frontend/.env`, `.env_edge`) — they
+hold secrets and must never be committed. `.env_edge` (project root) is a tracked-
+*intent*, untracked-*content* template you copy to `.env` and fill in.
+
+### Bare-metal: `backend/.env`
+
+```ini
+# backend/.env
+BERTH_ADMIN_PASSWORD=choose-a-strong-pin     # REQUIRED — without it admin login returns 503
+BERTH_AUTH_SECRET=paste-a-long-random-string # keeps login tokens valid across restarts
+BERTH_API_KEY=                               # only needed for machine clients (edge→hub sync)
+```
+
+### Docker: compose-dir `.env`
+
+Compose reads variables for `${BERTH_API_KEY:-}`, `${BERTH_ADMIN_PASSWORD:-}`, and
+`${BERTH_AUTH_SECRET:-}` from a `.env` next to the compose file (the project root)
+or from your shell. Copy the template and fill it in:
+
+```bash
+cp .env_edge .env        # then edit .env with real values
+docker compose -f docker-compose.rpi.yml up -d
+```
+
+To keep the template under a different name, point compose at it explicitly:
+
+```bash
+docker compose --env-file .env_edge -f docker-compose.rpi.yml up -d
+```
+
+`frontend/.env` no longer holds any secret — the browser authenticates with the
+session token from login, so there is nothing to bake into the bundle.
 
 ---
 
@@ -816,76 +882,107 @@ classifiers side-by-side. Download results as a formatted Excel file from
 
 ## Docker Deployment
 
-### Server stack
+Both images build the frontend and serve it from `static/`, so the whole app is
+reachable on a single origin/port. **Inside every container the backend listens on
+`8000`** (the `8001` default applies only to bare-metal `python main.py`).
+
+Secrets are passed as container env, never baked into the image. With compose,
+`${BERTH_*}` placeholders are interpolated from a `.env` file **in the compose
+directory** (the project root) or from your shell — this is a *different* file from
+`backend/.env`. See [Environment & Secrets](#environment--secrets-env).
+
+### 1. Server, on a normal machine (x86-64)
 
 ```bash
-# Build image
+# Build the image
 docker build -t berth:1.0 .
 
-# Run directly (container port 8000)
-docker run -p 8000:8000 berth:1.0
+# Run it directly (host 8000 → container 8000)
+docker run -p 8000:8000 \
+  -e BERTH_ADMIN_PASSWORD=your-pin \
+  -e BERTH_AUTH_SECRET=your-long-random-string \
+  berth:1.0
 
-# With API key
-docker run -p 8000:8000 -e BERTH_API_KEY=your-secret berth:1.0
-
-# With docker-compose (publishes 127.0.0.1:9000 → 8000)
-docker-compose up -d
+# Or with compose (reads ./.env; publishes 127.0.0.1:9000 → 8000)
+docker compose up -d --build
 ```
 
-The server image builds the frontend and serves it from `static/`, so the whole
-app is reachable on a single origin/port.
+`docker-compose.yml` binds to `127.0.0.1:9000`, so the app is reachable at
+`http://localhost:9000` and not exposed on the network — put a reverse proxy in
+front for remote access. It bind-mounts `backend/{data,models,outputs,uploads}` so
+datasets, weights, and runs persist on the host.
 
-### Edge / Raspberry Pi 5
+### 2. Edge node, on a Raspberry Pi (ARM64)
+
+The edge image (`Dockerfile.rpi`) installs CPU-only torch, runs the `edge` profile
+(inference-only), and reads camera `/dev/video0` plus persistent volumes for the
+SQLite DB and ROI/camera config.
 
 ```bash
-# Raspberry Pi 5 (ARM64) — uses Dockerfile.rpi, NCNN models, edge profile
-docker-compose -f docker-compose.rpi.yml up -d
+# On the Pi — build locally and start (host 8001 → container 8000)
+docker compose -f docker-compose.rpi.yml up -d --build
 ```
 
-The app is then reachable at `http://<pi-ip>:8001` — the compose file maps host
-`8001` → container `8000`.
+The app is then reachable at `http://<pi-ip>:8001`. Required env (set via the
+compose `.env`): `BERTH_ADMIN_PASSWORD` (else login → `503`); recommended:
+`BERTH_AUTH_SECRET`, `BERTH_API_KEY`, and `BERTH_EDGE_HUB_URL` to point the node at
+the hub. Pre-populate `backend/models/` with the exported `*_ncnn_model/`
+directories (see [Edge / Hub Deployment](#edge--hub-deployment)) before the first
+run.
 
-Pre-populate `backend/models/` with the exported `*_ncnn_model/` directories
-(see [Edge / Hub Deployment](#edge--hub-deployment)) before the first edge run,
-and set `BERTH_EDGE_HUB_URL` to point edge nodes at the hub.
+### 3. Baking the edge image on x86 and shipping it to the Pi
 
-> Inside the containers the backend listens on `8000`. The `8001` default applies
-> to bare-metal `python main.py` runs.
+Building on the Pi is slow. Cross-compile on a faster x86 machine, save the image
+to a tarball, copy it over, and load it on the Pi:
+
+```bash
+# On the x86 build machine — cross-compile for ARM64
+docker buildx build --platform linux/arm64 \
+  -t berth-rpi:latest -f Dockerfile.rpi . --load
+
+# Save the image to a compressed tarball
+docker save berth-rpi:latest | gzip > berth-rpi.tar.gz
+
+# Copy it to the Pi
+scp berth-rpi.tar.gz pi@raspberrypi.local:~/
+
+# On the Pi — load the image, then start with the prebuilt image
+docker load < berth-rpi.tar.gz
+docker compose -f docker-compose.rpi.yml up -d   # no --build: uses the loaded image
+```
+
+`docker-compose.rpi.yml` references `image: berth-rpi:latest`, so once the image is
+loaded the compose run picks it up without rebuilding. (Native build on the Pi —
+`docker build -t berth-rpi:latest -f Dockerfile.rpi .` — also works, just slower.)
+
+> The `.tar`/`.tar.gz` artifacts are gitignored; don't commit them. Rebuild after
+> any frontend/backend change so the image isn't stale.
 
 ---
 
 ## Contributing
 
-Contributions are welcome — bug fixes, new model backends, UI improvements, and
-documentation all help.
+Branch off `main`, run the checks below, and open a PR against `main`. CI
+(`.github/workflows/ci.yml`) runs the same three jobs — all must be green.
 
-1. **Fork** the repository and create a feature branch off `main`:
-   ```bash
-   git checkout -b feature/your-change
-   ```
-2. **Make focused changes.** Keep the diff scoped to one concern; match the
-   existing code style on both the backend (Python) and frontend (React).
-3. **Run the test and lint suites** before opening a PR — the same checks run in
-   CI (`.github/workflows/ci.yml`):
+```bash
+git checkout -b feature/your-change
+```
 
-   **Backend** (from `backend/`):
-   ```bash
-   pytest
-   ruff check . --select E,F,W --ignore E501
-   ```
+**Backend** (from `backend/`):
+```bash
+pytest
+ruff check . --select E,F,W --ignore E501
+```
 
-   **Frontend** (from `frontend/`):
-   ```bash
-   npm run test          # vitest
-   npx eslint src --max-warnings 0
-   ```
-4. **Update docs** when behavior changes — README, the in-app `/admin/docs` page,
-   and any affected env-var / API tables.
-5. **Open a pull request** against `main` with a clear description of the change
-   and how you verified it. CI must be green (all three jobs: pytest, vitest, lint).
+**Frontend** (from `frontend/`):
+```bash
+npm run test          # vitest
+npx eslint src --max-warnings 0
+```
 
-For larger features or architectural changes, open an issue first to discuss the
-approach.
+Contribution etiquette (scope, docs, when to open an issue first) is in
+[OPERATIONS.md](OPERATIONS.md#contributing-etiquette).
 
 ---
 

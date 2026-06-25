@@ -136,6 +136,10 @@ DEPLOYMENT_PROFILE = os.getenv("BERTH_DEPLOYMENT", "server")
 # Example: "http://192.168.1.10:8000"
 EDGE_HUB_URL = os.getenv("BERTH_EDGE_HUB_URL", "")
 
+DATA_GATHERING        = os.getenv("BERTH_DATA_GATHERING", "0") == "1"   # master enable (collection rig only)
+CAPTURE_DIR           = Path(os.getenv("BERTH_CAPTURE_DIR", str(Path.home() / "T12LOT")))
+CAPTURE_INTERVAL_SECS = float(os.getenv("BERTH_CAPTURE_INTERVAL", "300"))  # 5 min
+
 # ---------------------------------------------------------------------------
 # Inference / streaming
 # ---------------------------------------------------------------------------
