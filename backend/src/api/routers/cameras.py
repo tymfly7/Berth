@@ -142,8 +142,8 @@ async def add_camera(request: Request):
         raise HTTPException(400, "name is required")
     if not source:
         raise HTTPException(400, "source is required")
-    if type_ not in ("usb", "rtsp", "file", "youtube"):
-        raise HTTPException(400, "type must be usb, rtsp, file, or youtube")
+    if type_ not in ("usb", "rtsp", "youtube"):
+        raise HTTPException(400, "type must be usb, rtsp, or youtube")
 
     validate_camera_source(source, type_)
 
@@ -168,8 +168,8 @@ async def update_camera(camera_id: str, request: Request):
     type_   = body.get("type",    "").strip() or None
     roi_camera_id = body.get("roi_camera_id", "").strip() or None
 
-    if type_ is not None and type_ not in ("usb", "rtsp", "file", "youtube"):
-        raise HTTPException(400, "type must be usb, rtsp, file, or youtube")
+    if type_ is not None and type_ not in ("usb", "rtsp", "youtube"):
+        raise HTTPException(400, "type must be usb, rtsp, or youtube")
 
     cam_current = camera_registry.get(camera_id)
     if cam_current is None:

@@ -56,7 +56,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 | Real-Time Detection | Per-camera WebSocket video stream (~20 FPS server / ~10 FPS edge) with slot-wise occupancy overlay |
 | ROI Editor | Draw, edit, and manage custom parking slot polygons per camera |
 | Polygon Editing | Vertex drag, edge-midpoint insertion, duplicate, scale, undo/redo |
-| Multi-Camera Registry | USB, RTSP, file, and YouTube sources; one WebSocket feed per camera; cameras can share an ROI config |
+| Multi-Camera Registry | USB, RTSP, and YouTube sources; one WebSocket feed per camera; cameras can share an ROI config |
 | Anomaly Detection | YOLO26 Detect flags misparked vehicles (straddling or outside markings) |
 | Public / Admin Views | Public board shows live availability (no auth); Admin dashboard requires server-side password login |
 | ROI Proposals | Auto-propose candidate slot regions from an uploaded reference image (optional line-snapping) |
@@ -368,7 +368,6 @@ own `VideoProcessor`; detection work is dispatched to a shared `InferencePool`.
 |------|---------------|
 | `usb` | `0` (device index) |
 | `rtsp` | `rtsp://user:pass@192.168.1.10/stream` |
-| `file` | path to an uploaded video file |
 | `youtube` | YouTube video URL (resolved to an HLS stream) |
 
 ### Connecting a camera
@@ -380,7 +379,6 @@ choosing the source type for where the camera physically lives:
 |------|--------------|-------|
 | `usb` | device index (`0`, `1`, …) | Read server-side; camera must be on the backend host |
 | `rtsp` | `rtsp://user:pass@<camera-ip>:554/<stream-path>` | `<stream-path>` is vendor-specific |
-| `file` | path to an uploaded video file | |
 | `youtube` | YouTube live URL | Resolved to an HLS stream, cached `BERTH_YT_CACHE_TTL` s |
 
 A camera's `roi_camera_id` can point at another camera's ROI config to share one
