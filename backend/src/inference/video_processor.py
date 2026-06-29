@@ -11,6 +11,7 @@ the inference thread runs the model in the background and updates the cache.
 """
 
 import os
+import re
 import sys
 import base64
 import threading
@@ -55,9 +56,13 @@ class VideoProcessor:
         "unknown":  (180, 180, 180),
     }
 
-    def __init__(self, model_name=None, camera_id: str = "default"):
+    def __init__(self, model_name=None, camera_id: str = "default",
+                 name: str = None, data_gathering: bool = False):
         self.model_name = model_name or config.ACTIVE_MODEL
         self.camera_id = camera_id
+        # Display name drives the per-camera capture folder; sanitized for fs safety.
+        self._capture_name = re.sub(r"[^A-Za-z0-9._-]", "_", name or camera_id)
+        self._data_gathering = data_gathering
         self._source = 0
         self._source_type = "auto"
 
@@ -166,6 +171,10 @@ class VideoProcessor:
         for t in (self._thread, self._display_thread, self._infer_thread):
             if t:
                 t.join(timeout=3)
+
+    def set_data_gathering(self, enabled: bool) -> None:
+        """Enable/disable periodic full-frame capture for training data collection."""
+        self._data_gathering = enabled
 
     def set_anomaly_detection(self, enabled: bool) -> None:
         """Enable/disable wrong-parking anomaly detection."""
@@ -500,10 +509,10 @@ class VideoProcessor:
                 raw = self._latest_raw
             if raw is None:
                 continue
-            if config.DATA_GATHERING and now - self._last_capture >= config.CAPTURE_INTERVAL_SECS:
+            if self._data_gathering and now - self._last_capture >= config.CAPTURE_INTERVAL_SECS:
                 self._last_capture = now
                 day = datetime.now().strftime("%d-%m-%y")          # e.g. 12-06-26
-                out = config.CAPTURE_DIR / day
+                out = config.CAPTURE_DIR / self._capture_name / day
                 out.mkdir(parents=True, exist_ok=True)
                 idx = len(list(out.glob("*.jpg"))) + 1
                 ts = datetime.now().strftime("%H%M%S")

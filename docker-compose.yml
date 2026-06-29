@@ -14,9 +14,11 @@ services:
       - BERTH_API_KEY=${BERTH_API_KEY:-}
       - BERTH_EPOCHS=30
       - BERTH_BATCH_SIZE=64
+      - BERTH_CAPTURE_DIR=/app/captures
     volumes:
       - ./backend/data:/app/data
       - ./backend/models:/app/models
       - ./backend/outputs:/app/outputs
       - ./backend/uploads:/app/uploads
+      - ./captures:/app/captures
     restart: unless-stopped

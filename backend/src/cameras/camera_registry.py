@@ -122,6 +122,7 @@ class CameraRegistry:
                 "type": type_,
                 "roi_camera_id": roi_camera_id or id,
                 "active": False,
+                "data_gathering": False,
                 "added_at": datetime.now(timezone.utc).isoformat(),
             }
             self._cameras[id] = cam
@@ -177,7 +178,10 @@ class CameraRegistry:
             try:
                 mn = model_name or config.ACTIVE_MODEL
                 roi_id = cam.get("roi_camera_id") or id
-                proc = VideoProcessor(model_name=mn, camera_id=roi_id)
+                proc = VideoProcessor(
+                    model_name=mn, camera_id=roi_id,
+                    name=cam["name"], data_gathering=cam.get("data_gathering", False),
+                )
                 proc.set_video_source(self._resolve_source(cam), source_type=cam["type"])
                 proc.start_processing()
                 self._processors[id] = proc
@@ -196,6 +200,19 @@ class CameraRegistry:
             self._deactivate(id)
             self._save()
             logger.info(f"Camera '{id}' deactivated")
+            return True
+
+    def set_data_gathering(self, id: str, enabled: bool) -> bool:
+        with self._lock:
+            cam = self._cameras.get(id)
+            if not cam:
+                return False
+            cam["data_gathering"] = enabled
+            proc = self._processors.get(id)
+            if proc:
+                proc.set_data_gathering(enabled)
+            self._save()
+            logger.info(f"Camera '{id}' data_gathering set to {enabled}")
             return True
 
     def shutdown(self):

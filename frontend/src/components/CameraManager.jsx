@@ -256,6 +256,22 @@ export default function CameraManager({ onCamerasChange, onRoisSaved, compact = 
     } catch { /* silent */ }
   }
 
+  const handleDataGathering = async (cam) => {
+    try {
+      const res = await apiFetch(`${API_BASE}/api/cameras/${cam.id}/data-gathering`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: !cam.data_gathering }),
+      })
+      if (!res.ok) {
+        const d = await res.json()
+        setError(d.detail || 'Failed to toggle data gathering.')
+        return
+      }
+      await fetchCameras()
+    } catch { /* silent */ }
+  }
+
   const setField = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }))
 
   const showRoiMsg = (msg) => { setRoiMsg(msg); setTimeout(() => setRoiMsg(null), 4000) }
@@ -412,6 +428,17 @@ export default function CameraManager({ onCamerasChange, onRoisSaved, compact = 
                   </button>
                   <button style={{ ...s.btn(), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px', marginRight: 4 }} onClick={() => openRoiEdit(cam)}>
                     ✎
+                  </button>
+                  <button
+                    title={cam.data_gathering ? 'Data gathering on — click to stop' : 'Data gathering off — click to start'}
+                    style={{
+                      ...s.btn(), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px', marginRight: 4,
+                      color: cam.data_gathering ? '#2ecc71' : 'var(--text-muted)',
+                      borderColor: cam.data_gathering ? '#2ecc71' : undefined,
+                    }}
+                    onClick={() => handleDataGathering(cam)}
+                  >
+                    📷
                   </button>
                   <button style={{ ...s.btn('danger'), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px' }} onClick={() => handleDelete(cam.id)}>✕</button>
                 </td>

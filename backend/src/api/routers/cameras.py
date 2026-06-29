@@ -218,3 +218,12 @@ def deactivate_camera(camera_id: str):
         raise HTTPException(404, f"Camera '{camera_id}' not found")
     camera_registry.deactivate(camera_id)
     return {"deactivated": camera_id}
+
+
+@router.post("/api/cameras/{camera_id}/data-gathering", dependencies=[Depends(verify_api_key)])
+async def set_camera_data_gathering(camera_id: str, request: Request):
+    body = await request.json()
+    enabled = bool(body.get("enabled", False))
+    if not camera_registry.set_data_gathering(camera_id, enabled):
+        raise HTTPException(404, f"Camera '{camera_id}' not found")
+    return {"camera_id": camera_id, "data_gathering": enabled}
