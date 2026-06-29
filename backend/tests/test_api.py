@@ -135,22 +135,6 @@ def test_roi_crud(test_client):
     assert r.json()[0]["id"] == "roi_002"
 
 
-# ── Dataset upload ────────────────────────────────────────────────────────────
-
-def test_upload_dataset(test_client, tmp_data_dir):
-    files = [
-        ("files", (f"img{i}.jpg", _jpeg_bytes(), "image/jpeg"))
-        for i in range(3)
-    ]
-    r = test_client.post(
-        "/api/dataset/upload",
-        files=files,
-        data={"label": "occupied"},
-    )
-    assert r.status_code == 200
-    assert r.json()["saved"] == 3
-
-
 # ── Training ──────────────────────────────────────────────────────────────────
 
 def test_train_start_no_dataset(test_client, tmp_path, monkeypatch):

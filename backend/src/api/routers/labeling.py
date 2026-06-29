@@ -41,6 +41,9 @@ _IMG_EXTS = ("*.jpg", "*.jpeg", "*.png")
 _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 _running: set[str] = set()
+# Outcome of the most recent run per lot so the UI can tell success from a crash
+# (the op leaves /api/status either way). {lot_id: {"ok": bool, "error": str|None}}
+_last_run: dict[str, dict] = {}
 
 
 def _lock_for(lot_id: str) -> threading.Lock:
@@ -92,6 +95,36 @@ def _quad_bbox(polygon: list) -> tuple[float, float, float, float]:
     return (x0 + x1) / 2, (y0 + y1) / 2, x1 - x0, y1 - y0
 
 
+def _order_quad(pts: np.ndarray) -> np.ndarray:
+    """Order 4 points as top-left, top-right, bottom-right, bottom-left."""
+    s = pts.sum(axis=1)
+    d = np.diff(pts, axis=1).ravel()
+    return np.array([pts[np.argmin(s)], pts[np.argmin(d)],
+                     pts[np.argmax(s)], pts[np.argmax(d)]], dtype="float32")
+
+
+def _crop_roi(frame: np.ndarray, polygon: list):
+    """Deskewed (perspective-warped) crop for a 4-point quad so a slanted stall
+    yields a tight, neighbor-free rectangle; axis-aligned bbox crop otherwise."""
+    h, w = frame.shape[:2]
+    if len(polygon) == 4:
+        pts = np.array([[p[0] * w, p[1] * h] for p in polygon], dtype="float32")
+        tl, tr, br, bl = _order_quad(pts)
+        out_w = int(max(np.linalg.norm(br - bl), np.linalg.norm(tr - tl)))
+        out_h = int(max(np.linalg.norm(tr - br), np.linalg.norm(tl - bl)))
+        if out_w >= 2 and out_h >= 2:
+            dst = np.array([[0, 0], [out_w - 1, 0], [out_w - 1, out_h - 1],
+                            [0, out_h - 1]], dtype="float32")
+            m = cv2.getPerspectiveTransform(np.array([tl, tr, br, bl], dtype="float32"), dst)
+            return cv2.warpPerspective(frame, m, (out_w, out_h))
+    xs = [max(0, min(w - 1, int(p[0] * w))) for p in polygon]
+    ys = [max(0, min(h - 1, int(p[1] * h))) for p in polygon]
+    x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return frame[y1:y2, x1:x2]
+
+
 def _roi_mask(frame: np.ndarray, polys: list) -> np.ndarray:
     h, w = frame.shape[:2]
     mask = np.zeros((h, w), np.uint8)
@@ -135,10 +168,14 @@ def _run_batch(lot_id: str, base: Path, rois: list, polys: list, model_name: str
     try:
         root = _out_root(lot_id)
         crops_dir = root / "crops"
-        if crops_dir.exists():
-            shutil.rmtree(crops_dir)
+        # Clear stale crops by emptying each bucket folder rather than removing the
+        # crops/ tree: on Windows os.rmdir fails (WinError 32) if anything — e.g. an
+        # open Explorer window — holds the directory, which would abort the whole run.
         for b in BUCKETS:
-            (crops_dir / b).mkdir(parents=True, exist_ok=True)
+            bucket_dir = crops_dir / b
+            bucket_dir.mkdir(parents=True, exist_ok=True)
+            for f in bucket_dir.glob("*.jpg"):
+                f.unlink(missing_ok=True)
 
         clf = processor_service.get_classifier(model_name)
         images = _list_images(base, date_glob)
@@ -148,7 +185,6 @@ def _run_batch(lot_id: str, base: Path, rois: list, polys: list, model_name: str
             frame = cv2.imread(str(img_path))
             if frame is None:
                 continue
-            h, w = frame.shape[:2]
             rel = img_path.relative_to(base).as_posix()
 
             # Brightness gate measured over the ROI area only.
@@ -158,19 +194,16 @@ def _run_batch(lot_id: str, base: Path, rois: list, polys: list, model_name: str
             brightness = float(vals.mean()) if vals.size else 0.0
             too_dark = brightness < brightness_threshold
 
-            # Collect crops (same bbox crop as analyze-roi).
+            # Collect crops — perspective-warped per quad ROI (see _crop_roi).
             valid = []
             for roi in rois:
                 polygon = roi.get("polygon", [])
                 if len(polygon) < 3:
                     continue
-                xs = [max(0, min(w - 1, int(p[0] * w))) for p in polygon]
-                ys = [max(0, min(h - 1, int(p[1] * h))) for p in polygon]
-                x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
-                if x2 <= x1 or y2 <= y1:
+                crop = _crop_roi(frame, polygon)
+                if crop is None or crop.size == 0:
                     continue
-                valid.append({"roi": roi, "polygon": polygon,
-                              "crop": frame[y1:y2, x1:x2]})
+                valid.append({"roi": roi, "polygon": polygon, "crop": crop})
 
             preds = ([{"status": None, "confidence": None}] * len(valid) if too_dark
                      else (clf.predict_batch([v["crop"] for v in valid]) if valid else []))
@@ -217,8 +250,10 @@ def _run_batch(lot_id: str, base: Path, rois: list, polys: list, model_name: str
             "crops": records,
         }
         _save_manifest(lot_id, manifest)
+        _last_run[lot_id] = {"ok": True, "error": None}
         logger.info(f"Labeling done for '{lot_id}': {len(records)} crops from {len(images)} images")
-    except Exception:
+    except Exception as e:
+        _last_run[lot_id] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
         logger.exception(f"Labeling batch failed for '{lot_id}'")
     finally:
         _running.discard(lot_id)
@@ -265,6 +300,14 @@ def label_batch(
 def get_manifest(lot_id: str):
     _validate_lot(lot_id)
     return _load_manifest(lot_id)
+
+
+@router.get("/api/label-batch/{lot_id}/last-run", dependencies=[Depends(verify_api_key)])
+def get_last_run(lot_id: str):
+    """Outcome of the most recent run so the UI can show a failure instead of a
+    false 'complete' once the op leaves /api/status. None until the first run."""
+    _validate_lot(lot_id)
+    return _last_run.get(lot_id, {"ok": None, "error": None})
 
 
 @router.get("/api/label-batch/{lot_id}/crop/{crop_id}", dependencies=[Depends(verify_api_key)])
@@ -382,7 +425,7 @@ def export_detector(lot_id: str):
     with open(staging / "annotations.json", "w") as f:
         json.dump(annotations, f)
 
-    out_dir = _out_root(lot_id) / "yolo_detect_dataset"
+    out_dir = config.YOLO_DATASET_DIR
     yaml_path = build_yolo_detect_dataset(gopro_dir=staging, out_dir=out_dir, force=True)
 
     counts = {s: len(annotations[s]["file_names"]) for s in ("train", "valid", "test")}

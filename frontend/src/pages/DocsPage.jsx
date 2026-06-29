@@ -643,8 +643,8 @@ export default function DocsPage() {
         <p style={s.body}>
           Open <span style={s.label}>Settings → Training Data</span> to see a
           live count of images in every dataset folder. Use the{' '}
-          <span style={s.label}>↻ Refresh</span> button to re-poll after an
-          upload. The table shows:
+          <span style={s.label}>↻ Refresh</span> button to re-poll the current
+          counts. The table shows:
         </p>
         <ul style={{ ...s.steps, listStyleType: 'disc' }}>
           <li style={s.step}>
@@ -660,111 +660,6 @@ export default function DocsPage() {
             (train / val / test split counts shown inline).
           </li>
         </ul>
-
-        <hr style={s.divider} />
-
-        {/* ── Classifier Images ── */}
-        <p style={{ ...s.body, marginBottom: 8 }}>
-          <span style={s.label}>Uploading classifier images</span>
-        </p>
-        <p style={s.body}>
-          Open <span style={s.label}>Model Training → Classifier Images</span>{' '}
-          (hover the <Code>?</Code> badge for a quick reminder). This upload
-          path feeds the four classifier models:
-        </p>
-        <div style={s.chipRow}>
-          {['CNN Scratch', 'ResNet-50', 'MobileNetV4', 'YOLO26 Classify'].map(m => (
-            <span key={m} style={s.chip}>{m}</span>
-          ))}
-        </div>
-        <ol style={{ ...s.steps, marginTop: 12 }}>
-          <li style={s.step}>
-            Prepare <span style={s.label}>cropped images of individual parking
-            spots</span> — one image per slot per frame. Any common format is
-            accepted (jpg, png, bmp). The model resizes everything to 224 × 224
-            automatically.
-          </li>
-          <li style={s.step}>
-            Drop or click the <span style={s.label}>🚗 Occupied</span> zone to
-            add images of occupied spots, and the{' '}
-            <span style={s.label}>🟢 Vacant</span> zone for empty spots.
-          </li>
-          <li style={s.step}>
-            Click <span style={s.label}>⬆️ Upload</span>. Images are saved to{' '}
-            <Code>data/occupied/</Code> and <Code>data/vacant/</Code> on the
-            server. The dataset counter below the zones updates immediately.
-          </li>
-        </ol>
-        <div style={s.callout}>
-          <span style={s.label}>Recommended dataset size:</span> At least 200
-          images per class for reliable results. Capture across different times
-          of day and weather conditions. The upload limit is 50 files per
-          request — split large batches into multiple uploads.
-        </div>
-
-        <hr style={s.divider} />
-
-        {/* ── YOLO Detect Dataset ── */}
-        <p style={{ ...s.body, marginBottom: 8 }}>
-          <span style={s.label}>Uploading a YOLO Detect dataset</span>
-        </p>
-        <p style={s.body}>
-          Open <span style={s.label}>Model Training → YOLO Detect Dataset</span>{' '}
-          (hover the <Code>?</Code> badge for the full schema). This upload
-          path is only used by:
-        </p>
-        <div style={s.chipRow}>
-          <span style={s.chip}>YOLO26 Detect</span>
-        </div>
-        <p style={{ ...s.body, marginTop: 12 }}>
-          It requires two inputs uploaded together:
-        </p>
-        <ul style={{ ...s.steps, listStyleType: 'disc' }}>
-          <li style={s.step}>
-            <span style={s.label}>🖼️ Parking Images</span> — full parking lot
-            frames (not crops). Drop as many as needed; each must be a jpg or
-            png of the entire camera view.
-          </li>
-          <li style={s.step}>
-            <span style={s.label}>📋 annotations.json</span> — a single JSON
-            file with <Code>train</Code>, <Code>valid</Code>, and{' '}
-            <Code>test</Code> top-level keys. Each split must contain:
-            <ul style={{ paddingLeft: 18, marginTop: 6 }}>
-              <li style={{ ...s.step, marginBottom: 2 }}>
-                <Code>file_names</Code> — list of image filenames matching the
-                uploaded frames.
-              </li>
-              <li style={{ ...s.step, marginBottom: 2 }}>
-                <Code>rois_list</Code> — per-image list of quad polygons, each
-                polygon being four <Code>[x, y]</Code> pairs in normalised
-                (0–1) coordinates.
-              </li>
-              <li style={{ ...s.step }}>
-                <Code>occupancy_list</Code> — per-image list of booleans, one
-                per ROI, indicating whether the spot is occupied.
-              </li>
-            </ul>
-          </li>
-        </ul>
-        <p style={s.body}>
-          The Upload button stays disabled until both a set of images and an{' '}
-          <Code>annotations.json</Code> are staged. On success, files are saved
-          to:
-        </p>
-        <ul style={{ ...s.steps, listStyleType: 'disc' }}>
-          <li style={s.step}>
-            Images → <Code>data/yolo_data/parking_rois_gopro/images/</Code>
-          </li>
-          <li style={s.step}>
-            Annotations → <Code>data/yolo_data/parking_rois_gopro/annotations.json</Code>
-          </li>
-        </ul>
-        <div style={s.calloutWarn}>
-          <span style={s.label}>Note:</span> Uploading a new{' '}
-          <Code>annotations.json</Code> overwrites the existing one. The
-          converted YOLO detection dataset (<Code>yolo_detect_dataset/</Code>)
-          is rebuilt automatically the next time YOLO26 Detect training starts.
-        </div>
 
         <hr style={s.divider} />
 

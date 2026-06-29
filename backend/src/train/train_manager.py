@@ -205,16 +205,17 @@ class TrainManager:
         run_id = None
         try:
             from ultralytics import YOLO
-            from src.data_prep.yolo_converter import build_yolo_classify_dataset
+            from src.data_prep.preprocessor import build_classify_split
 
             _classify_start = time.time()
             _batch_count = [0]
 
             with _lock:
-                _state["message"] = "Cropping ROI spots from gopro annotations..."
+                _state["message"] = "Building classifier train/val/test split..."
                 _state["total_epochs"] = config.YOLO_CLASSIFY_EPOCHS
 
-            classify_data_dir = build_yolo_classify_dataset()
+            build_classify_split()                      # idempotent; ensures the folders exist
+            classify_data_dir = config.CLASSIFY_SPLIT_DIR
 
             with _lock:
                 _state["message"] = "Starting YOLO26 classification training..."
@@ -312,23 +313,27 @@ class TrainManager:
 
     def _train_yolo26_detect(self):
         """
-        Train YOLO26 in detection mode using the parking_rois_gopro annotated dataset.
-        Converts annotations.json → YOLO format on first run, then calls Ultralytics train.
+        Train YOLO26 in detection mode using the exported YOLO detect dataset.
+        Reads the dataset.yaml produced by the labeling export, then calls Ultralytics train.
         Output: config.YOLO26_DETECT_PATH
         """
         run_id = None
         try:
             from ultralytics import YOLO
-            from src.data_prep.yolo_converter import build_yolo_detect_dataset
 
             _detect_start = time.time()
             _batch_count = [0]
 
             with _lock:
-                _state["message"] = "Converting gopro annotations to YOLO format..."
+                _state["message"] = "Loading exported YOLO detect dataset..."
                 _state["total_epochs"] = config.YOLO_DETECT_EPOCHS
 
-            yaml_path = build_yolo_detect_dataset()
+            yaml_path = config.YOLO_DATASET_DIR / "dataset.yaml"
+            if not yaml_path.exists():
+                raise FileNotFoundError(
+                    f"YOLO detect dataset not found at {yaml_path}. "
+                    "Export it from the labeling panel first."
+                )
 
             with _lock:
                 _state["message"] = "Starting YOLO26 detection training..."
@@ -631,7 +636,7 @@ class TrainManager:
                     _state["model_name"] = "yolo26_classify"
 
                 from ultralytics import YOLO
-                from src.data_prep.yolo_converter import build_yolo_classify_dataset
+                from src.data_prep.preprocessor import build_classify_split
 
                 entry = {"model": "yolo26_classify", "type": "classification"}
 
@@ -648,7 +653,8 @@ class TrainManager:
                         })
 
                 # Actual evaluation — run inference on the val split
-                classify_data_dir = build_yolo_classify_dataset()
+                build_classify_split()                      # idempotent; ensures the folders exist
+                classify_data_dir = config.CLASSIFY_SPLIT_DIR
                 yolo_cl = YOLO(str(config.YOLO26_CLASSIFY_PATH))
                 val_res = yolo_cl.val(
                     data=str(classify_data_dir),
@@ -691,7 +697,6 @@ class TrainManager:
                     _state["model_name"] = "yolo26_detect"
 
                 from ultralytics import YOLO
-                from src.data_prep.yolo_converter import build_yolo_detect_dataset
 
                 entry = {"model": "yolo26", "type": "detection"}
 
@@ -708,7 +713,7 @@ class TrainManager:
                         })
 
                 # Actual evaluation — run inference on the test split
-                yaml_path = build_yolo_detect_dataset()
+                yaml_path = config.YOLO_DATASET_DIR / "dataset.yaml"
                 yolo_dt = YOLO(str(config.YOLO26_DETECT_PATH))
                 val_res = yolo_dt.val(
                     data=str(yaml_path),

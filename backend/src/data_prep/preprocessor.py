@@ -8,6 +8,7 @@ and returns PyTorch DataLoaders ready for training.
 import os
 import sys
 import random
+import shutil
 import logging
 from pathlib import Path
 from collections import Counter
@@ -21,6 +22,118 @@ import config
 from src.data_prep.dataset import ParkingDataset
 
 logger = logging.getLogger("berth.preprocessor")
+
+
+def build_classify_split(
+    source_labeled_dir=None,
+    out_dir=None,
+    train_ratio=None,
+    val_ratio=None,
+    seed=42,
+    force=False,
+):
+    """
+    Build a persistent train/val/test classifier dataset on disk, split BY SOURCE
+    FRAME so that all crops from one source photo land in the same split (prevents
+    near-duplicate leakage across splits).
+
+    Source layout (read-only):
+        source_labeled_dir/<lot>/crops/{occupied,vacant}/*.jpg
+    Output layout:
+        out_dir/{train,val,test}/{occupied,vacant}/<lot>__<cropname>.jpg
+
+    Crops are COPIED (shutil.copy2), never moved — the source crops/ folders stay
+    intact. Returns out_dir.
+    """
+    source_labeled_dir = Path(source_labeled_dir) if source_labeled_dir else (config.DATA_DIR / "labeled")
+    out_dir     = Path(out_dir) if out_dir else config.CLASSIFY_SPLIT_DIR
+    train_ratio = train_ratio if train_ratio is not None else config.TRAIN_SPLIT
+    val_ratio   = val_ratio   if val_ratio   is not None else config.VAL_SPLIT
+
+    # -------------------------------------------------------------------
+    # Idempotency
+    # -------------------------------------------------------------------
+    sentinel = out_dir / "train" / "occupied"
+    if out_dir.exists() and sentinel.is_dir() and any(sentinel.iterdir()) and not force:
+        logger.info(f"📁 Classify split already exists at {out_dir} — skipping build.")
+        return out_dir
+    if force and out_dir.exists():
+        logger.info(f"🗑️  force=True — removing existing {out_dir}")
+        shutil.rmtree(out_dir)
+
+    # -------------------------------------------------------------------
+    # 1. Scan every lot for crops
+    # -------------------------------------------------------------------
+    samples = []  # (frame_key, bucket, src_path)
+    for lot_dir in sorted(source_labeled_dir.iterdir()):
+        crops_dir = lot_dir / "crops"
+        if not crops_dir.is_dir():
+            continue
+        lot = lot_dir.name
+        for bucket in ("occupied", "vacant"):
+            bucket_dir = crops_dir / bucket
+            if not bucket_dir.is_dir():
+                continue
+            for img_path in sorted(bucket_dir.iterdir()):
+                if img_path.suffix.lower() not in ('.jpg', '.jpeg', '.png', '.bmp'):
+                    continue
+                frame_key = (lot, img_path.stem.rsplit("__roi", 1)[0])
+                samples.append((frame_key, bucket, img_path))
+
+    if not samples:
+        raise FileNotFoundError(
+            f"No crops found under {source_labeled_dir}. "
+            f"Expected <lot>/crops/{{occupied,vacant}}/*.jpg."
+        )
+
+    # -------------------------------------------------------------------
+    # 2. Frame-level split (deterministic)
+    # -------------------------------------------------------------------
+    frames = sorted({fk for fk, _, _ in samples})
+    random.Random(seed).shuffle(frames)
+    n = len(frames)
+    n_train = int(n * train_ratio)
+    n_val   = int(n * val_ratio)
+    train_frames = set(frames[:n_train])
+    val_frames   = set(frames[n_train:n_train + n_val])
+    test_frames  = set(frames[n_train + n_val:])
+
+    # Sanity: the three frame-sets must be pairwise disjoint
+    assert train_frames.isdisjoint(val_frames),  "train/val frames overlap"
+    assert train_frames.isdisjoint(test_frames), "train/test frames overlap"
+    assert val_frames.isdisjoint(test_frames),   "val/test frames overlap"
+
+    split_of = {}
+    for fk in train_frames:
+        split_of[fk] = "train"
+    for fk in val_frames:
+        split_of[fk] = "val"
+    for fk in test_frames:
+        split_of[fk] = "test"
+
+    # -------------------------------------------------------------------
+    # 3. Copy crops into split layout
+    # -------------------------------------------------------------------
+    counts = {s: {"occupied": 0, "vacant": 0} for s in ("train", "val", "test")}
+    for frame_key, bucket, src_path in samples:
+        split = split_of[frame_key]
+        lot = frame_key[0]
+        dst_dir = out_dir / split / bucket
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dst_dir / f"{lot}__{src_path.name}")
+        counts[split][bucket] += 1
+
+    # -------------------------------------------------------------------
+    # 4. Report
+    # -------------------------------------------------------------------
+    total = 0
+    for split in ("train", "val", "test"):
+        occ, vac = counts[split]["occupied"], counts[split]["vacant"]
+        total += occ + vac
+        logger.info(f"   {split:5s} — occupied: {occ}, vacant: {vac}, total: {occ + vac}")
+    logger.info(f"✅ Classify split built at {out_dir} — {len(frames)} frames, {total} crops")
+
+    return out_dir
 
 
 def prepare_dataset(
@@ -59,7 +172,7 @@ def prepare_dataset(
         }
     """
     # Defaults from config
-    data_root   = data_root   or str(config.DATA_DIR)
+    data_root   = data_root   or str(config.CLASSIFY_SPLIT_DIR)
     train_ratio = train_ratio or config.TRAIN_SPLIT
     val_ratio   = val_ratio   or config.VAL_SPLIT
     batch_size  = batch_size  or config.BATCH_SIZE
@@ -72,6 +185,74 @@ def prepare_dataset(
     subset_size = subset_size if subset_size is not None else config.SUBSET_SIZE
 
     logger.info(f"📂 Scanning dataset at: {data_root}")
+
+    # -------------------------------------------------------------------
+    # Pre-split layout: data_root/{train,val,test}/{occupied,vacant}.
+    # The persistent frame-level classify split (default path). Each split is
+    # already a fixed set on disk, so we load them directly instead of
+    # re-splitting in memory.
+    # -------------------------------------------------------------------
+    data_root_path = Path(data_root)
+    has_presplit = (data_root_path / "train").is_dir() and (data_root_path / "val").is_dir()
+    if has_presplit or data_root_path == config.CLASSIFY_SPLIT_DIR:
+        if not has_presplit:
+            logger.info(f"🏗️  Pre-split dataset not found at {data_root_path} — building it…")
+            build_classify_split()
+
+        train_dataset = ParkingDataset(data_root=data_root_path / "train", split="train", image_size=image_size)
+        val_dataset   = ParkingDataset(data_root=data_root_path / "val",   split="val",   image_size=image_size)
+        test_dir = data_root_path / "test"
+        test_dataset  = ParkingDataset(data_root=test_dir, split="test", image_size=image_size) if test_dir.is_dir() else val_dataset
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            drop_last=True,
+        )
+        val_loader = DataLoader(
+            val_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
+        test_loader = DataLoader(
+            test_dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+        )
+
+        all_labels = (
+            [lbl for _, lbl in train_dataset.samples]
+            + [lbl for _, lbl in val_dataset.samples]
+            + [lbl for _, lbl in test_dataset.samples]
+        )
+        class_counts = Counter(all_labels)
+
+        logger.info(f"✂️  Pre-split sizes — Train: {len(train_dataset)}, "
+                    f"Val: {len(val_dataset)}, Test: {len(test_dataset)}")
+        logger.info(f"✅ DataLoaders ready — "
+                    f"Train batches: {len(train_loader)}, "
+                    f"Val batches: {len(val_loader)}, "
+                    f"Test batches: {len(test_loader)}")
+
+        return {
+            "train_loader": train_loader,
+            "val_loader":   val_loader,
+            "test_loader":  test_loader,
+            "train_size":   len(train_dataset),
+            "val_size":     len(val_dataset),
+            "test_size":    len(test_dataset),
+            "class_distribution": {
+                "occupied": class_counts.get(1, 0),
+                "vacant":   class_counts.get(0, 0),
+            },
+        }
 
     # -------------------------------------------------------------------
     # 1. Collect all samples

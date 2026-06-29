@@ -75,6 +75,22 @@ class RoiStore:
         return True
 
     @classmethod
+    def delete_config(cls, camera_id: str) -> bool:
+        """Delete a camera/lot's ROI config and snapshot (best-effort: removes the
+        snapshot if present even when no ROI file exists). Returns True if a ROI
+        config file existed."""
+        roi_path = cls._roi_path(camera_id)
+        snap_path = cls._snapshot_path(camera_id)
+        existed = roi_path.exists()
+        if existed:
+            roi_path.unlink()
+        if snap_path.exists():
+            snap_path.unlink()
+        if existed:
+            logger.info(f"Deleted ROI config and snapshot for '{camera_id}'")
+        return existed
+
+    @classmethod
     def save_snapshot(cls, camera_id: str, image_bytes: bytes) -> dict:
         cls._ensure_dir()
         nparr = np.frombuffer(image_bytes, np.uint8)

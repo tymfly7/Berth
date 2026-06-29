@@ -12,6 +12,7 @@ from src.api.deps import limiter, validate_camera_source, verify_api_key
 from src.api.operations import finish_op, register_op
 from src.api.processor_service import processor_service
 from src.cameras.camera_registry import camera_registry
+from src.roi.roi_store import RoiStore
 
 logger = logging.getLogger("berth.cameras")
 router = APIRouter()
@@ -189,6 +190,7 @@ async def update_camera(camera_id: str, request: Request):
 def remove_camera(camera_id: str):
     if not camera_registry.remove_camera(camera_id):
         raise HTTPException(404, f"Camera '{camera_id}' not found")
+    RoiStore.delete_config(camera_id)  # best-effort: drop its ROIs + snapshot
     return {"deleted": camera_id}
 
 

@@ -67,13 +67,8 @@ def delete_roi(camera_id: str, roi_id: str):
 @router.delete("/api/roi/{camera_id}", dependencies=[Depends(verify_api_key)])
 def delete_roi_config(camera_id: str):
     """Delete all ROIs and snapshot for a camera/lot config."""
-    roi_path = RoiStore._roi_path(camera_id)
-    snap_path = RoiStore._snapshot_path(camera_id)
-    if not roi_path.exists():
+    if not RoiStore.delete_config(camera_id):
         raise HTTPException(404, f"No ROI config found for '{camera_id}'")
-    roi_path.unlink()
-    if snap_path.exists():
-        snap_path.unlink()
     return {"deleted": camera_id}
 
 

@@ -112,10 +112,12 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
-    return JSONResponse(
-        status_code=404,
-        content={"detail": "We looked everywhere and we couldn't find that!"},
-    )
+    # Preserve an endpoint's own 404 message (e.g. "Image directory not found");
+    # only fall back to the friendly text for a genuinely unmatched route.
+    detail = getattr(exc, "detail", None)
+    if not detail or detail == "Not Found":
+        detail = "We looked everywhere and we couldn't find that!"
+    return JSONResponse(status_code=404, content={"detail": detail})
 
 
 _allowed_origins = [o for o in [

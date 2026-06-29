@@ -199,18 +199,25 @@ Open `http://localhost:5173` for the public view, or `http://localhost:5173/admi
 
 The CNN / ResNet / MobileNet / YOLO26-classify models are trained on a binary
 `occupied` / `vacant` image dataset. The YOLO26 **Detect** model uses a separate
-annotated full-scene dataset (`data/yolo_data/parking_rois_gopro/`).
+annotated full-scene dataset (`backend/data/labeled/lot-t10lot/yolo_detect_dataset/`).
 
-### Option A: PKLot Dataset (recommended)
+### Option A: Labeled lot-t10lot dataset (recommended)
 
-1. Download from [Kaggle — PKLot](https://www.kaggle.com/datasets/blanderbuss/parking-lot-dataset)
-2. Extract to a local folder (e.g., `D:\datasets\PKLotSegmented`)
-3. Organize into the `data/occupied` and `data/vacant` layout:
+The classifier trains on `occupied` / `vacant` slot crops under
+`backend/data/labeled/<lot>/`. A labeled set for the **lot-t10lot** lot — cropped
+and annotated from the [parking-lot-t10](https://github.com/tomas-fryza/parking-lot-t10)
+time-lapse dataset — lives under `backend/data/labeled/lot-t10lot/`:
 
-```bash
-cd "School Project/backend"
-python -m src.data_prep.downloader --source "D:\datasets\PKLotSegmented"
 ```
+backend/data/labeled/lot-t10lot/
+├── crops/{occupied,vacant}/   # cropped slot images → classifier training
+├── detector_src/              # full frames + annotations.json
+└── yolo_detect_dataset/       # YOLO detect images/labels + dataset.yaml
+```
+
+At training time the backend builds a leakage-safe train/val/test split from these
+crops into `backend/data/classify_split/{train,val,test}/{occupied,vacant}/`
+automatically (split by source frame), so no manual organizing step is needed.
 
 ### Option B: Generate sample data (quick testing)
 
@@ -224,8 +231,8 @@ python -m src.data_prep.downloader --generate-sample --sample-count 500
 # Generate synthetic sample data
 curl -X POST "http://localhost:8001/api/dataset/prepare?generate_sample=true&sample_count=500"
 
-# Organize from a local PKLot path
-curl -X POST "http://localhost:8001/api/dataset/prepare?source=D:/datasets/PKLotSegmented"
+# Organize from a local source dataset path
+curl -X POST "http://localhost:8001/api/dataset/prepare?source=/path/to/dataset"
 ```
 
 ### Option D: Upload images directly from the Admin UI
@@ -593,7 +600,7 @@ image.
 | POST | `/api/dataset/upload` | Upload labeled classifier training images |
 | POST | `/api/dataset/upload-yolo` | Upload a YOLO detect dataset (images + annotations.json) |
 | GET | `/api/dataset/browse` | List dataset folders and counts |
-| POST | `/api/dataset/prepare` | Organize PKLot or generate a sample dataset |
+| POST | `/api/dataset/prepare` | Organize a source dataset or generate a sample dataset |
 
 ### Settings
 
@@ -642,7 +649,7 @@ School Project/
 │   │   ├── data_prep/
 │   │   │   ├── dataset.py               # PyTorch Dataset + augmentation
 │   │   │   ├── preprocessor.py          # Train/val/test split + DataLoaders
-│   │   │   ├── downloader.py            # PKLot organizer + sample generator
+│   │   │   ├── downloader.py            # dataset organizer + sample generator
 │   │   │   └── yolo_converter.py        # Build YOLO detect dataset from annotations
 │   │   ├── models/
 │   │   │   ├── cnn_scratch.py           # Custom CNN architecture
@@ -748,7 +755,6 @@ environment variables.
 | `BERTH_INFERENCE_WORKERS` | `min(cpu-1, 4)` | Shared inference pool worker count |
 | `BERTH_MAX_ACTIVE_CAMERAS` | `8` server / `2` edge | Max cameras allowed active at once |
 | `BERTH_OCCUPANCY_THRESHOLD` | `0.40` | YOLO-classify "occupied" decision threshold |
-| `PKLOT_ROOT` | _(empty)_ | Path to downloaded PKLot dataset |
 | `BERTH_YT_CACHE_TTL` | `240` | YouTube HLS URL cache lifetime (seconds) |
 | `BERTH_RELOAD` | `0` | Set `1` to enable uvicorn auto-reload (dev) |
 | `BERTH_CAM_SOURCE_<ID>` | _(empty)_ | Per-camera runtime source override (keeps credentials off disk) |
@@ -987,7 +993,7 @@ Contribution etiquette (scope, docs, when to open an issue first) is in
 ## Acknowledgements
 - [AI-Parking-Lot-Detection](https://github.com/Nandini60/AI-Parking-Lot-Detection/tree/main/parking_ai) — Reference implementation and architectural inspiration
 
-- [PKLot Dataset](https://www.cnrpark.it/dataset/) — Parking lot occupancy dataset used for training the classifiers ([Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/))
+- [parking-lot-t10](https://github.com/tomas-fryza/parking-lot-t10) — Tomas Fryza — time-lapse parking lot (lot T10) dataset used to build the occupied/vacant classifier crops and the YOLO detect set
 
 - [Image-Based Parking Space Occupancy Classification: Dataset and Baseline](https://github.com/martin-marek/parking-space-occupancy) — Martin Marek ([arXiv:2107.12207](https://arxiv.org/abs/2107.12207)); occupancy-classification dataset and baseline for YOLO training
 

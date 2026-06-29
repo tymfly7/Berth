@@ -24,6 +24,22 @@ const loadLotIds = () => {
   } catch { return [] }
 }
 
+// Crop endpoints require auth, so a plain <img src> 401s (no header). Fetch the
+// blob with apiFetch (attaches the Bearer token) and render it via object URL.
+function AuthedImg({ src, alt, onClick, style }) {
+  const [objUrl, setObjUrl] = useState(null)
+  useEffect(() => {
+    let url = null, cancelled = false
+    apiFetch(src)
+      .then(r => (r.ok ? r.blob() : null))
+      .then(blob => { if (blob && !cancelled) { url = URL.createObjectURL(blob); setObjUrl(url) } })
+      .catch(() => {})
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url) }
+  }, [src])
+  if (!objUrl) return <div style={{ ...style, background: 'var(--border-color)' }} />
+  return <img src={objUrl} alt={alt} onClick={onClick} style={style} />
+}
+
 const labelStyle = { fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }
 const fieldStyle = { width: '100%', padding: '6px 8px', fontSize: '0.8rem', marginBottom: 10,
   background: 'var(--bg-secondary, #1a1a1a)', color: 'var(--text-primary)',
@@ -63,6 +79,7 @@ export default function LabelingPanel({ apiBase }) {
   useEffect(() => () => clearInterval(pollRef.current), [])
 
   const poll = useCallback(() => {
+    clearInterval(pollRef.current)  // idempotent: never stack two intervals
     pollRef.current = setInterval(async () => {
       try {
         const res = await apiFetch(`${apiBase}/api/status`)
@@ -75,12 +92,42 @@ export default function LabelingPanel({ apiBase }) {
           clearInterval(pollRef.current)
           setRunning(false)
           setProgress(1)
+          // The op leaves /api/status whether the worker succeeded or crashed, so
+          // confirm the outcome before declaring success.
+          try {
+            const lr = await apiFetch(`${apiBase}/api/label-batch/${lotId}/last-run`)
+            const { ok, error } = lr.ok ? await lr.json() : {}
+            if (ok === false) { setStatus(`✗ Labeling failed: ${error || 'unknown error'}`); return }
+          } catch { /* fall through to success */ }
           fetchManifest()
           setStatus('Labeling complete.')
         }
       } catch { /* keep polling */ }
     }, 1500)
-  }, [apiBase, fetchManifest])
+  }, [apiBase, lotId, fetchManifest])
+
+  // Re-attach to a labeling run already in flight server-side (e.g. after a page
+  // reload). The backend thread keeps running regardless of the browser and the
+  // op stays in /api/status, so on mount we check for it and resume the progress
+  // UI — mirroring TrainingPanel's resume-on-mount behavior.
+  useEffect(() => {
+    let cancelled = false
+    apiFetch(`${apiBase}/api/status`)
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        const op = data?.operations?.find(o => o.type === 'label_batch')
+        if (op && !cancelled) {
+          setRunning(true)
+          setProgress(op.progress || 0)
+          setStatus('Resuming in-progress labeling…')
+          poll()
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+    // Mount-only: reattach is about surviving a reload, not lotId changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const runCalibrate = async () => {
     setCalibLoading(true); setStatus(null); setCalib(null)
@@ -249,7 +296,7 @@ export default function LabelingPanel({ apiBase }) {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8 }}>
                     {items.slice(0, 400).map(c => (
                       <div key={c.crop_id} style={{ border: '1px solid var(--border-color)', borderRadius: 4, padding: 4 }}>
-                        <img src={cropUrl(c.crop_id)} alt={c.roi_label} loading="lazy"
+                        <AuthedImg src={cropUrl(c.crop_id)} alt={c.roi_label}
                           onClick={() => setEnlarged(cropUrl(c.crop_id))}
                           style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 3, cursor: 'pointer' }} />
                         <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
@@ -283,7 +330,7 @@ export default function LabelingPanel({ apiBase }) {
             <div onClick={(e) => { e.stopPropagation(); setEnlarged(null) }}
               style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 10000,
                 display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <img src={enlarged} alt="" style={{ maxWidth: '90%', maxHeight: '90%' }} />
+              <AuthedImg src={enlarged} alt="" style={{ maxWidth: '90%', maxHeight: '90%' }} />
             </div>
           )}
         </div>,

@@ -5,12 +5,10 @@ import logging
 import os
 import threading
 import time
-import uuid
 from pathlib import Path
-from typing import List
 
 from fastapi import (
-    APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile,
+    APIRouter, Depends, HTTPException, Request, Response,
 )
 
 import config
@@ -23,7 +21,7 @@ from src.reports.model_report import build_comparison_excel, load_model_training
 logger = logging.getLogger("berth.training")
 router = APIRouter()
 
-# ── model_info cache (invalidated on training start / dataset upload) ─
+# ── model_info cache (invalidated on training start) ─
 _model_info_cache: dict = {"data": None, "ts": 0.0}
 _MODEL_INFO_TTL = 60.0  # seconds
 
@@ -197,14 +195,14 @@ def start_training(request: Request, model_name: str = "cnn_scratch",
     mgr = TrainManager()
     if mgr.is_training():
         raise HTTPException(409, "Training already in progress")
-    # YOLO detect uses the gopro annotated dataset, not the occupied/vacant folders
+    # YOLO detect uses the exported detect dataset, not the occupied/vacant folders
     if model_name not in ("yolo26_classify", "yolo26_detect"):
         occ = config.DATA_DIR / "occupied"
         vac = config.DATA_DIR / "vacant"
         if not occ.exists() or not vac.exists():
             raise HTTPException(400, "Dataset not found. Prepare it first.")
-    if model_name == "yolo26_detect" and not config.YOLO_GOPRO_DIR.exists():
-        raise HTTPException(400, "Gopro annotated dataset not found. Expected: backend/data/yolo_data/parking_rois_gopro/")
+    if model_name == "yolo26_detect" and not (config.YOLO_DATASET_DIR / "dataset.yaml").exists():
+        raise HTTPException(400, "YOLO detect dataset not found. Export it first from the labeling panel.")
     _model_info_cache["data"] = None  # invalidate so next poll reflects new state
     result = mgr.start_training(model_name, compare_all=compare_all)
     op_id = register_op("training", f"Training {model_name}…")
@@ -236,119 +234,6 @@ def train_status():
     return TrainManager().get_status()
 
 
-@router.post("/api/dataset/upload", dependencies=[Depends(verify_api_key)])
-@limiter.limit(config.UPLOAD_RATE_LIMIT)
-async def upload_dataset_images(
-    request: Request,
-    files: List[UploadFile] = File(...),
-    label: str = Form(...),
-):
-    if config.DEPLOYMENT_PROFILE == "edge":
-        raise HTTPException(403, "Dataset upload is not available on edge nodes. Use the hub server.")
-    op_id = register_op("dataset_upload", "Saving training images…")
-    try:
-        if label not in ("occupied", "vacant"):
-            raise HTTPException(400, "label must be 'occupied' or 'vacant'")
-        if len(files) > 50:
-            raise HTTPException(400, "Maximum 50 files per request")
-
-        allowed = {".jpg", ".jpeg", ".png", ".bmp"}
-        dest_dir = config.DATA_DIR / label
-        dest_dir.mkdir(parents=True, exist_ok=True)
-
-        max_image_bytes = 20 * 1024 * 1024  # 20 MB per image
-        saved = 0
-        skipped = 0
-        for file in files:
-            safe_name = Path(file.filename).name  # strip any directory components
-            ext = Path(safe_name).suffix.lower()
-            if ext not in allowed:
-                skipped += 1
-                continue
-            content = await file.read()
-            if len(content) > max_image_bytes:
-                skipped += 1
-                continue
-            dest = dest_dir / safe_name
-            if dest.exists():
-                stem = Path(safe_name).stem
-                suffix_str = uuid.uuid4().hex[:6]
-                dest = dest_dir / f"{stem}_{suffix_str}{ext}"
-            with open(dest, "wb") as f:
-                f.write(content)
-            saved += 1
-
-        _model_info_cache["data"] = None  # dataset count changed
-        return {"saved": saved, "skipped": skipped, "label": label}
-    finally:
-        finish_op(op_id)
-
-
-@router.post("/api/dataset/upload-yolo", dependencies=[Depends(verify_api_key)])
-@limiter.limit(config.UPLOAD_RATE_LIMIT)
-async def upload_yolo_dataset(
-    request: Request,
-    images: List[UploadFile] = File(...),
-    annotations: UploadFile = File(...),
-):
-    """
-    Upload a YOLO detect dataset to data/yolo_data/parking_rois_gopro/.
-    - images: full-scene parking lot images (jpg/png)
-    - annotations: annotations.json with train/valid/test splits
-    """
-    if config.DEPLOYMENT_PROFILE == "edge":
-        raise HTTPException(403, "Dataset upload is not available on edge nodes.")
-    op_id = register_op("yolo_upload", "Saving YOLO dataset…")
-    try:
-        gopro_dir = config.YOLO_GOPRO_DIR
-        img_dir = gopro_dir / "images"
-        img_dir.mkdir(parents=True, exist_ok=True)
-
-        # Validate and save annotations.json
-        if Path(annotations.filename).suffix.lower() != ".json":
-            raise HTTPException(400, "annotations file must be a .json file")
-        ann_content = await annotations.read()
-        if len(ann_content) > 50 * 1024 * 1024:
-            raise HTTPException(400, "annotations.json exceeds 50 MB limit")
-        import json as _json
-        try:
-            parsed = _json.loads(ann_content)
-        except Exception:
-            raise HTTPException(400, "annotations file is not valid JSON")
-        for split in ("train", "valid", "test"):
-            if split not in parsed:
-                raise HTTPException(400, f"annotations.json missing required split: '{split}'")
-        (gopro_dir / "annotations.json").write_bytes(ann_content)
-
-        # Save images
-        allowed = {".jpg", ".jpeg", ".png", ".bmp"}
-        max_image_bytes = 20 * 1024 * 1024
-        saved = 0
-        skipped = 0
-        for file in images:
-            safe_name = Path(file.filename).name
-            ext = Path(safe_name).suffix.lower()
-            if ext not in allowed:
-                skipped += 1
-                continue
-            content = await file.read()
-            if len(content) > max_image_bytes:
-                skipped += 1
-                continue
-            dest = img_dir / safe_name
-            if dest.exists():
-                stem = Path(safe_name).stem
-                dest = img_dir / f"{stem}_{uuid.uuid4().hex[:6]}{ext}"
-            with open(dest, "wb") as fh:
-                fh.write(content)
-            saved += 1
-
-        _model_info_cache["data"] = None
-        return {"saved_images": saved, "skipped": skipped, "annotations": "saved"}
-    finally:
-        finish_op(op_id)
-
-
 @router.get("/api/dataset/browse", dependencies=[Depends(verify_api_key)])
 def browse_dataset():
     data_dir = config.DATA_DIR
@@ -363,9 +248,6 @@ def browse_dataset():
     for name in ("occupied", "vacant"):
         p = data_dir / name
         folders.append({"name": name, "count": _count(p), "exists": p.exists()})
-
-    gopro = config.YOLO_GOPRO_DIR
-    folders.append({"name": "yolo_data/parking_rois_gopro", "count": _count(gopro), "exists": gopro.exists()})
 
     yolo_ds = config.YOLO_DATASET_DIR
     if yolo_ds.exists():
