@@ -40,18 +40,22 @@ async def upload_video(request: Request, file: UploadFile = File(...)):
         except HTTPException:
             dest.unlink(missing_ok=True)
             raise
-        proc = processor_service.get_processor()
-        proc.set_video_source(str(dest))
-        return {"message": "Video uploaded", "path": safe_name}
+
+        # Register the upload as a 'file' camera so it streams through the
+        # registry like any other source (viewable at /ws/cameras/{id}). The
+        # source path is server-controlled (always under UPLOAD_DIR).
+        name = Path(safe_name).stem or "Uploaded video"
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "video"
+        cam_id = f"{slug}-{uuid.uuid4().hex[:6]}"
+        camera_registry.add_camera(id=cam_id, name=name, source=str(dest), type_="file")
+        try:
+            camera_registry.activate(cam_id, model_name=processor_service.resolve_model_name())
+            activated = True
+        except ValueError:
+            activated = False  # at MAX_ACTIVE_CAMERAS — added but left inactive
+        return {"message": "Video uploaded", "camera": camera_registry.get(cam_id), "activated": activated}
     finally:
         finish_op(op_id)
-
-
-@router.post("/api/use-camera", dependencies=[Depends(verify_api_key)])
-def use_camera():
-    proc = processor_service.get_processor()
-    proc.set_video_source(0)
-    return {"message": "Switched to live camera"}
 
 
 # ── Anomaly detection settings ────────────────────────────
@@ -69,14 +73,11 @@ async def set_anomaly(request: Request):
             processor_service.anomaly_park_thresh = max(0.0, min(1.0, float(body["park_thresh"])))
         except (TypeError, ValueError):
             raise HTTPException(400, "park_thresh must be a number between 0 and 1")
-    try:
-        proc = processor_service.get_processor()
-        proc.set_anomaly_detection(enabled)
-        proc.set_anomaly_sensitivity(processor_service.anomaly_park_thresh)
-    except FileNotFoundError:
+    # Surface a missing-model error at toggle time (no phantom processor to
+    # probe anymore). Mirrors VideoProcessor._load_yolo_detector: NCNN on edge,
+    # else the torch .pt — either satisfies the requirement.
+    if enabled and not (config.YOLO26_DETECT_NCNN_PATH.exists() or config.YOLO26_DETECT_PATH.exists()):
         raise HTTPException(400, "YOLO26 detect model not found. Train it first via the Training panel.")
-    except RuntimeError as e:
-        raise HTTPException(400, str(e))
     processor_service.anomaly_enabled = enabled
     for cam in camera_registry.get_all():
         if cam.get("active"):

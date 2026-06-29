@@ -42,6 +42,21 @@ logger = logging.getLogger("berth.video")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 
+def default_metrics() -> dict:
+    """Canonical empty-metrics shape. Returned by analytics endpoints when no
+    camera is active so the dashboard renders zeros instead of erroring."""
+    return {
+        "total": 0, "available": 0, "occupied": 0,
+        "occupancy_percent": 0.0, "avg_confidence": 0.0,
+        "slots": [], "fps": 0.0, "infer_fps": 0.0, "infer_ms": 0.0,
+        "infer_cap": float(config.INFER_FPS),
+        "source_type": "auto", "mode": "unknown",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "misparked_count": 0,
+        "anomaly_enabled": False,
+    }
+
+
 class VideoProcessor:
     """
     Three-thread pipeline per camera:
@@ -751,13 +766,4 @@ class VideoProcessor:
             return result
 
     def _default_metrics(self):
-        return {
-            "total": 0, "available": 0, "occupied": 0,
-            "occupancy_percent": 0.0, "avg_confidence": 0.0,
-            "slots": [], "fps": 0.0, "infer_fps": 0.0, "infer_ms": 0.0,
-            "infer_cap": float(config.INFER_FPS),
-            "source_type": "auto", "mode": "unknown",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "misparked_count": 0,
-            "anomaly_enabled": False,
-        }
+        return default_metrics()

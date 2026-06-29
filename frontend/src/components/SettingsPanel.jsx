@@ -130,7 +130,7 @@ export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchMode
           <div style={dividerStyle} />
 
           <SubSection title="Controls">
-            <ControlPanel apiAction={apiAction} apiBase={apiBase} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} setActiveModel={setActiveModel} />
+            <ControlPanel apiAction={apiAction} apiBase={apiBase} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} setActiveModel={setActiveModel} onCamerasChange={onCamerasChange} />
             <div style={{ height: 1, background: 'var(--border-color)', margin: '16px 0' }} />
             <AnomalyPanel apiBase={apiBase} />
             {modelInfo?.active_model?.startsWith('yolo') && (

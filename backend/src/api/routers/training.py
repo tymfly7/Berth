@@ -33,10 +33,8 @@ _MODEL_INFO_TTL = 60.0  # seconds
 def use_model(model_name: str):
     if model_name not in config.SUPPORTED_MODELS:
         raise HTTPException(400, f"Invalid model. Choose from: {list(config.SUPPORTED_MODELS)}")
-    processor_service.reset_processor()
+    processor_service.clear_classifier_cache()
     processor_service.active_mode = model_name
-    proc = processor_service.get_processor()
-    proc.start_processing()
     # Restart all active live cameras with the new model so they pick it up immediately.
     restarted = 0
     for cam in camera_registry.get_all():

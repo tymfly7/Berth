@@ -79,18 +79,13 @@ async def lifespan(app: FastAPI):
         )
     from src.sync.sync_worker import SyncWorker
     SyncWorker().start()
-    # Restore active cameras and pre-warm the default processor in a background
+    # Restore active cameras and pre-warm the active classifier in a background
     # thread so the server starts accepting connections immediately — model loading
     # is slow (5–15 s) and must not block the asyncio event loop.
     def _startup_warmup():
         camera_registry._restore_active()
         from src.inference.inference_pool import InferencePool
         InferencePool.get()
-        try:
-            processor_service.get_processor()
-            logger.info("VideoProcessor pre-warmed")
-        except Exception as e:
-            logger.warning(f"Processor pre-warm skipped: {e}")
         # Pre-load only the active classifier. The others load lazily on first
         # use and stay cached after — pre-loading all five bloated startup time
         # and resident memory (and on edge dragged in the torch/ultralytics path
@@ -172,10 +167,11 @@ def root():
 
 @app.get("/api/health")
 def health():
-    proc = processor_service.get_processor()
+    active = sum(1 for c in camera_registry.get_all() if c.get("active"))
     return {
         "status": "ok",
-        "processor": type(proc).__name__,
+        "processor": "registry",
+        "active_cameras": active,
         "model": processor_service.active_mode,
         "auth_enabled": bool(API_KEY),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -203,37 +199,6 @@ def _ws_token_valid(token: str) -> bool:
     if verify_token(token):
         return True
     return hmac.compare_digest(token.encode(), API_KEY.encode())
-
-
-@app.websocket("/ws/video")
-async def video_ws(websocket: WebSocket, token: str = ""):
-    if not _ws_token_valid(token):
-        await websocket.close(code=4001)
-        return
-    await websocket.accept()
-    # Offload the (potentially slow) model load + processor start to a worker
-    # thread so a cold connect never blocks the event loop and freezes every
-    # other request/WS.
-    proc = await asyncio.to_thread(processor_service.get_processor)
-    await asyncio.to_thread(proc.start_processing)
-    logger.info("WebSocket client connected")
-    last_frame_seq = -1
-    try:
-        while True:
-            proc = processor_service.get_processor()
-            metrics = proc.get_metrics()
-            await websocket.send_json({"metrics": metrics})
-            # New frames are sent as a separate binary message (raw JPEG bytes)
-            # so we avoid base64 inflation (~33%) in the JSON payload.
-            frame_jpeg, frame_seq = proc.get_frame_jpeg_and_seq()
-            if frame_jpeg and frame_seq != last_frame_seq:
-                last_frame_seq = frame_seq
-                await websocket.send_bytes(frame_jpeg)
-            await asyncio.sleep(0.05)
-    except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
 
 
 @app.websocket("/ws/cameras/{camera_id}")

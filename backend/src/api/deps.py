@@ -88,6 +88,10 @@ def validate_camera_source(source: str, type_: str) -> None:
         p = urlparse(source)
         if p.hostname not in _YOUTUBE_HOSTS:
             raise HTTPException(400, "YouTube source must be a youtube.com or youtu.be URL")
+    elif type_ == "file":
+        # 'file' cameras are created server-side by the video upload endpoint with
+        # a path confined to UPLOAD_DIR; a client may not supply a file source.
+        raise HTTPException(400, "File cameras are created via video upload and cannot be set manually")
 
 
 # ── Image helpers ─────────────────────────────────────────────────────────────

@@ -6,30 +6,33 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.api.deps import verify_api_key
-from src.api.processor_service import processor_service
 from src.cameras.camera_registry import camera_registry
 from src.db import database as db
+from src.inference.video_processor import default_metrics
 from src.roi.roi_store import RoiStore
 
 logger = logging.getLogger("berth.analytics")
 router = APIRouter()
 
 
-# ── Public metrics (no auth) ─────────────────────────────
-@router.get("/api/public/metrics")
-def get_public_metrics():
-    # Aggregate across active cameras (mirrors /api/history); fall back to the
-    # default processor when no cameras are active.
-    active_procs = [
+def _active_processors() -> list:
+    """Running VideoProcessors for all active registry cameras."""
+    procs = [
         camera_registry.get_processor(c["id"])
         for c in camera_registry.get_all()
         if c.get("active")
     ]
-    active_procs = [p for p in active_procs if p is not None]
-    if not active_procs:
-        return processor_service.get_processor().get_metrics()
+    return [p for p in procs if p is not None]
 
-    metrics = [p.get_metrics() for p in active_procs]
+
+def _aggregate_metrics() -> dict:
+    """Sum live metrics across active cameras. Returns the canonical empty
+    shape when none are active (no live video system to query otherwise)."""
+    procs = _active_processors()
+    if not procs:
+        return default_metrics()
+
+    metrics = [p.get_metrics() for p in procs]
     total     = sum(m.get("total", 0)     for m in metrics)
     available = sum(m.get("available", 0) for m in metrics)
     occupied  = sum(m.get("occupied", 0)  for m in metrics)
@@ -45,6 +48,12 @@ def get_public_metrics():
         "anomaly_enabled": any(m.get("anomaly_enabled") for m in metrics),
         "slots": [s for m in metrics for s in m.get("slots", [])],
     }
+
+
+# ── Public metrics (no auth) ─────────────────────────────
+@router.get("/api/public/metrics")
+def get_public_metrics():
+    return _aggregate_metrics()
 
 
 @router.get("/api/public/lots")
@@ -77,18 +86,13 @@ def get_public_trends(range: str = "day", camera_id: str = None):
 # ── Metrics / Heatmap / History ──────────────────────────
 @router.get("/api/metrics", dependencies=[Depends(verify_api_key)])
 def get_metrics():
-    return processor_service.get_processor().get_metrics()
+    return _aggregate_metrics()
 
 
 @router.get("/api/heatmap", dependencies=[Depends(verify_api_key)])
 def get_heatmap():
-    active = next((c for c in camera_registry.get_all() if c.get("active")), None)
-    if active:
-        proc = camera_registry.get_processor(active["id"])
-        if proc and hasattr(proc, "get_heatmap"):
-            return proc.get_heatmap()
-    proc = processor_service.get_processor()
-    return proc.get_heatmap() if hasattr(proc, "get_heatmap") else []
+    proc = next(iter(_active_processors()), None)
+    return proc.get_heatmap() if proc else []
 
 
 @router.get("/api/heatmap/{camera_id}", dependencies=[Depends(verify_api_key)])
@@ -101,22 +105,15 @@ def get_heatmap_camera(camera_id: str):
 
 @router.get("/api/history", dependencies=[Depends(verify_api_key)])
 def get_history():
-    # Prefer active camera processors; fall back to the default processor
-    active_procs = [
-        camera_registry.get_processor(c["id"])
-        for c in camera_registry.get_all()
-        if c.get("active")
-    ]
-    active_procs = [p for p in active_procs if p and hasattr(p, "get_history")]
-    if active_procs:
-        # Merge and sort all camera histories by timestamp
-        merged = sorted(
-            (entry for p in active_procs for entry in p.get_history()),
-            key=lambda e: e.get("timestamp", "")
-        )
-        return merged[-100:]
-    proc = processor_service.get_processor()
-    return proc.get_history() if hasattr(proc, "get_history") else []
+    # Merge and sort all active camera histories by timestamp.
+    procs = _active_processors()
+    if not procs:
+        return []
+    merged = sorted(
+        (entry for p in procs for entry in p.get_history()),
+        key=lambda e: e.get("timestamp", "")
+    )
+    return merged[-100:]
 
 
 @router.get("/api/trends", dependencies=[Depends(verify_api_key)])

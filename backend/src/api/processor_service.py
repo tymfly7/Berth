@@ -1,12 +1,12 @@
 """
 ProcessorService — single owner of runtime inference state
 ==========================================================
-Owns the lazily-loaded VideoProcessor, the active-model selection, the
-per-model classifier cache, and the anomaly-detection settings.
+Owns the active-model selection, the per-model classifier cache (used by the
+single-image /predict and /analyze-* endpoints), and the anomaly-detection
+settings that newly activated cameras inherit.
 
-These previously lived as module-level globals in main.py guarded by ad-hoc
-locks. Centralising them here makes the lifecycle explicit and lets the API
-routers share one source of truth instead of reaching into main's namespace.
+Live video is owned exclusively by ``camera_registry`` — each camera runs its
+own VideoProcessor there. This service holds no processor of its own.
 A single module-level instance (``processor_service``) is used app-wide.
 """
 
@@ -14,15 +14,12 @@ import logging
 import threading
 
 import config
-from src.inference.video_processor import VideoProcessor
 
 logger = logging.getLogger("berth.processor")
 
 
 class ProcessorService:
     def __init__(self) -> None:
-        self._processor = None
-        self._processor_lock = threading.Lock()
         self.active_mode = config.ACTIVE_MODEL
         self.anomaly_enabled = False
         # min fraction of a car inside its best bay to count as parked
@@ -48,28 +45,6 @@ class ProcessorService:
     def clear_classifier_cache(self) -> None:
         with self._clf_lock:
             self._clf_cache.clear()
-
-    # ── Processor lifecycle (lazy, thread-safe) ───────────────────────────
-    def get_processor(self):
-        with self._processor_lock:
-            if self._processor is None:
-                try:
-                    self._processor = VideoProcessor(model_name=self.active_mode or None)
-                    logger.info(f"VideoProcessor initialised (model={self.active_mode or 'none'})")
-                except Exception as e:
-                    logger.error(f"VideoProcessor failed to initialise: {e}")
-                    raise
-            return self._processor
-
-    def reset_processor(self) -> None:
-        with self._processor_lock:
-            if self._processor is not None:
-                try:
-                    self._processor.stop_processing()
-                except Exception:
-                    pass
-            self._processor = None
-        self.clear_classifier_cache()
 
     # ── Model resolution ──────────────────────────────────────────────────
     def resolve_model_name(self):

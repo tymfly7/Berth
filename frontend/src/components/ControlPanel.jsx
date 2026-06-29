@@ -135,7 +135,7 @@ const style = {
   },
 }
 
-export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModelInfo, setActiveModel }) {
+export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModelInfo, setActiveModel, onCamerasChange }) {
   const [status, setStatus]           = useState('')
   const [resultImage, setResultImage] = useState(null)
   const [resultData, setResultData]   = useState(null)
@@ -366,7 +366,16 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       try {
         const res = await apiFetch(`${apiBase}/api/upload-video`, { method: 'POST', body: form })
         const data = await res.json()
-        showStatus(data.message || 'Uploaded', 6000)
+        // The upload is registered as a 'file' camera; refresh the registry so it
+        // appears in the live feeds (and is selectable) immediately.
+        try {
+          const camRes = await apiFetch(`${apiBase}/api/cameras`)
+          if (camRes.ok) onCamerasChange?.(await camRes.json())
+        } catch { /* the 10s camera poll will catch up */ }
+        showStatus(
+          data.activated ? `Uploaded — now streaming as "${data.camera?.name}"` : (data.message || 'Uploaded'),
+          6000,
+        )
       } catch { showStatus('Upload failed', 6000) }
       return
     }
