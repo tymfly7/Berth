@@ -1,0 +1,294 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
+import { apiFetch } from '../api'
+
+// Auto-labeling uses the classifier as a pre-labeler — detector head excluded.
+const MODELS = [
+  { id: 'cnn_scratch',     label: 'CNN Scratch'     },
+  { id: 'resnet50',        label: 'ResNet-50'       },
+  { id: 'mobilenetv4s',    label: 'MobileNetV4'     },
+  { id: 'yolo26_classify', label: 'YOLO26 Classify' },
+]
+
+const BUCKETS = [
+  { id: 'occupied', label: 'Occupied', color: 'var(--text-occupied, #e05a5a)' },
+  { id: 'vacant',   label: 'Vacant',   color: 'var(--text-vacant, #3fbf6f)'   },
+  { id: 'review',   label: 'Review',   color: '#d6a73a' },
+  { id: 'too_dark', label: 'Too Dark', color: 'var(--text-secondary)' },
+]
+
+const loadLotIds = () => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('berth_test_lots') || '[]')
+    return Array.isArray(parsed) ? parsed.map(l => l.id).filter(Boolean) : []
+  } catch { return [] }
+}
+
+const labelStyle = { fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }
+const fieldStyle = { width: '100%', padding: '6px 8px', fontSize: '0.8rem', marginBottom: 10,
+  background: 'var(--bg-secondary, #1a1a1a)', color: 'var(--text-primary)',
+  border: '1px solid var(--border-color)', borderRadius: 4 }
+
+export default function LabelingPanel({ apiBase }) {
+  const [lotId, setLotId] = useState('lot-t10lot')
+  const [imageDir, setImageDir] = useState('')
+  const [model, setModel] = useState('mobilenetv4s')
+  const [conf, setConf] = useState(0.7)
+  const [brightness, setBrightness] = useState(50)
+  const [dateGlob, setDateGlob] = useState('2026-*')
+  const [running, setRunning] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState(null)
+  const [calib, setCalib] = useState(null)
+  const [calibLoading, setCalibLoading] = useState(false)
+  const [manifest, setManifest] = useState(null)
+  const [galleryOpen, setGalleryOpen] = useState(false)
+  const [enlarged, setEnlarged] = useState(null)
+  const pollRef = useRef(null)
+  const knownLots = loadLotIds()
+
+  const cropUrl = useCallback(
+    (cropId) => `${apiBase}/api/label-batch/${lotId}/crop/${cropId}`,
+    [apiBase, lotId],
+  )
+
+  const fetchManifest = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/manifest`)
+      if (res.ok) setManifest(await res.json())
+    } catch { /* none yet */ }
+  }, [apiBase, lotId])
+
+  useEffect(() => { fetchManifest() }, [fetchManifest])
+  useEffect(() => () => clearInterval(pollRef.current), [])
+
+  const poll = useCallback(() => {
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await apiFetch(`${apiBase}/api/status`)
+        if (!res.ok) return
+        const { operations } = await res.json()
+        const op = operations.find(o => o.type === 'label_batch')
+        if (op) {
+          setProgress(op.progress || 0)
+        } else {
+          clearInterval(pollRef.current)
+          setRunning(false)
+          setProgress(1)
+          fetchManifest()
+          setStatus('Labeling complete.')
+        }
+      } catch { /* keep polling */ }
+    }, 1500)
+  }, [apiBase, fetchManifest])
+
+  const runCalibrate = async () => {
+    setCalibLoading(true); setStatus(null); setCalib(null)
+    try {
+      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/calibrate?date_glob=${encodeURIComponent(dateGlob)}&sample=200&image_dir=${encodeURIComponent(imageDir)}`)
+      const data = await res.json()
+      if (!res.ok) { setStatus(`✗ ${data.detail || 'Calibration failed'}`); return }
+      setCalib(data)
+    } catch (e) { setStatus(`✗ ${e.message}`) }
+    finally { setCalibLoading(false) }
+  }
+
+  const runBatch = async () => {
+    setStatus(null); setProgress(0)
+    const qs = `model_name=${model}&conf_threshold=${conf}&brightness_threshold=${brightness}&date_glob=${encodeURIComponent(dateGlob)}&image_dir=${encodeURIComponent(imageDir)}`
+    try {
+      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}?${qs}`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) { setStatus(`✗ ${data.detail || 'Failed to start'}`); return }
+      setRunning(true)
+      setStatus(`Running on ${data.image_count} images × ${data.roi_count} ROIs…`)
+      poll()
+    } catch (e) { setStatus(`✗ ${e.message}`) }
+  }
+
+  const exportDetector = async () => {
+    setStatus('Exporting detector dataset…')
+    try {
+      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/export-detector`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) { setStatus(`✗ ${data.detail || 'Export failed'}`); return }
+      const c = data.counts
+      setStatus(`✓ Exported ${c.total_images} imgs (train ${c.train}/val ${c.valid}/test ${c.test}), ${c.total_labels} labels → ${data.dataset_yaml}`)
+    } catch (e) { setStatus(`✗ ${e.message}`) }
+  }
+
+  const deleteCrop = async (cropId) => {
+    try {
+      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/crop/${cropId}`, { method: 'DELETE' })
+      if (res.ok) setManifest(m => ({ ...m, crops: m.crops.filter(c => c.crop_id !== cropId) }))
+    } catch { /* ignore */ }
+  }
+
+  const reassignCrop = async (cropId, newStatus) => {
+    try {
+      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/crop/${cropId}/reassign?status=${newStatus}`, { method: 'POST' })
+      if (res.ok) setManifest(m => ({
+        ...m,
+        crops: m.crops.map(c => c.crop_id === cropId ? { ...c, bucket: newStatus, status: newStatus } : c),
+      }))
+    } catch { /* ignore */ }
+  }
+
+  const counts = manifest
+    ? BUCKETS.reduce((acc, b) => ({ ...acc, [b.id]: manifest.crops.filter(c => c.bucket === b.id).length }), {})
+    : {}
+  const totalCrops = manifest ? manifest.crops.length : 0
+
+  return (
+    <div>
+      <label style={labelStyle}>Lot ID (ROI set + output name)</label>
+      <input style={fieldStyle} list="labeling-lots" value={lotId}
+        onChange={e => setLotId(e.target.value)} placeholder="lot-t10lot" />
+      <datalist id="labeling-lots">
+        {knownLots.map(id => <option key={id} value={id} />)}
+      </datalist>
+
+      <label style={labelStyle}>Image folder (absolute path — blank = data/&lt;lotId&gt;)</label>
+      <input style={fieldStyle} value={imageDir} onChange={e => setImageDir(e.target.value)}
+        placeholder="D:\Documents\School Project\backend\data\t10lot" />
+
+      <label style={labelStyle}>Classifier (pre-labeler)</label>
+      <select style={fieldStyle} value={model} onChange={e => setModel(e.target.value)}>
+        {MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+      </select>
+
+      <label style={labelStyle}>Confidence threshold: {conf.toFixed(2)} (below → review)</label>
+      <input type="range" min="0.5" max="0.99" step="0.01" value={conf}
+        onChange={e => setConf(parseFloat(e.target.value))} style={{ width: '100%', marginBottom: 12 }} />
+
+      <label style={labelStyle}>Brightness threshold: {brightness} (below → too_dark)</label>
+      <input type="range" min="10" max="120" step="1" value={brightness}
+        onChange={e => setBrightness(parseInt(e.target.value))} style={{ width: '100%', marginBottom: 12 }} />
+
+      <label style={labelStyle}>Date filter (glob)</label>
+      <input style={fieldStyle} value={dateGlob} onChange={e => setDateGlob(e.target.value)} placeholder="2026-*" />
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+        <button className="btn btn-ghost btn-sm" onClick={runCalibrate}
+          disabled={calibLoading || running} style={{ flex: 1 }}>
+          {calibLoading ? 'Calibrating…' : 'Calibrate'}
+        </button>
+        <button className="btn btn-primary btn-sm" onClick={runBatch}
+          disabled={running} style={{ flex: 1 }}>
+          {running ? `Running ${Math.round(progress * 100)}%` : 'Run labeling'}
+        </button>
+      </div>
+
+      {running && (
+        <div style={{ height: 6, background: 'var(--border-color)', borderRadius: 3, marginBottom: 10 }}>
+          <div style={{ height: '100%', width: `${Math.round(progress * 100)}%`,
+            background: 'var(--accent-primary)', borderRadius: 3, transition: 'width 0.3s' }} />
+        </div>
+      )}
+
+      {calib && (
+        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 10,
+          padding: 8, border: '1px solid var(--border-color)', borderRadius: 4 }}>
+          <div>ROI-area luminance (n={calib.sampled}/{calib.total_images}):
+            min {calib.min} · p10 {calib.p10} · median {calib.median} · max {calib.max}</div>
+          <div style={{ marginTop: 4 }}>too_dark count by threshold:&nbsp;
+            {Object.entries(calib.below).map(([t, n]) => `<${t}:${n}`).join('  ')}</div>
+          {calib.darkest_thumbnails?.length > 0 && (
+            <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
+              {calib.darkest_thumbnails.map((t, i) => (
+                <div key={i} style={{ textAlign: 'center' }}>
+                  <img src={t.image} alt="" style={{ height: 48, borderRadius: 3 }} />
+                  <div>{t.brightness}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {status && (
+        <div style={{ fontSize: '0.74rem', marginBottom: 10, wordBreak: 'break-all',
+          color: status.startsWith('✗') ? 'var(--text-occupied)' : 'var(--text-secondary)' }}>
+          {status}
+        </div>
+      )}
+
+      {manifest && totalCrops > 0 && (
+        <>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: '0.72rem', marginBottom: 8 }}>
+            {BUCKETS.map(b => (
+              <span key={b.id} style={{ color: b.color }}>{b.label}: <b>{counts[b.id] || 0}</b></span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" style={{ flex: 1 }}
+              onClick={() => setGalleryOpen(true)}>Review gallery</button>
+            <button className="btn btn-ghost btn-sm" style={{ flex: 1 }}
+              onClick={exportDetector}>Export detector</button>
+          </div>
+        </>
+      )}
+
+      {galleryOpen && manifest && createPortal(
+        <div onClick={() => setGalleryOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999,
+            overflow: 'auto', padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ maxWidth: 1100, margin: '0 auto', background: 'var(--bg-primary, #111)',
+              borderRadius: 8, padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>Review — {lotId} ({totalCrops} crops)</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => setGalleryOpen(false)}>✕ Close</button>
+            </div>
+            {BUCKETS.map(b => {
+              const items = manifest.crops.filter(c => c.bucket === b.id)
+              if (!items.length) return null
+              return (
+                <div key={b.id} style={{ marginBottom: 24 }}>
+                  <h4 style={{ color: b.color, marginBottom: 8 }}>{b.label} — {items.length}</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8 }}>
+                    {items.slice(0, 400).map(c => (
+                      <div key={c.crop_id} style={{ border: '1px solid var(--border-color)', borderRadius: 4, padding: 4 }}>
+                        <img src={cropUrl(c.crop_id)} alt={c.roi_label} loading="lazy"
+                          onClick={() => setEnlarged(cropUrl(c.crop_id))}
+                          style={{ width: '100%', height: 70, objectFit: 'cover', borderRadius: 3, cursor: 'pointer' }} />
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+                          {c.roi_label}{c.confidence != null ? ` · ${Math.round(c.confidence * 100)}%` : ''}
+                        </div>
+                        <div style={{ display: 'flex', gap: 3, marginTop: 3 }}>
+                          {b.id === 'review' && (
+                            <>
+                              <button title="Confirm occupied" onClick={() => reassignCrop(c.crop_id, 'occupied')}
+                                style={{ flex: 1, fontSize: '0.6rem', cursor: 'pointer' }}>Occ</button>
+                              <button title="Confirm vacant" onClick={() => reassignCrop(c.crop_id, 'vacant')}
+                                style={{ flex: 1, fontSize: '0.6rem', cursor: 'pointer' }}>Vac</button>
+                            </>
+                          )}
+                          <button title="Delete" onClick={() => deleteCrop(c.crop_id)}
+                            style={{ flex: 1, fontSize: '0.6rem', cursor: 'pointer', color: 'var(--text-occupied)' }}>✕</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {items.length > 400 && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: 6 }}>
+                      Showing first 400 of {items.length}.
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {enlarged && (
+            <div onClick={(e) => { e.stopPropagation(); setEnlarged(null) }}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 10000,
+                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <img src={enlarged} alt="" style={{ maxWidth: '90%', maxHeight: '90%' }} />
+            </div>
+          )}
+        </div>,
+        document.body,
+      )}
+    </div>
+  )
+}

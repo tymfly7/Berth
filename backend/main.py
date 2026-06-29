@@ -51,7 +51,7 @@ from slowapi.errors import RateLimitExceeded
 import config
 from src.api.deps import limiter, verify_token
 from src.api.processor_service import processor_service
-from src.api.routers import analytics, auth, cameras, inference, roi, training
+from src.api.routers import analytics, auth, cameras, inference, labeling, roi, training
 from src.cameras.camera_registry import camera_registry
 from src.db import database as db
 
@@ -146,6 +146,7 @@ app.include_router(analytics.router)
 app.include_router(training.router)
 app.include_router(cameras.router)
 app.include_router(roi.router)
+app.include_router(labeling.router)
 app.include_router(auth.router)
 
 

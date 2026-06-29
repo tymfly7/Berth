@@ -15,6 +15,12 @@ logger = logging.getLogger("berth.roi")
 router = APIRouter()
 
 
+@router.get("/api/roi", dependencies=[Depends(verify_api_key)])
+def list_roi_sets():
+    """List camera/lot ids that have a saved ROI config."""
+    return {"lots": RoiStore.list_camera_ids()}
+
+
 @router.get("/api/roi/{camera_id}", dependencies=[Depends(verify_api_key)])
 def get_rois(camera_id: str):
     return RoiStore.get_rois(camera_id)

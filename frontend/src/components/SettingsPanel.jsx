@@ -5,6 +5,7 @@ import ModelStatus from './ModelStatus'
 import CameraManager from './CameraManager'
 import AnomalyPanel from './AnomalyPanel'
 import OccupancyPanel from './OccupancyPanel'
+import LabelingPanel from './LabelingPanel'
 import { apiFetch } from '../api'
 
 
@@ -145,6 +146,12 @@ export default function SettingsPanel({ apiAction, apiBase, modelInfo, fetchMode
 
           <SubSection title="Training Data" defaultOpen={false}>
             <TrainingDataBrowser apiBase={apiBase} />
+          </SubSection>
+
+          <div style={dividerStyle} />
+
+          <SubSection title="Auto-Labeling" defaultOpen={false}>
+            <LabelingPanel apiBase={apiBase} />
           </SubSection>
 
           <div style={dividerStyle} />

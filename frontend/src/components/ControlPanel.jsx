@@ -173,6 +173,28 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     }
   }, [modelInfo?.active_model])
 
+  // Merge backend-saved testing lots into the dropdown so sets created in other
+  // sessions/browsers (the backend is the source of truth) aren't missing. Only
+  // testing lots (id prefixed "lot-") — live-camera ROIs are kept out.
+  useEffect(() => {
+    apiFetch(`${apiBase}/api/roi`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const ids = (data?.lots || []).filter(id => id.startsWith('lot-'))
+        if (ids.length === 0) return
+        setLots(prev => {
+          const known = new Set(prev.map(l => l.id))
+          const added = ids.filter(id => !known.has(id)).map(id => ({ id, name: id.replace(/^lot-/, '') }))
+          if (added.length === 0) return prev
+          const merged = [...prev, ...added]
+          localStorage.setItem(LOTS_KEY, JSON.stringify(merged))
+          setSelectedLotId(cur => cur || merged[0].id)
+          return merged
+        })
+      })
+      .catch(() => {})
+  }, [apiBase])
+
   // Reload ROIs when selected lot changes
   useEffect(() => {
     if (!selectedLotId) { setRois([]); return }
@@ -629,12 +651,14 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
             >
               ✕
             </button>
-            {rois.length > 0 && (
-              <span className="badge badge-info" style={{ flexShrink: 0 }}>
+          </div>
+          {rois.length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              <span className="badge badge-info">
                 {rois.length} ROI{rois.length !== 1 ? 's' : ''}
               </span>
-            )}
-          </div>
+            </div>
+          )}
 
           {roiMsg && (
             <div style={{
@@ -807,15 +831,9 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
 
             {/* Canvas area: responsive 16:9, capped to viewport so the whole lot stays visible */}
             <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', maxHeight: '78vh', background: '#000', flexShrink: 0 }}>
-              {roiEditorBg && (
-                <img
-                  src={roiEditorBg}
-                  alt="ROI background"
-                  style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', userSelect: 'none', pointerEvents: 'none' }}
-                />
-              )}
               <div style={{ position: 'absolute', inset: 0 }}>
                 <RoiEditor
+                  backgroundImage={roiEditorBg}
                   rois={rois}
                   onRoisChange={setRois}
                   proposals={proposals}

@@ -269,7 +269,7 @@ export default function RoiEditor({
     const H = canvas.height
     ctx.clearRect(0, 0, W, H)
 
-    if (!overlay && bgImgRef.current) {
+    if (bgImgRef.current) {
       ctx.drawImage(bgImgRef.current, 0, 0, W, H)
     }
 
@@ -439,7 +439,14 @@ export default function RoiEditor({
     const handleResize = () => { syncSize(); redraw() }
     window.addEventListener('resize', handleResize)
     const raf = requestAnimationFrame(() => { syncSize(); redraw() })
-    return () => { window.removeEventListener('resize', handleResize); cancelAnimationFrame(raf) }
+    // The toolbar band grows/shrinks (e.g. spot-type row on selection), which
+    // resizes the flex:1 canvas area in overlay mode — keep the canvas in sync.
+    let ro
+    if (containerRef.current && typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(handleResize)
+      ro.observe(containerRef.current)
+    }
+    return () => { window.removeEventListener('resize', handleResize); cancelAnimationFrame(raf); ro?.disconnect() }
   }, [syncSize, redraw])
 
   const commitChange = useCallback((newRois) => {
@@ -840,11 +847,10 @@ export default function RoiEditor({
   })
 
   return (
-    <div style={overlay ? { position: 'absolute', inset: 0 } : {}}>
-      {/* ── Floating toolbar layer: in overlay it sits above the full-box canvas.
-          pointerEvents:none lets clicks fall through to the canvas; each
-          interactive toolbar re-enables pointerEvents on itself. ── */}
-      <div style={overlay ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 2, pointerEvents: 'none' } : {}}>
+    <div style={overlay ? { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' } : {}}>
+      {/* ── Toolbar layer: in overlay it stacks above the canvas (flex column)
+          so it never covers the image. ── */}
+      <div style={overlay ? { flexShrink: 0, zIndex: 2 } : {}}>
       {/* ── ROI drawing toolbar ── */}
       <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', pointerEvents: 'auto' } : {}) }}>
         <button style={btnStyle(mode === 'polygon')} onClick={() => changeMode('polygon')}>
@@ -1044,7 +1050,7 @@ export default function RoiEditor({
       </div>
       {/* ── Canvas ── */}
       <div ref={containerRef} style={overlay
-        ? { position: 'absolute', inset: 0, zIndex: 1 }
+        ? { position: 'relative', flex: 1, minHeight: 0, zIndex: 1 }
         : { position: 'relative', width: '100%', minHeight: 300, background: 'rgba(0,0,0,0.25)', borderRadius: 4 }
       }>
         <canvas

@@ -37,6 +37,14 @@ class RoiStore:
         return cls._ensure_dir() / f"{camera_id}_snapshot.jpg"
 
     @classmethod
+    def list_camera_ids(cls) -> list[str]:
+        """All camera/lot ids that have a saved ROI config (one .json each)."""
+        roi_dir = config.ROI_CONFIG_DIR
+        if not roi_dir.exists():
+            return []
+        return sorted(p.stem for p in roi_dir.glob("*.json"))
+
+    @classmethod
     def get_rois(cls, camera_id: str) -> list[dict]:
         path = cls._roi_path(camera_id)
         if not path.exists():
