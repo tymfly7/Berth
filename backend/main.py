@@ -16,6 +16,10 @@ Features:
   - Multi-camera registry with persistent activation
 """
 
+# Third-party imports below are intentionally placed after the CPU thread-budget
+# env setup, which must run before cv2/torch/ncnn import (see block at top of imports).
+# ruff: noqa: E402
+
 import asyncio
 import hmac
 import logging

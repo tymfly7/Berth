@@ -652,8 +652,8 @@ export default function DocsPage() {
             used by the classifier models.
           </li>
           <li style={s.step}>
-            <Code>yolo_data/parking_rois_gopro</Code> — full-scene frames and
-            annotations used by YOLO26 Detect.
+            <Code>labeled/&lt;lot&gt;/detector_src</Code> — full-scene frames and
+            annotations used to build the YOLO26 Detect dataset.
           </li>
           <li style={s.step}>
             <Code>yolo_detect_dataset</Code> — the converted YOLO dataset

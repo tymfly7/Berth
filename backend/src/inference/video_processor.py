@@ -30,10 +30,10 @@ from src.db import database as db
 # multiple_requests;0  — disable persistent HTTP connections so YouTube CDN
 #   host changes between HLS segments don't cause reconnect warnings.
 # fflags;nobuffer  — return packets immediately without input buffering.
-# live_start_index;-3  — start near the live edge of the HLS manifest.
+# live_start_index;-1  — ride the live edge of the HLS manifest (last segment).
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-    "multiple_requests;0|fflags;nobuffer|live_start_index;-3"
+    "multiple_requests;0|fflags;nobuffer|live_start_index;-1"
     "|probesize;500000|analyzeduration;500000"
     "|reconnect;1|reconnect_streamed;1|reconnect_delay_max;5",
 )
@@ -247,7 +247,15 @@ class VideoProcessor:
             except YouTubeResolveError as e:
                 logger.error(f"YouTube resolve failed for '{self._source}': {e}")
                 return None
-            cap = cv2.VideoCapture(stream_url)
+            # Set YouTube options explicitly here so a prior RTSP open (which sets
+            # rtsp_transport;tcp below) can't leave the process env clobbered for a
+            # later YouTube reconnect. Force the FFmpeg backend so the options apply.
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                "multiple_requests;0|fflags;nobuffer|live_start_index;-1"
+                "|probesize;500000|analyzeduration;500000"
+                "|reconnect;1|reconnect_streamed;1|reconnect_delay_max;5"
+            )
+            cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
         elif is_rtsp:
             # Force RTSP over TCP. UDP packet loss (common over Wi-Fi / a busy
             # LAN) corrupts H264 macroblocks — the pixelation and "error while

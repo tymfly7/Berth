@@ -1,45 +1,27 @@
 """
-PKLot Dataset — PyTorch Dataset Class
-======================================
+Parking Dataset — PyTorch Dataset Class
+=======================================
 Loads individual parking space images (occupied/vacant) with augmentation.
 
-The PKLot dataset contains cropped images of individual parking spaces.
-Each image is labeled as either "occupied" or "vacant" (empty).
+The dataset contains cropped images of individual parking spaces (e.g. the
+lot-t10lot crops from parking-lot-t10). Each image is labeled as either
+"occupied" or "vacant" (empty).
 
 Labels:
     0 = Vacant  (empty parking space)
     1 = Occupied (car present)
 """
 
-import random as _random
+import sys
 from pathlib import Path
 from PIL import Image
 
-import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
 
-
-class _RandomShadow:
-    """Simulate a partial shadow stripe across a parking space crop.
-
-    Teaches the model that a dark band in an otherwise empty space
-    is not a vehicle — the primary cause of vacant→occupied drift
-    as sun angle changes throughout the day.
-    """
-    def __init__(self, p=0.5):
-        self.p = p
-
-    def __call__(self, img):
-        if _random.random() > self.p:
-            return img
-        arr = np.array(img, dtype=np.float32)
-        h, w = arr.shape[:2]
-        bw = _random.randint(w // 5, 3 * w // 5)
-        x0 = _random.randint(0, w - bw)
-        arr[:, x0:x0 + bw] *= _random.uniform(0.35, 0.65)
-        return Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+import config
 
 
 class ParkingDataset(Dataset):
@@ -68,7 +50,8 @@ class ParkingDataset(Dataset):
     IMAGENET_MEAN = [0.485, 0.456, 0.406]
     IMAGENET_STD  = [0.229, 0.224, 0.225]
 
-    def __init__(self, data_root=None, split="train", image_size=224, file_list=None):
+    def __init__(self, data_root=None, split="train", image_size=224, file_list=None,
+                 cache_images=None):
         super().__init__()
         self.image_size = image_size
         self.split = split
@@ -83,6 +66,12 @@ class ParkingDataset(Dataset):
 
         # Build transforms based on split
         self.transform = self._build_transforms()
+
+        # Optional in-RAM cache of decoded+resized images (lazily filled).
+        # Removes the per-epoch disk read + JPEG decode + resize cost, which
+        # dominates on the Windows web-UI path (num_workers=0, single process).
+        self.cache_images = config.CACHE_DATASET if cache_images is None else cache_images
+        self._cache = {}
 
     def _scan_directory(self, data_root):
         """Scan occupied/ and vacant/ folders, return list of (path, label)."""
@@ -119,17 +108,9 @@ class ParkingDataset(Dataset):
         """
         if self.split == "train":
             return transforms.Compose([
-                transforms.Resize((self.image_size, self.image_size)),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.RandomVerticalFlip(p=0.1),
                 transforms.RandomRotation(degrees=15),
-                transforms.ColorJitter(
-                    brightness=0.3,
-                    contrast=0.2,
-                    saturation=0.2,
-                    hue=0.05
-                ),
-                _RandomShadow(p=0.5),
                 transforms.RandomAffine(
                     degrees=0,
                     translate=(0.05, 0.05),
@@ -144,7 +125,6 @@ class ParkingDataset(Dataset):
         else:
             # Val / Test — no augmentation
             return transforms.Compose([
-                transforms.Resize((self.image_size, self.image_size)),
                 transforms.ToTensor(),
                 transforms.Normalize(
                     mean=self.IMAGENET_MEAN,
@@ -155,24 +135,40 @@ class ParkingDataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
+    def _load_image(self, idx):
+        """Return the decoded, resized RGB image for idx (cached if enabled).
+
+        Only the deterministic part of the pipeline (decode + resize) is cached;
+        random augmentation is applied fresh per epoch in __getitem__.
+        """
+        cached = self._cache.get(idx)
+        if cached is not None:
+            return cached
+
+        img_path, _ = self.samples[idx]
+        try:
+            image = Image.open(img_path).convert("RGB").resize(
+                (self.image_size, self.image_size), Image.BILINEAR
+            )
+        except Exception as e:
+            # Return a black image if loading fails (robustness)
+            print(f"⚠️  Failed to load {img_path}: {e}")
+            image = Image.new("RGB", (self.image_size, self.image_size), (0, 0, 0))
+
+        if self.cache_images:
+            self._cache[idx] = image
+        return image
+
     def __getitem__(self, idx):
         """
         Returns:
             image (Tensor): Transformed image tensor [C, H, W]
             label (Tensor): Binary label (0=vacant, 1=occupied)
         """
-        img_path, label = self.samples[idx]
+        _, label = self.samples[idx]
 
-        # Load image as RGB
-        try:
-            image = Image.open(img_path).convert("RGB")
-        except Exception as e:
-            # Return a black image if loading fails (robustness)
-            print(f"⚠️  Failed to load {img_path}: {e}")
-            image = Image.new("RGB", (self.image_size, self.image_size), (0, 0, 0))
-
-        # Apply transforms
-        image = self.transform(image)
+        # Apply augmentation + normalization on the (cached) resized image
+        image = self.transform(self._load_image(idx))
         label = torch.tensor(label, dtype=torch.float32)
 
         return image, label

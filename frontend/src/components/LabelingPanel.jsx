@@ -126,7 +126,6 @@ export default function LabelingPanel({ apiBase }) {
       .catch(() => {})
     return () => { cancelled = true }
     // Mount-only: reattach is about surviving a reload, not lotId changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const runCalibrate = async () => {

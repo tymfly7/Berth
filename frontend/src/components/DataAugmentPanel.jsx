@@ -47,11 +47,8 @@ function ChipRow({ label, options, value, onChange }) {
 
 export default function DataAugmentPanel({ apiBase }) {
   const [label, setLabel]     = useState('both')
-  const [shadowP, setShadowP] = useState(50)
-  const [night, setNight]     = useState(false)
   const [flip, setFlip]       = useState(true)
   const [rotation, setRotation] = useState(15)
-  const [jitter, setJitter]   = useState(30)
   const [count, setCount]     = useState(6)
   const [images, setImages]   = useState([])
   const [loading, setLoading] = useState(false)
@@ -66,11 +63,8 @@ export default function DataAugmentPanel({ apiBase }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           label,
-          shadow_p: shadowP / 100,
-          night,
           flip,
           rotation,
-          jitter: jitter / 100,
           count,
         }),
       })
@@ -91,18 +85,10 @@ export default function DataAugmentPanel({ apiBase }) {
       <ChipRow label="Source class" options={['occupied', 'vacant', 'both']}
         value={label} onChange={setLabel} />
 
-      <SliderRow label="Shadow probability" value={shadowP} min={0} max={100}
-        suffix="%" onChange={setShadowP} />
-
-      <ToggleRow label="Night / low-light mode" value={night} onChange={setNight} />
-
       <ToggleRow label="Random horizontal flip" value={flip} onChange={setFlip} />
 
       <SliderRow label="Rotation" value={rotation} min={0} max={45}
         suffix="°" onChange={setRotation} />
-
-      <SliderRow label="Color jitter" value={jitter} min={0} max={100}
-        suffix="%" onChange={setJitter} />
 
       <ChipRow label="Preview count" options={[4, 6, 8]}
         value={count} onChange={setCount} />

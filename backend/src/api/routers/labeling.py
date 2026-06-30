@@ -426,7 +426,7 @@ def export_detector(lot_id: str):
         json.dump(annotations, f)
 
     out_dir = config.YOLO_DATASET_DIR
-    yaml_path = build_yolo_detect_dataset(gopro_dir=staging, out_dir=out_dir, force=True)
+    yaml_path = build_yolo_detect_dataset(source_dir=staging, out_dir=out_dir, force=True)
 
     counts = {s: len(annotations[s]["file_names"]) for s in ("train", "valid", "test")}
     counts["total_images"] = sum(counts.values())

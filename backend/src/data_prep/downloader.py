@@ -1,15 +1,11 @@
 """
-PKLot Dataset Downloader & Organizer
-=====================================
-Downloads the PKLot dataset and organizes it into the expected
-occupied/vacant directory structure for training.
+Classifier Dataset Organizer
+============================
+Organizes a segmented occupied/vacant dataset (e.g. the lot-t10lot crops derived
+from the parking-lot-t10 dataset, https://github.com/tomas-fryza/parking-lot-t10)
+into the flat occupied/vacant directory structure used for training.
 
-The PKLot dataset contains images from 3 parking lots:
-    - PUC (Pontifical Catholic University)
-    - UFPR04 (Federal University of Paraná - Lot 04)
-    - UFPR05 (Federal University of Paraná - Lot 05)
-
-Each image is a cropped parking space, pre-labeled as Occupied or Empty.
+Each source image is a cropped parking space, pre-labeled as Occupied or Empty.
 """
 
 import sys
@@ -24,46 +20,38 @@ import config
 logger = logging.getLogger("berth.downloader")
 
 
-def organize_pklot(source_root=None, target_root=None, max_per_class=0,):
+def organize_dataset(source_root=None, target_root=None, max_per_class=0,):
     """
-    Organize PKLot dataset into a flat occupied/vacant structure.
+    Organize a segmented occupied/vacant dataset into a flat structure.
 
-    The PKLot segmented dataset has structure:
-        PKLotSegmented/
-            PUC/
-                Cloudy/
-                    2012-09-12/
+    The expected source layout is nested by lot / condition / date:
+        DATASET_ROOT/
+            <lot>/
+                <condition>/
+                    <date>/
                         Occupied/
                             *.jpg
                         Empty/
                             *.jpg
-                Rainy/
-                    ...
-                Sunny/
-                    ...
-            UFPR04/
-                ...
-            UFPR05/
-                ...
 
     This function flattens it into:
         target_root/
             occupied/
-                PUC_Cloudy_2012-09-12_001.jpg
+                <lot>_<condition>_<date>_001.jpg
                 ...
             vacant/
-                PUC_Cloudy_2012-09-12_001.jpg
+                <lot>_<condition>_<date>_001.jpg
                 ...
 
     Args:
-        source_root (str): Path to PKLotSegmented directory
+        source_root (str): Path to the segmented dataset directory
         target_root (str): Path to output directory (default: config.DATA_DIR)
         max_per_class (int): Max images per class (0 = unlimited)
 
     Returns:
         dict: {"occupied": count, "vacant": count}
     """
-    source_root = Path(source_root or config.PKLOT_ROOT)
+    source_root = Path(source_root or config.DATASET_ROOT)
     target_root = Path(target_root or config.DATA_DIR)
 
     occ_dir = target_root / "occupied"
@@ -71,16 +59,16 @@ def organize_pklot(source_root=None, target_root=None, max_per_class=0,):
     occ_dir.mkdir(parents=True, exist_ok=True)
     vac_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"📂 Scanning PKLot source: {source_root}")
+    logger.info(f"📂 Scanning dataset source: {source_root}")
 
     if not source_root.exists():
         logger.error(f"❌ Source directory not found: {source_root}")
         logger.info(
-            "💡 Download the PKLot dataset from:\n"
-            "   https://www.kaggle.com/datasets/blanderbuss/parking-lot-dataset\n"
+            "💡 Point this at a segmented occupied/vacant dataset, e.g. the\n"
+            "   parking-lot-t10 dataset (https://github.com/tomas-fryza/parking-lot-t10).\n"
             "   \n"
-            "   Then set PKLOT_ROOT environment variable or edit config.py:\n"
-            "   PKLOT_ROOT = 'path/to/PKLotSegmented'\n"
+            "   Then set the DATASET_ROOT environment variable or pass --source:\n"
+            "   DATASET_ROOT = 'path/to/segmented-dataset'\n"
         )
         return {"occupied": 0, "vacant": 0}
 
@@ -88,16 +76,16 @@ def organize_pklot(source_root=None, target_root=None, max_per_class=0,):
     occupied_images = []
     vacant_images = []
 
-    # Walk through the PKLot directory structure
+    # Walk through the segmented dataset directory structure
     for lot_dir in sorted(source_root.iterdir()):
         if not lot_dir.is_dir():
             continue
-        lot_name = lot_dir.name  # PUC, UFPR04, UFPR05
+        lot_name = lot_dir.name  # parking lot name
 
         for weather_dir in sorted(lot_dir.iterdir()):
             if not weather_dir.is_dir():
                 continue
-            weather = weather_dir.name  # Cloudy, Rainy, Sunny
+            weather = weather_dir.name  # capture condition
 
             for date_dir in sorted(weather_dir.iterdir()):
                 if not date_dir.is_dir():
@@ -209,9 +197,9 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 
     import argparse
-    parser = argparse.ArgumentParser(description="PKLot Dataset Organizer")
+    parser = argparse.ArgumentParser(description="Classifier Dataset Organizer")
     parser.add_argument("--source", type=str, default=None,
-                        help="Path to PKLotSegmented directory")
+                        help="Path to the segmented occupied/vacant dataset directory")
     parser.add_argument("--target", type=str, default=None,
                         help="Output directory (default: backend/data/)")
     parser.add_argument("--max-per-class", type=int, default=0,
@@ -228,7 +216,7 @@ if __name__ == "__main__":
             num_per_class=args.sample_count
         )
     else:
-        organize_pklot(
+        organize_dataset(
             source_root=args.source,
             target_root=args.target,
             max_per_class=args.max_per_class,

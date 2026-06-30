@@ -385,7 +385,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
           ))}
 
           <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>
-            Classifiers: PKLot test set accuracy · YOLO26 Detect: mAP@50 on parking detection test split
+            Classifiers: test set accuracy · YOLO26 Detect: mAP@50 on parking detection test split
           </div>
         </div>
       )}

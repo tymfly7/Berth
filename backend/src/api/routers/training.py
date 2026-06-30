@@ -145,13 +145,11 @@ def model_info():
         dataset_ready = False
         dataset_count = occupied_count = vacant_count = 0
     else:
-        data_dir = config.DATA_DIR
-        occ_dir  = data_dir / "occupied"
-        vac_dir  = data_dir / "vacant"
-        dataset_ready  = occ_dir.exists() and vac_dir.exists()
-        occupied_count = _count_images(occ_dir)
-        vacant_count   = _count_images(vac_dir)
+        split_dir = config.CLASSIFY_SPLIT_DIR
+        occupied_count = sum(_count_images(split_dir / s / "occupied") for s in ("train", "val", "test"))
+        vacant_count   = sum(_count_images(split_dir / s / "vacant")   for s in ("train", "val", "test"))
         dataset_count  = occupied_count + vacant_count
+        dataset_ready  = dataset_count > 0
         available_models = {
             "cnn_scratch":     config.CNN_SCRATCH_PATH.exists(),
             "resnet50":        config.RESNET50_PATH.exists(),
@@ -195,13 +193,14 @@ def start_training(request: Request, model_name: str = "cnn_scratch",
     mgr = TrainManager()
     if mgr.is_training():
         raise HTTPException(409, "Training already in progress")
-    # YOLO detect uses the exported detect dataset, not the occupied/vacant folders
-    if model_name not in ("yolo26_classify", "yolo26_detect"):
-        occ = config.DATA_DIR / "occupied"
-        vac = config.DATA_DIR / "vacant"
-        if not occ.exists() or not vac.exists():
-            raise HTTPException(400, "Dataset not found. Prepare it first.")
-    if model_name == "yolo26_detect" and not (config.YOLO_DATASET_DIR / "dataset.yaml").exists():
+    # Classifiers train from the classify split (built from data/labeled/<lot>/crops);
+    # YOLO detect uses the exported detect dataset. Neither uses the old occupied/vacant folders.
+    if model_name in config.CLASSIFY_MODELS:
+        labeled = config.DATA_DIR / "labeled"
+        split_ready = (config.CLASSIFY_SPLIT_DIR / "train" / "occupied").is_dir()
+        if not split_ready and not (labeled.is_dir() and any(labeled.iterdir())):
+            raise HTTPException(400, "No classifier dataset found. Label a lot's crops first.")
+    elif model_name == "yolo26_detect" and not (config.YOLO_DATASET_DIR / "dataset.yaml").exists():
         raise HTTPException(400, "YOLO detect dataset not found. Export it first from the labeling panel.")
     _model_info_cache["data"] = None  # invalidate so next poll reflects new state
     result = mgr.start_training(model_name, compare_all=compare_all)
@@ -265,9 +264,9 @@ def browse_dataset():
 @router.post("/api/dataset/prepare", dependencies=[Depends(verify_api_key)])
 def prepare_dataset(source: str = None, max_per_class: int = 0,
                     generate_sample: bool = False, sample_count: int = 200):
-    from src.data_prep.downloader import organize_pklot, generate_sample_dataset
+    from src.data_prep.downloader import organize_dataset, generate_sample_dataset
     if generate_sample:
         generate_sample_dataset(num_per_class=sample_count)
         return {"message": f"Generated {sample_count} synthetic images per class"}
-    result = organize_pklot(source_root=source, max_per_class=max_per_class)
+    result = organize_dataset(source_root=source, max_per_class=max_per_class)
     return {"message": "Dataset prepared", **result}

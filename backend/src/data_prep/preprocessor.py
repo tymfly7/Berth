@@ -204,6 +204,29 @@ def prepare_dataset(
         test_dir = data_root_path / "test"
         test_dataset  = ParkingDataset(data_root=test_dir, split="test", image_size=image_size) if test_dir.is_dir() else val_dataset
 
+        # Subset cap — the on-the-fly split path applies SUBSET_SIZE to the full
+        # pool before splitting; mirror that here so the cap also works on the
+        # default pre-split path (otherwise it trains on the entire dataset).
+        # Each split is trimmed toward subset_size by its proportional share, and
+        # within each split the two classes are balanced 50/50 — this also
+        # corrects the ~1.7:1 occupied:vacant imbalance in the full set. Safe to
+        # mutate .samples now: it's before any DataLoader iteration, so the
+        # lazily-filled index cache is still empty.
+        if subset_size and subset_size > 0:
+            total = len(train_dataset) + len(val_dataset) + len(test_dataset)
+            if subset_size < total:
+                random.seed(seed)
+                frac = subset_size / total
+                for ds in (train_dataset, val_dataset, test_dataset):
+                    target = max(2, int(len(ds.samples) * frac))
+                    occ = [s for s in ds.samples if s[1] == 1]
+                    vac = [s for s in ds.samples if s[1] == 0]
+                    per = min(target // 2, len(occ), len(vac))
+                    ds.samples = random.sample(occ, per) + random.sample(vac, per)
+                    random.shuffle(ds.samples)
+                logger.info(f"🔽 Subset cap {subset_size} (of {total}), class-balanced 50/50 → "
+                            f"train {len(train_dataset)}, val {len(val_dataset)}, test {len(test_dataset)}")
+
         train_loader = DataLoader(
             train_dataset,
             batch_size=batch_size,

@@ -417,11 +417,8 @@ async def augment_preview(request: Request):
 
     body = await request.json()
     label    = body.get("label", "both")
-    shadow_p = max(0.0, min(1.0, float(body.get("shadow_p", 0.5))))
-    night    = bool(body.get("night", False))
     flip     = bool(body.get("flip", True))
     rotation = max(0, min(45, int(body.get("rotation", 15))))
-    jitter   = max(0.0, min(1.0, float(body.get("jitter", 0.3))))
     count    = max(1, min(8, int(body.get("count", 6))))
 
     classes = ["occupied", "vacant"] if label == "both" else [label]
@@ -455,23 +452,6 @@ async def augment_preview(request: Request):
                 Image.fromarray(arr.astype(np.uint8)).rotate(angle, expand=False),
                 dtype=np.float32,
             )
-
-        if jitter > 0:
-            brightness = 1.0 + _rnd.uniform(-jitter, jitter)
-            arr = np.clip(arr * brightness, 0, 255)
-            contrast = 1.0 + _rnd.uniform(-jitter * 0.7, jitter * 0.7)
-            mean = arr.mean()
-            arr = np.clip((arr - mean) * contrast + mean, 0, 255)
-
-        if shadow_p > 0 and _rnd.random() < shadow_p:
-            _, w_s = arr.shape[:2]
-            bw = _rnd.randint(w_s // 5, 3 * w_s // 5)
-            x0 = _rnd.randint(0, w_s - bw)
-            arr[:, x0:x0 + bw] *= _rnd.uniform(0.35, 0.65)
-
-        if night:
-            arr *= _rnd.uniform(0.15, 0.35)
-            arr[:, :, 2] = np.clip(arr[:, :, 2] * 1.5, 0, 255)
 
         arr = np.clip(arr, 0, 255).astype(np.uint8)
         buf = io.BytesIO()

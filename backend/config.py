@@ -26,9 +26,10 @@ ROI_CONFIG_DIR = Path(os.getenv("BERTH_ROI_DIR", str(CONFIG_DIR / "roi")))
 CAMERAS_FILE = Path(os.getenv("BERTH_CAMERAS_FILE", str(CONFIG_DIR / "cameras.json")))
 DB_PATH = Path(os.getenv("BERTH_DB_PATH", str(BASE_DIR / "berth.db")))
 
-# PKLot dataset root — set this to your downloaded PKLot path
-# Expected structure: PKLOT_ROOT/PKLotSegmented/{PUC,UFPR04,UFPR05}/.../Occupied|Empty
-PKLOT_ROOT = os.getenv("PKLOT_ROOT", "")
+# Source dataset root for the classifier organizer — set this to a segmented
+# occupied/vacant dataset (e.g. the lot-t10lot crops from parking-lot-t10).
+# Expected structure: DATASET_ROOT/<lot>/<condition>/<date>/{Occupied,Empty}
+DATASET_ROOT = os.getenv("DATASET_ROOT", "")
 
 # Ensure directories exist
 for d in (DATA_DIR, UPLOAD_DIR, MODEL_DIR, EDGE_MODEL_DIR, CONFIG_DIR, ROI_CONFIG_DIR, OUTPUT_DIR):
@@ -50,7 +51,7 @@ UPLOAD_RATE_LIMIT = os.getenv("BERTH_UPLOAD_RATE_LIMIT", "10/minute")
 # shipped to the browser; a successful login returns a short-lived signed token.
 ADMIN_PASSWORD = os.getenv("BERTH_ADMIN_PASSWORD", "")   # empty = admin login disabled (503)
 AUTH_SECRET = os.getenv("BERTH_AUTH_SECRET", "") or secrets.token_urlsafe(32)  # token signing key
-AUTH_TOKEN_TTL = int(os.getenv("BERTH_AUTH_TTL", "28800"))  # admin session length, seconds (8h)
+AUTH_TOKEN_TTL = int(os.getenv("BERTH_AUTH_TTL", "315360000"))  # admin session length, seconds (8h)
 
 # ---------------------------------------------------------------------------
 # Active model  ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26")
@@ -80,7 +81,12 @@ YOLO_DATASET_DIR         = DATA_DIR  / "yolo_detect_dataset"
 CLASSIFY_SPLIT_DIR       = DATA_DIR  / "classify_split"
 YOLO26_CLASSIFY_RUN_DIR  = OUTPUT_DIR / "yolo26_classify" / "run"
 YOLO26_DETECT_RUN_DIR    = OUTPUT_DIR / "yolo26_detect"   / "run"
-CNN_INPUT_SIZE    = 224
+# Input resolution shared by all three PyTorch classifiers (cnn_scratch,
+# resnet50, mobilenetv4s) for both training and inference. Kept at 224 because
+# resnet50/mobilenetv4s are ImageNet-pretrained and expect ~224. A from-scratch
+# cnn_scratch run can go faster at 64 px (subset test: 98.6% vs 99.6%); set
+# BERTH_CNN_IMGSZ=64 for that ad-hoc experiment — but note it lowers all three.
+CNN_INPUT_SIZE    = int(os.getenv("BERTH_CNN_IMGSZ", "224"))
 CNN_CONFIDENCE_THRESHOLD = 0.6
 
 # Occupancy decision threshold for the YOLO26 classify head: a spot is called
@@ -103,7 +109,7 @@ TEST_SPLIT  = 0.15
 
 EPOCHS               = int(os.getenv("BERTH_EPOCHS", "30"))
 YOLO_CLASSIFY_EPOCHS = int(os.getenv("BERTH_YOLO_CLASSIFY_EPOCHS", "30"))
-YOLO_DETECT_EPOCHS   = int(os.getenv("BERTH_YOLO_DETECT_EPOCHS", "30"))
+YOLO_DETECT_EPOCHS   = int(os.getenv("BERTH_YOLO_DETECT_EPOCHS", "50"))
 BATCH_SIZE           = int(os.getenv("BERTH_BATCH_SIZE", "32"))
 LEARNING_RATE        = float(os.getenv("BERTH_LR", "1e-3"))
 WEIGHT_DECAY         = 1e-4          # L2 regularization
@@ -112,8 +118,14 @@ LR_SCHEDULER_PATIENCE = 2
 LR_SCHEDULER_FACTOR  = 0.1
 NUM_WORKERS          = int(os.getenv("BERTH_WORKERS", "2"))
 
+# Cache decoded+resized images in RAM after first read. On Windows the web-UI
+# training path runs with num_workers=0 (single process), so disk decode is the
+# main bottleneck; caching removes it from every epoch after the first.
+# Set BERTH_CACHE_DATASET=0 to disable if RAM is tight (~3.7 GB at 25k imgs).
+CACHE_DATASET = os.getenv("BERTH_CACHE_DATASET", "1") == "1"
+
 # Subset size for CNN models (0 = full dataset)
-SUBSET_SIZE = int(os.getenv("BERTH_SUBSET", "12000"))
+SUBSET_SIZE = int(os.getenv("BERTH_SUBSET", "25000"))
 
 # Smaller input size for YOLO classify — spots are pre-cropped so 64 px is
 # enough and is ~10x faster than 224 px.

@@ -37,7 +37,7 @@ if __name__ == "__main__":
     print("=" * 65)
     print("  BERTH - Train All Models (CPU)")
     print("=" * 65)
-    print(f"  Dataset:    {config.PKLOT_ROOT}")
+    print(f"  Dataset:    {config.DATASET_ROOT}")
     print("  Images:     1000/class = 2000 total (per model)")
     print(f"  Epochs:     {config.EPOCHS}")
     print(f"  Batch Size: {config.BATCH_SIZE}")
@@ -45,12 +45,12 @@ if __name__ == "__main__":
     print("=" * 65)
 
     # ── Step 1: Organize Dataset ────────────────────────────
-    print("\n[STEP 1/5] Organizing PKLot dataset...")
+    print("\n[STEP 1/5] Organizing dataset...")
     step_start = time.time()
 
-    from src.data_prep.downloader import organize_pklot
-    counts = organize_pklot(
-        source_root=config.PKLOT_ROOT,
+    from src.data_prep.downloader import organize_dataset
+    counts = organize_dataset(
+        source_root=config.DATASET_ROOT,
         target_root=str(config.DATA_DIR),
         max_per_class=config.SUBSET_SIZE // 2,
     )

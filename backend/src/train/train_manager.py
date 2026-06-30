@@ -384,7 +384,7 @@ class TrainManager:
                 cache="ram",                           # cache decoded images in RAM
                 workers=min(8, config.NUM_WORKERS * 4),
                 amp=True,                              # mixed-precision (fp16 on GPU)
-                patience=30,                           # let it converge before early-stopping
+                patience=20,                           # small-dataset recipe (epochs=50, patience=20); below max epochs so early-stop can actually fire
                 project=str(config.OUTPUT_DIR / "yolo26_detect"),
                 name="run",
                 exist_ok=True,

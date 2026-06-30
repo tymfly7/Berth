@@ -37,8 +37,16 @@ const honeypotStyle = {
   overflow: 'hidden',
 }
 
+// Session tokens are "<expiry_epoch>.<sig>"; treat a missing/past epoch as expired.
+const tokenExpired = () => {
+  const exp = Number(sessionStorage.getItem('admin_token')?.split('.')[0])
+  return !exp || exp * 1000 <= Date.now()
+}
+
 export default function PinGate({ children }) {
-  const [authed, setAuthed] = useState(sessionStorage.getItem('admin_authed') === 'true')
+  const [authed, setAuthed] = useState(
+    sessionStorage.getItem('admin_authed') === 'true' && !tokenExpired(),
+  )
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -64,6 +72,24 @@ export default function PinGate({ children }) {
     }, 500)
     return () => clearInterval(id)
   }, [lockUntil])
+
+  // Drop the user back to the login screen the moment the session expires —
+  // proactively (interval) and reactively (apiFetch fires 'auth-expired' on a
+  // 401). Flipping authed off unmounts the app, halting background polling/WS.
+  useEffect(() => {
+    if (!authed) return
+    const logout = () => {
+      sessionStorage.removeItem('admin_authed')
+      sessionStorage.removeItem('admin_token')
+      setAuthed(false)
+    }
+    window.addEventListener('auth-expired', logout)
+    const id = setInterval(() => { if (tokenExpired()) logout() }, 30_000)
+    return () => {
+      window.removeEventListener('auth-expired', logout)
+      clearInterval(id)
+    }
+  }, [authed])
 
   if (authed) return children
 

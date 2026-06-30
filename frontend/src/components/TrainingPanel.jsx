@@ -10,6 +10,16 @@ const MODELS = [
   { id: 'yolo26_detect',   label: 'YOLO26 Detect'   },
 ]
 
+function fmtElapsed(sec) {
+  if (sec == null) return '—'
+  const s = Math.floor(sec % 60)
+  const m = Math.floor((sec / 60) % 60)
+  const h = Math.floor(sec / 3600)
+  if (h > 0) return `${h}h ${m}m ${s}s`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
+
 function Collapsible({ label, children, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
@@ -90,7 +100,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo }) {
       <div className="section-title">Training</div>
 
       {/* ── Data Augmentation ────────────────────────────── */}
-      <Collapsible label="Data Augmentation">
+      <Collapsible label="Augmentation preview (geometric only)">
         <DataAugmentPanel apiBase={apiBase} />
       </Collapsible>
 
@@ -146,7 +156,7 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo }) {
               </div>
               <div style={style.stat}>
                 <span>Elapsed</span>
-                <span>{training.elapsed}s</span>
+                <span>{fmtElapsed(training.elapsed)}</span>
               </div>
 
               <div className="progress-bar" style={{ marginTop: 8 }}>

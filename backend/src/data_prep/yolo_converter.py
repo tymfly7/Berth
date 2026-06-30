@@ -62,7 +62,7 @@ def _clamp(v: float) -> float:
 
 
 def build_yolo_detect_dataset(
-    gopro_dir: Path | None = None,
+    source_dir: Path | None = None,
     out_dir: Path | None = None,
     force: bool = False,
 ) -> Path:
@@ -70,18 +70,18 @@ def build_yolo_detect_dataset(
     Convert annotated source frames to YOLO detection format.
 
     Args:
-        gopro_dir: Path to the annotated source dir (annotations.json + images/)
+        source_dir: Path to the annotated source dir (annotations.json + images/)
         out_dir:   Destination dataset directory (default: config.YOLO_DATASET_DIR)
         force:     Rebuild even if out_dir already exists
 
     Returns:
         Path to the generated dataset.yaml
     """
-    gopro_dir = Path(gopro_dir)
+    source_dir = Path(source_dir)
     out_dir   = Path(out_dir   or config.YOLO_DATASET_DIR)
 
-    ann_path  = gopro_dir / "annotations.json"
-    img_src   = gopro_dir / "images"
+    ann_path  = source_dir / "annotations.json"
+    img_src   = source_dir / "images"
 
     if not ann_path.exists():
         raise FileNotFoundError(f"annotations.json not found at {ann_path}")
