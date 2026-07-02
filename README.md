@@ -995,7 +995,5 @@ Contribution etiquette (scope, docs, when to open an issue first) is in
 
 - [parking-lot-t10](https://github.com/tomas-fryza/parking-lot-t10) — Tomas Fryza — time-lapse parking lot (lot T10) dataset used to build the occupied/vacant classifier crops and the YOLO detect set
 
-- [Image-Based Parking Space Occupancy Classification: Dataset and Baseline](https://github.com/martin-marek/parking-space-occupancy) — Martin Marek ([arXiv:2107.12207](https://arxiv.org/abs/2107.12207)); occupancy-classification dataset and baseline for YOLO training
-
 - Ultralytics YOLO26 — State-of-the-art object detection and classification models
 

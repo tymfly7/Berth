@@ -32,8 +32,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.edge.txt requirements.edge.txt
-# Pre-install CPU-only torch before requirements so ultralytics doesn't pull the CUDA wheel
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# Torch-free edge image: every model runs on NCNN, so neither torch nor
+# ultralytics is installed here. See requirements.edge.txt.
 RUN pip install --no-cache-dir -r requirements.edge.txt
 
 COPY backend/ /app/

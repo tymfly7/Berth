@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import config
 from src.models.model_factory import create_model, list_available_models
-from src.train.trainer import Trainer
+from src.train.trainer import Trainer, TrainingCancelled
 from src.data_prep.preprocessor import prepare_dataset
 from src.eval.evaluator import evaluate_model
 
@@ -27,7 +27,8 @@ logger = logging.getLogger("berth.train_manager")
 
 # Singleton state — shared across API requests
 _state = {
-    "status": "idle",       # idle | training | done | error
+    "status": "idle",       # idle | training | done | error | cancelled
+    "cancel_requested": False,
     "message": "",
     "model_name": "",
     "epoch": 0,
@@ -62,6 +63,19 @@ class TrainManager:
         with _lock:
             return dict(_state)
 
+    def _should_cancel(self):
+        with _lock:
+            return _state["cancel_requested"]
+
+    def request_cancel(self):
+        """Request that the in-progress training stop at the next checkpoint."""
+        with _lock:
+            if _state["status"] != "training":
+                return {"status": "error", "message": "No training in progress"}
+            _state["cancel_requested"] = True
+            _state["message"] = "Cancelling…"
+        return {"status": "cancelling", "message": "Cancellation requested"}
+
     def start_training(self, model_name="cnn_scratch", compare_all=False):
         """
         Start training in a background thread.
@@ -79,6 +93,7 @@ class TrainManager:
 
         with _lock:
             _state["status"] = "training"
+            _state["cancel_requested"] = False
             _state["message"] = f"Starting {'comparison' if compare_all else model_name}..."
             _state["model_name"] = model_name
             _state["epoch"] = 0
@@ -153,6 +168,7 @@ class TrainManager:
                 data["val_loader"],
                 progress_callback=on_progress,
                 batch_callback=on_batch,
+                should_cancel=self._should_cancel,
             )
 
             with _lock:
@@ -185,6 +201,16 @@ class TrainManager:
 
             logger.info(f"✅ Training complete: {model_name}")
 
+        except TrainingCancelled:
+            logger.info(f"⏹️ Training cancelled: {model_name}")
+            with _lock:
+                _state["status"] = "cancelled"
+                _state["message"] = "Training cancelled by user."
+            if run_id:
+                try:
+                    db.finish_training_run(run_id, "cancelled")
+                except Exception:
+                    pass
         except Exception as e:
             logger.exception(f"❌ Training failed: {e}")
             with _lock:
@@ -205,7 +231,7 @@ class TrainManager:
         run_id = None
         try:
             from ultralytics import YOLO
-            from src.data_prep.preprocessor import build_classify_split
+            from src.data_prep.preprocessor import build_classify_split, build_classify_subset
 
             _classify_start = time.time()
             _batch_count = [0]
@@ -214,8 +240,8 @@ class TrainManager:
                 _state["message"] = "Building classifier train/val/test split..."
                 _state["total_epochs"] = config.YOLO_CLASSIFY_EPOCHS
 
-            build_classify_split()                      # idempotent; ensures the folders exist
-            classify_data_dir = config.CLASSIFY_SPLIT_DIR
+            build_classify_split()                       # idempotent; full split for the PyTorch classifiers
+            classify_data_dir = build_classify_subset()  # capped & class-balanced — matches the CNN classifiers' ~500-batch volume
 
             with _lock:
                 _state["message"] = "Starting YOLO26 classification training..."
@@ -227,6 +253,9 @@ class TrainManager:
             model = YOLO("yolo26s-cls.yaml")  # build from scratch, no pretrained weights
 
             def on_batch_end(trainer):
+                if self._should_cancel():
+                    trainer.stop = True
+                    return
                 _batch_count[0] += 1
                 if _batch_count[0] % 50 != 0:
                     return
@@ -242,6 +271,10 @@ class TrainManager:
                     )
 
             def on_epoch_end(trainer):
+                if self._should_cancel():
+                    trainer.stop = True
+                    return
+                _batch_count[0] = 0   # reset so the UI batch count is per-epoch, matching Ultralytics' bar
                 epoch   = trainer.epoch + 1
                 metrics = trainer.metrics or {}
                 with _lock:
@@ -270,6 +303,18 @@ class TrainManager:
                 exist_ok=True,
                 verbose=False,
             )
+
+            if self._should_cancel():
+                logger.info("⏹️ YOLO26 classify training cancelled")
+                with _lock:
+                    _state["status"]  = "cancelled"
+                    _state["message"] = "YOLO26 classification training cancelled by user."
+                if run_id:
+                    try:
+                        db.finish_training_run(run_id, "cancelled")
+                    except Exception:
+                        pass
+                return
 
             # Copy best weights to model dir
             best_src = config.OUTPUT_DIR / "yolo26_classify" / "run" / "weights" / "best.pt"
@@ -345,6 +390,9 @@ class TrainManager:
             model = YOLO(config.YOLO_DETECT_MODEL)
 
             def on_batch_end(trainer):
+                if self._should_cancel():
+                    trainer.stop = True
+                    return
                 _batch_count[0] += 1
                 if _batch_count[0] % 50 != 0:
                     return
@@ -360,6 +408,10 @@ class TrainManager:
                     )
 
             def on_epoch_end(trainer):
+                if self._should_cancel():
+                    trainer.stop = True
+                    return
+                _batch_count[0] = 0   # reset so the UI batch count is per-epoch, matching Ultralytics' bar
                 epoch   = trainer.epoch + 1
                 metrics = trainer.metrics or {}
                 map50   = float(metrics.get("metrics/mAP50(B)", 0))
@@ -390,6 +442,18 @@ class TrainManager:
                 exist_ok=True,
                 verbose=False,
             )
+
+            if self._should_cancel():
+                logger.info("⏹️ YOLO26 detect training cancelled")
+                with _lock:
+                    _state["status"]  = "cancelled"
+                    _state["message"] = "YOLO26 detection training cancelled by user."
+                if run_id:
+                    try:
+                        db.finish_training_run(run_id, "cancelled")
+                    except Exception:
+                        pass
+                return
 
             # Copy best weights to model dir
             best_src = config.OUTPUT_DIR / "yolo26_detect" / "run" / "weights" / "best.pt"
@@ -464,6 +528,7 @@ class TrainManager:
                     data["train_loader"],
                     data["val_loader"],
                     progress_callback=on_progress,
+                    should_cancel=self._should_cancel,
                 )
 
                 # Evaluate on test set
@@ -497,6 +562,11 @@ class TrainManager:
 
             logger.info("✅ Model comparison complete")
 
+        except TrainingCancelled:
+            logger.info("⏹️ Model comparison cancelled")
+            with _lock:
+                _state["status"] = "cancelled"
+                _state["message"] = "Model comparison cancelled by user."
         except Exception as e:
             logger.exception(f"❌ Comparison failed: {e}")
             with _lock:

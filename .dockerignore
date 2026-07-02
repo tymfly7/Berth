@@ -1,17 +1,62 @@
+# ── Python runtime / caches ──────────────────────────────
 backend/venv/
-backend/data/
-backend/outputs/
-backend/models/
-# Runtime config — created on first run / persisted in a named volume, never baked in
-backend/configs/roi/*.json
-backend/configs/roi/*.jpg
-backend/configs/cameras.json
 backend/__pycache__/
 backend/**/__pycache__/
 backend/**/*.pyc
-frontend/node_modules/
-frontend/.vite/
-.git/
+.pytest_cache/
+.ruff_cache/
+
+# ── Datasets & training artifacts (large, not deployable) ─
+backend/data/
+backend/classify_yolo_data/
+backend/outputs/
+backend/uploads/
+runs/
+
+# ── Torch weights — edge image is torch-free (NCNN only) ─
+backend/models/
+backend/*.pt
+backend/*.pth
+# NOTE: backend/edge_models/ is intentionally kept — NCNN exports are baked into the edge image
+
+# ── Runtime config & state (first-run / named volumes) ───
+backend/configs/roi/*.json
+backend/configs/roi/*.jpg
+backend/configs/cameras.json
+backend/cameras.json
+backend/spots_config.json
 *.db
 *.db-shm
 *.db-wal
+
+# ── Frontend ─────────────────────────────────────────────
+frontend/node_modules/
+frontend/.vite/
+frontend/.env
+frontend/.env.*
+
+# ── Secrets / env ────────────────────────────────────────
+.env
+.env_edge
+
+# ── Docker image tarballs (huge) ─────────────────────────
+*.tar
+*.tar.gz
+
+# ── Compose files — not needed inside the image ──────────
+docker-compose.yml
+docker-compose.rpi.yml
+docker-compose.zero.yml
+
+# ── Docs, notes, logs — not needed in image ──────────────
+LResearch.md
+OPERATIONS.md
+log_combined.md
+log_docker_todo.md
+log_monetization_plan.md
+
+# ── VCS / tooling ────────────────────────────────────────
+.git/
+.github/
+.claude/
+.vscode/

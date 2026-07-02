@@ -25,6 +25,9 @@ router = APIRouter()
 _model_info_cache: dict = {"data": None, "ts": 0.0}
 _MODEL_INFO_TTL = 60.0  # seconds
 
+# ── NCNN export state (polled by the UI while a hub export runs) ─
+_export_state: dict = {"status": "idle", "message": ""}
+
 
 # ── Model switching ──────────────────────────────────────
 @router.post("/api/use-model/{model_name}", dependencies=[Depends(verify_api_key)])
@@ -104,6 +107,59 @@ def download_evaluation_excel():
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=model_comparison.xlsx"},
     )
+
+
+# ── NCNN export (hub only — produces the edge NCNN models) ───────────
+@router.post("/api/export/ncnn", dependencies=[Depends(verify_api_key)])
+def export_ncnn():
+    if config.DEPLOYMENT_PROFILE == "edge":
+        raise HTTPException(403, "Export is not available on edge nodes. Use the hub server.")
+    if _export_state["status"] == "running":
+        raise HTTPException(409, "Export already in progress")
+
+    from src.export.model_exporter import export_pytorch_model, export_yolo_model
+    models = [
+        ("cnn_scratch",     config.CNN_SCRATCH_PATH,    export_pytorch_model),
+        ("resnet50",        config.RESNET50_PATH,       export_pytorch_model),
+        ("mobilenetv4s",    config.MOBILENETV4_PATH,     export_pytorch_model),
+        ("yolo26_classify", config.YOLO26_CLASSIFY_PATH, export_yolo_model),
+        ("yolo26_detect",   config.YOLO26_DETECT_PATH,   export_yolo_model),
+    ]
+
+    _export_state.update(status="running", message="Starting export…")
+    op_id = register_op("export", "Exporting NCNN models…")
+
+    def _run():
+        ok, skip, fail = [], [], []
+        try:
+            for i, (name, weights_path, fn) in enumerate(models):
+                if not Path(weights_path).exists():
+                    skip.append(name)
+                    continue
+                _export_state["message"] = f"Exporting {name}… ({i + 1}/{len(models)})"
+                update_op_progress(op_id, i / len(models))
+                if fn(name, weights_path):
+                    ok.append(name)
+                else:
+                    fail.append(name)
+            _export_state.update(
+                status="error" if fail else "done",
+                message=f"Exported {len(ok)}, skipped {len(skip)}, failed {len(fail)}"
+                        + (f" ({', '.join(fail)})" if fail else ""),
+            )
+        except Exception as e:
+            _export_state.update(status="error", message=f"Export failed: {e}")
+        finally:
+            _model_info_cache["data"] = None  # refresh 'Deployed' badges
+            finish_op(op_id)
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"message": "Export started"}
+
+
+@router.get("/api/export/status", dependencies=[Depends(verify_api_key)])
+def export_status():
+    return _export_state
 
 
 def _count_images(path: Path) -> int:
@@ -224,6 +280,15 @@ def start_training(request: Request, model_name: str = "cnn_scratch",
         finish_op(op_id)
 
     threading.Thread(target=_monitor, daemon=True).start()
+    return result
+
+
+@router.post("/api/train/cancel", dependencies=[Depends(verify_api_key)])
+def cancel_training():
+    from src.train.train_manager import TrainManager
+    result = TrainManager().request_cancel()
+    if result.get("status") == "error":
+        raise HTTPException(409, result["message"])
     return result
 
 

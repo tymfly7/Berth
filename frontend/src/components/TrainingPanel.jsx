@@ -61,6 +61,7 @@ const style = {
 
 export default function TrainingPanel({ apiAction, apiBase, modelInfo }) {
   const [training, setTraining] = useState(null)
+  const [cancelling, setCancelling] = useState(false)
   const pollRef = useRef(null)
   const [selectedModel, setSelectedModel] = useState('cnn_scratch')
 
@@ -87,9 +88,17 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo }) {
   }, [])
 
   const startTraining = async (modelName, compareAll = false) => {
+    setCancelling(false)
     setTraining({ status: 'training', model_name: modelName })
     const endpoint = `/api/train/start?model_name=${modelName}&compare_all=${compareAll}`
     await apiAction(endpoint)
+    pollStatus()
+  }
+
+  const cancelTraining = async () => {
+    if (!window.confirm('Stop the current training session? The best checkpoint so far is kept.')) return
+    setCancelling(true)
+    await apiAction('/api/train/cancel')
     pollStatus()
   }
 
@@ -168,6 +177,15 @@ export default function TrainingPanel({ apiAction, apiBase, modelInfo }) {
                   }}
                 />
               </div>
+
+              <button
+                className="btn btn-sm btn-danger"
+                style={{ marginTop: 8, width: '100%' }}
+                disabled={cancelling}
+                onClick={cancelTraining}
+              >
+                {cancelling ? 'Cancelling…' : 'Stop Training'}
+              </button>
             </>
           )}
           <div style={{ ...style.logBox, marginTop: 8 }}>

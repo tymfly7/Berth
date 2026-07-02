@@ -14,7 +14,7 @@ services:
       - BERTH_AUTH_SECRET=${BERTH_AUTH_SECRET:-}         # optional: persist token signing across restarts
       - BERTH_PORT=8000
       - BERTH_DB_PATH=/app/edge_data/berth.db
-      - BERTH_MAX_ACTIVE_CAMERAS=3        # cap concurrent decode+inference loops on the Pi
+      - BERTH_MAX_ACTIVE_CAMERAS=4        # Pi 5 (quad A76) — cap concurrent decode+inference loops
     volumes:
       - berth_rpi_data:/app/edge_data      # persistent SQLite database
       - berth_rpi_config:/app/configs      # ROIs + camera registry — created on first run, survives rebuilds

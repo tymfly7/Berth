@@ -92,7 +92,7 @@ def test_analyze_lot(test_client):
     data = _jpeg_bytes(64, 64)
     from src.api.processor_service import processor_service
     with patch.object(processor_service, "resolve_model_name", return_value="cnn_scratch"), \
-         patch("src.inference.classifier.ParkingClassifier", return_value=mock_clf):
+         patch("src.inference.torch_classifier.ParkingClassifier", return_value=mock_clf):
         r = test_client.post(
             "/api/analyze-lot?rows=2&cols=2",
             files={"file": ("lot.jpg", data, "image/jpeg")},

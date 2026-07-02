@@ -138,6 +138,11 @@ class VideoProcessor:
         self._anomaly_enabled = False
         self._anomaly_park_thresh = 0.60
         self._yolo_detector = None
+        # Anomaly/detect pass runs on its own slow cadence (config.ANOMALY_FPS),
+        # decoupled from INFER_FPS; the last result is reused between passes.
+        self._last_anomaly_ts = 0.0
+        self._last_anomalies: list = []
+        self._last_straddled_ids: set = set()
 
     # ── Setup ──────────────────────────────────────────────────────────────
 
@@ -203,16 +208,17 @@ class VideoProcessor:
         self._anomaly_park_thresh = max(0.0, min(1.0, float(park_thresh)))
 
     def _load_yolo_detector(self) -> None:
-        from src.models.yolo_detector import ParkingYOLO26
         # On edge use the NCNN-exported detect model (torch-free, ARM-fast); fall
-        # back to the torch .pt elsewhere. Mirrors classifier._load_yolo_detect —
-        # the .pt is not shipped in the edge image, so anomaly must use NCNN.
+        # back to the torch .pt elsewhere. The .pt is not shipped in the edge
+        # image, so anomaly detection must run on the NCNN export there.
         if config.DEPLOYMENT_PROFILE == "edge" and config.YOLO26_DETECT_NCNN_PATH.exists():
-            model_path = config.YOLO26_DETECT_NCNN_PATH
+            from src.models.yolo_detector_ncnn import EdgeYoloDetector
+            self._yolo_detector = EdgeYoloDetector(str(config.YOLO26_DETECT_NCNN_PATH))
+            logger.info(f"Anomaly detection: NCNN detector loaded ({config.YOLO26_DETECT_NCNN_PATH.name})")
         else:
-            model_path = config.YOLO26_DETECT_PATH
-        self._yolo_detector = ParkingYOLO26(str(model_path))
-        logger.info(f"Anomaly detection: YOLO26 detector loaded ({model_path.name})")
+            from src.models.yolo_detector import ParkingYOLO26
+            self._yolo_detector = ParkingYOLO26(str(config.YOLO26_DETECT_PATH))
+            logger.info(f"Anomaly detection: YOLO26 detector loaded ({config.YOLO26_DETECT_PATH.name})")
 
     def set_video_source(self, source, source_type="auto"):
         was_running = self.running
@@ -571,38 +577,52 @@ class VideoProcessor:
                     else 0.7 * self._infer_ms + 0.3 * sample_ms
         new_status_map = {s["id"]: s["status"] for s in result.get("slots", [])}
 
-        # Anomaly detection (optional YOLO26 detect pass).
+        # Anomaly detection (optional YOLO26 detect pass). Throttled to
+        # config.ANOMALY_FPS and decoupled from INFER_FPS: the detect pass is far
+        # heavier than the per-slot classify, so it runs on its own slow cadence
+        # and the last result is reused between passes (mis-parking changes slowly).
         new_anomalies = []
         straddled_ids = set()
         if self._anomaly_enabled and self._yolo_detector is not None and self._roi_cache:
-            h, w = frame.shape[:2]
-            try:
-                from src.inference.parking_geometry import classify_vehicle_parking
-                cars = self._yolo_detector.predict_frame(frame)
-                roi_by_id = {r["id"]: r for r in self._roi_cache}
-                for car in cars:
-                    clf = classify_vehicle_parking(
-                        car["bbox"], self._roi_cache, w, h,
-                        park_thresh=self._anomaly_park_thresh,
-                    )
-                    if clf["status"] == "misparked":
-                        if clf["reason"] == "straddling":
-                            straddled_ids.update(clf["intruded_rois"])
-                            polygons = []
-                            for rid in clf["intruded_rois"]:
-                                roi = roi_by_id.get(rid)
-                                if roi and roi.get("polygon"):
-                                    pts = np.array(
-                                        [[int(p[0] * w), int(p[1] * h)] for p in roi["polygon"]],
-                                        dtype=np.int32,
-                                    )
-                                    polygons.append(pts)
-                            new_anomalies.append({"label": "STRADDLE", "polygons": polygons})
-                        else:
-                            x1, y1, x2, y2 = (int(v) for v in car["bbox"])
-                            new_anomalies.append({"label": "OUTSIDE", "bbox": (x1, y1, x2, y2)})
-            except Exception as e:
-                logger.warning(f"Anomaly detection error: {e}")
+            _a_now = time.time()
+            _a_interval = 1.0 / config.ANOMALY_FPS if config.ANOMALY_FPS > 0 else 0.0
+            if not _a_interval or _a_now - self._last_anomaly_ts >= _a_interval:
+                self._last_anomaly_ts = _a_now
+                h, w = frame.shape[:2]
+                try:
+                    from src.inference.parking_geometry import classify_vehicle_parking
+                    cars = self._yolo_detector.predict_frame(frame)
+                    roi_by_id = {r["id"]: r for r in self._roi_cache}
+                    for car in cars:
+                        clf = classify_vehicle_parking(
+                            car["bbox"], self._roi_cache, w, h,
+                            park_thresh=self._anomaly_park_thresh,
+                        )
+                        if clf["status"] == "misparked":
+                            if clf["reason"] == "straddling":
+                                straddled_ids.update(clf["intruded_rois"])
+                                polygons = []
+                                for rid in clf["intruded_rois"]:
+                                    roi = roi_by_id.get(rid)
+                                    if roi and roi.get("polygon"):
+                                        pts = np.array(
+                                            [[int(p[0] * w), int(p[1] * h)] for p in roi["polygon"]],
+                                            dtype=np.int32,
+                                        )
+                                        polygons.append(pts)
+                                new_anomalies.append({"label": "STRADDLE", "polygons": polygons})
+                            else:
+                                x1, y1, x2, y2 = (int(v) for v in car["bbox"])
+                                new_anomalies.append({"label": "OUTSIDE", "bbox": (x1, y1, x2, y2)})
+                except Exception as e:
+                    logger.warning(f"Anomaly detection error: {e}")
+                self._last_anomalies = new_anomalies
+                self._last_straddled_ids = straddled_ids
+            else:
+                # Between detect passes: reuse the last detection result so the
+                # overlays and blocked-bay hysteresis stay stable.
+                new_anomalies = self._last_anomalies
+                straddled_ids = self._last_straddled_ids
 
         _now = time.time()
         with self._cached_status_lock:

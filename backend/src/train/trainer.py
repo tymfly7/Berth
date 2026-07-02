@@ -28,6 +28,11 @@ import config
 logger = logging.getLogger("berth.trainer")
 
 
+class TrainingCancelled(Exception):
+    """Raised to abort the training loop when a cancel was requested via the UI."""
+    pass
+
+
 class EarlyStopping:
     """
     Stop training when validation loss stops improving.
@@ -147,7 +152,8 @@ class Trainer:
         params = model.count_parameters()
         logger.info(f"   Parameters: {params['total']:,} total, {params['trainable']:,} trainable")
 
-    def train(self, train_loader, val_loader, progress_callback=None, batch_callback=None):
+    def train(self, train_loader, val_loader, progress_callback=None, batch_callback=None,
+              should_cancel=None):
         """
         Run the full training loop.
 
@@ -155,6 +161,8 @@ class Trainer:
             train_loader: Training DataLoader
             val_loader: Validation DataLoader
             progress_callback: Optional callable(epoch, metrics_dict) for progress updates
+            should_cancel: Optional callable() -> bool; when it returns True the loop aborts
+                           by raising TrainingCancelled (checked between batches/epochs)
 
         Returns:
             dict: Training results including best metrics and history
@@ -166,10 +174,14 @@ class Trainer:
         total_start = time.time()
 
         for epoch in range(1, self.epochs + 1):
+            if should_cancel and should_cancel():
+                raise TrainingCancelled()
+
             epoch_start = time.time()
 
             # --- Train one epoch ---
-            train_loss, train_acc = self._train_epoch(train_loader, epoch=epoch, batch_callback=batch_callback)
+            train_loss, train_acc = self._train_epoch(
+                train_loader, epoch=epoch, batch_callback=batch_callback, should_cancel=should_cancel)
 
             # --- Validate ---
             val_loss, val_acc = self._validate(val_loader)
@@ -246,7 +258,7 @@ class Trainer:
 
         return results
 
-    def _train_epoch(self, loader, epoch=None, batch_callback=None):
+    def _train_epoch(self, loader, epoch=None, batch_callback=None, should_cancel=None):
         """Train for one epoch. Returns (loss, accuracy)."""
         self.model.train()
         running_loss = 0.0
@@ -255,6 +267,9 @@ class Trainer:
         total_batches = len(loader)
 
         for batch_idx, (images, labels) in enumerate(loader):
+            if should_cancel and should_cancel():
+                raise TrainingCancelled()
+
             images = images.to(self.device)
             labels = labels.to(self.device).float().unsqueeze(1)
 

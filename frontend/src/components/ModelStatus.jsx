@@ -1,6 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { apiFetch } from '../api'
 
+function fmtDuration(sec) {
+  if (sec == null) return '—'
+  sec = Math.round(sec)
+  const s = sec % 60
+  const m = Math.floor(sec / 60) % 60
+  const h = Math.floor(sec / 3600)
+  if (h > 0) return `${h}h ${m}m ${s}s`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
+}
+
 const style = {
   container: { marginTop: 18 },
   modelRow: {
@@ -68,10 +79,15 @@ function DetailRow({ label, value, highlight }) {
 export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   const [expanded, setExpanded]     = useState(null)
   const [evalStatus, setEvalStatus] = useState(null)   // null | {status, message}
+  const [exportStatus, setExportStatus] = useState(null)   // null | {status, message}
   const pollRef                     = useRef(null)
+  const exportPollRef               = useRef(null)
 
   // Clean up polling on unmount
-  useEffect(() => () => clearTimeout(pollRef.current), [])
+  useEffect(() => () => {
+    clearTimeout(pollRef.current)
+    clearTimeout(exportPollRef.current)
+  }, [])
 
   if (!modelInfo) {
     return (
@@ -123,6 +139,36 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
     }
   }
 
+  // ── Export NCNN ─────────────────────────────────────────────────────────────
+  const pollExportStatus = async () => {
+    try {
+      const res  = await apiFetch(`${apiBase}/api/export/status`)
+      const data = await res.json()
+      setExportStatus(data)
+      if (data.status === 'running') {
+        exportPollRef.current = setTimeout(pollExportStatus, 2000)
+      } else {
+        // Done or error — refresh model info so 'Deployed' badges update
+        fetchModelInfo?.()
+        if (data.status === 'done') {
+          setTimeout(() => setExportStatus(null), 5000)
+        }
+      }
+    } catch {
+      clearTimeout(exportPollRef.current)
+    }
+  }
+
+  const handleExportNcnn = async () => {
+    setExportStatus({ status: 'running', message: 'Starting export…' })
+    try {
+      await apiFetch(`${apiBase}/api/export/ncnn`, { method: 'POST' })
+      pollExportStatus()
+    } catch (e) {
+      setExportStatus({ status: 'error', message: String(e) })
+    }
+  }
+
   const handleDownloadExcel = async () => {
     try {
       const res = await apiFetch(`${apiBase}/api/evaluate/excel`)
@@ -140,6 +186,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   }
 
   const isEvaluating  = evalStatus?.status === 'training'
+  const isExporting   = exportStatus?.status === 'running'
   const hasComparison = modelInfo.comparison && modelInfo.comparison.length > 0
   const classRows     = modelInfo.comparison?.filter(r => r.type !== 'detection') ?? []
   const detectRows    = modelInfo.comparison?.filter(r => r.type === 'detection')  ?? []
@@ -220,7 +267,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                     <DetailRow label="mAP@50"        value={details?.map50      != null ? `${details.map50.toFixed(1)}%`      : null} highlight />
                     <DetailRow label="Precision"     value={details?.precision  != null ? `${details.precision.toFixed(1)}%`  : null} />
                     <DetailRow label="Recall"        value={details?.recall     != null ? `${details.recall.toFixed(1)}%`     : null} />
-                    <DetailRow label="Train Time"    value={details?.total_time_s != null ? `${Math.round(details.total_time_s)}s` : null} />
+                    <DetailRow label="Train Time"    value={details?.total_time_s != null ? fmtDuration(details.total_time_s) : null} />
                     {/* From comparison evaluation */}
                     <DetailRow label={compResult?.type === 'detection' ? 'mAP@50' : 'Test Acc'} value={compResult?.test_accuracy  != null ? `${compResult.test_accuracy.toFixed(1)}%`  : null} highlight />
                     <DetailRow label="Precision"     value={compResult?.test_precision != null ? `${compResult.test_precision.toFixed(1)}%` : null} />
@@ -255,6 +302,37 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
           >
             {isEvaluating ? 'Evaluating…' : 'Evaluate All'}
           </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+            disabled={isExporting}
+            onClick={handleExportNcnn}
+            title="Export trained models to NCNN for edge deployment"
+          >
+            {isExporting ? 'Exporting…' : 'Export NCNN'}
+          </button>
+        </div>
+      )}
+
+      {/* Export progress */}
+      {exportStatus && (
+        <div style={{
+          ...style.evalStatus,
+          color: exportStatus.status === 'error' ? 'var(--color-occupied)' : 'var(--accent-primary)',
+          background: exportStatus.status === 'error' ? 'rgba(244,63,94,0.1)' : 'rgba(99,102,241,0.1)',
+        }}>
+          {exportStatus.message}
+          {isExporting && (
+            <div style={style.progressBar}>
+              <div style={{
+                width: '100%',
+                height: '100%',
+                background: 'var(--gradient-accent)',
+                animation: 'indeterminate 1.4s infinite ease-in-out',
+                transformOrigin: 'left',
+              }} />
+            </div>
+          )}
         </div>
       )}
 
@@ -341,7 +419,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                       </td>
                     )}
                     <td style={{ padding: '4px 4px', textAlign: 'right', color: 'var(--text-muted)' }}>
-                      {r.train_time != null ? `${Math.round(r.train_time)}s` : '—'}
+                      {fmtDuration(r.train_time)}
                     </td>
                   </tr>
                 )
@@ -378,7 +456,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                   {r.test_recall != null ? `${r.test_recall.toFixed(1)}%` : '—'}
                 </span>
                 {r.train_time != null && (
-                  <span style={{ color: 'var(--text-muted)' }}>{Math.round(r.train_time)}s</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{fmtDuration(r.train_time)}</span>
                 )}
               </div>
             </div>

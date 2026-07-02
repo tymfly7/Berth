@@ -285,6 +285,12 @@ export default function AnalyticsChart({ connected = false, cameras = [], trends
     const now = new Date().toISOString()
     const zeros = [{ timestamp: now, available: 0, occupied: 0 }, { timestamp: now, available: 0, occupied: 0 }]
     let data = activeData.length > 0 ? activeData : zeros
+    // No active cameras → live occupancy is zero. Anchor a current-time zero
+    // sample so the Live line drops to zero (and reaches "now" on the axis)
+    // instead of trailing the last stored value while the page keeps running.
+    if (tab === 'live' && cameras.length === 0) {
+      data = [...data, { timestamp: now, available: 0, occupied: 0 }]
+    }
     if (tab === 'live') data = aggregateByMinutes(data, 1)
     if (tab === 'day')  data = aggregateByMinutes(data, 5)
     if (tab === 'week') data = aggregateByDay(data, 7)
@@ -292,7 +298,7 @@ export default function AnalyticsChart({ connected = false, cameras = [], trends
     data = data.map(d => ({ ...d, available: Math.round(d.available || 0), occupied: Math.round(d.occupied || 0) }))
     chartDataRef.current = { data, tab }
     drawChart(canvasRef.current, data, tab)
-  }, [activeData, tab, connected])
+  }, [activeData, tab, connected, cameras.length])
 
   const handleMouseMove = useCallback((e) => {
     const canvas = canvasRef.current

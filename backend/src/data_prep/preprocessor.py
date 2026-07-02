@@ -136,6 +136,83 @@ def build_classify_split(
     return out_dir
 
 
+def build_classify_subset(subset_size=None, seed=42, force=False):
+    """
+    Materialize a class-balanced, size-capped copy of the classify split for
+    Ultralytics classification training.
+
+    The PyTorch classifiers cap the dataset at config.SUBSET_SIZE in memory (see
+    prepare_dataset), training on ~500 batches. Ultralytics reads an ImageFolder
+    directory wholesale — its `fraction` arg truncates the class-ordered sample
+    list and would drop an entire class — so we bake the same cap onto disk and
+    point YOLO at this directory instead.
+
+    Mirrors prepare_dataset's cap: each split is trimmed proportionally toward
+    subset_size and balanced 50/50 between occupied/vacant. Returns the subset
+    dir, or the full split dir when no cap applies.
+    """
+    subset_size = subset_size if subset_size is not None else config.SUBSET_SIZE
+    src_dir = config.CLASSIFY_SPLIT_DIR
+    out_dir = config.CLASSIFY_SUBSET_DIR
+
+    if not subset_size or subset_size <= 0:
+        return src_dir
+
+    # -------------------------------------------------------------------
+    # 1. Gather per-split file lists and the full total
+    # -------------------------------------------------------------------
+    split_files = {}  # split -> {"occupied": [...], "vacant": [...]}
+    total = 0
+    for split in ("train", "val", "test"):
+        buckets = {}
+        for bucket in ("occupied", "vacant"):
+            d = src_dir / split / bucket
+            files = [f for f in d.iterdir() if f.is_file()] if d.is_dir() else []
+            buckets[bucket] = files
+            total += len(files)
+        split_files[split] = buckets
+
+    if total == 0:
+        raise FileNotFoundError(
+            f"No crops found under {src_dir}; run build_classify_split first."
+        )
+    if subset_size >= total:
+        logger.info(f"Subset cap {subset_size} ≥ {total} crops — using full split {src_dir}.")
+        return src_dir
+
+    # -------------------------------------------------------------------
+    # 2. Idempotency
+    # -------------------------------------------------------------------
+    sentinel = out_dir / "train" / "occupied"
+    if out_dir.exists() and sentinel.is_dir() and any(sentinel.iterdir()) and not force:
+        logger.info(f"📁 Classify subset already exists at {out_dir} — skipping build.")
+        return out_dir
+    if out_dir.exists():
+        logger.info(f"🗑️  Rebuilding classify subset — removing existing {out_dir}")
+        shutil.rmtree(out_dir)
+
+    # -------------------------------------------------------------------
+    # 3. Copy a proportional, class-balanced slice of each split
+    # -------------------------------------------------------------------
+    frac = subset_size / total
+    rng = random.Random(seed)
+    for split in ("train", "val", "test"):
+        occ = split_files[split]["occupied"]
+        vac = split_files[split]["vacant"]
+        target = max(2, int((len(occ) + len(vac)) * frac))
+        per = min(target // 2, len(occ), len(vac))
+        chosen = {"occupied": rng.sample(occ, per), "vacant": rng.sample(vac, per)}
+        for bucket, files in chosen.items():
+            dst = out_dir / split / bucket
+            dst.mkdir(parents=True, exist_ok=True)
+            for f in files:
+                shutil.copy2(f, dst / f.name)
+        logger.info(f"   {split:5s} — {per} occupied + {per} vacant")
+    logger.info(f"✅ Classify subset built at {out_dir} — cap {subset_size} of {total}, class-balanced 50/50")
+
+    return out_dir
+
+
 def prepare_dataset(
     data_root=None,
     train_ratio=None,

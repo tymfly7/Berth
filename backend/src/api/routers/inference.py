@@ -319,10 +319,15 @@ async def analyze_misparked(
                 f"No ROIs saved for camera '{camera_id}'. Draw and save ROIs first.",
             )
 
-        # Load YOLO26 detector — surface a clear error if weights are missing
+        # Load YOLO26 detector — surface a clear error if weights are missing.
+        # On edge use the torch-free NCNN export (the .pt is not shipped there).
         try:
-            from src.models.yolo_detector import ParkingYOLO26
-            detector = ParkingYOLO26(str(config.YOLO26_DETECT_PATH))
+            if config.DEPLOYMENT_PROFILE == "edge" and config.YOLO26_DETECT_NCNN_PATH.exists():
+                from src.models.yolo_detector_ncnn import EdgeYoloDetector
+                detector = EdgeYoloDetector(str(config.YOLO26_DETECT_NCNN_PATH))
+            else:
+                from src.models.yolo_detector import ParkingYOLO26
+                detector = ParkingYOLO26(str(config.YOLO26_DETECT_PATH))
         except FileNotFoundError:
             raise HTTPException(
                 400,

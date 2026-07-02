@@ -79,6 +79,7 @@ YOLO26_CLASSIFY_NCNN_PATH = EDGE_MODEL_DIR / "best_yolo26_classify_ncnn_model"
 YOLO26_DETECT_NCNN_PATH   = EDGE_MODEL_DIR / "best_yolo26_detect_ncnn_model"
 YOLO_DATASET_DIR         = DATA_DIR  / "yolo_detect_dataset"
 CLASSIFY_SPLIT_DIR       = DATA_DIR  / "classify_split"
+CLASSIFY_SUBSET_DIR      = DATA_DIR  / "classify_subset"   # capped, class-balanced copy for YOLO classify
 YOLO26_CLASSIFY_RUN_DIR  = OUTPUT_DIR / "yolo26_classify" / "run"
 YOLO26_DETECT_RUN_DIR    = OUTPUT_DIR / "yolo26_detect"   / "run"
 # Input resolution shared by all three PyTorch classifiers (cnn_scratch,
@@ -109,7 +110,7 @@ TEST_SPLIT  = 0.15
 
 EPOCHS               = int(os.getenv("BERTH_EPOCHS", "30"))
 YOLO_CLASSIFY_EPOCHS = int(os.getenv("BERTH_YOLO_CLASSIFY_EPOCHS", "30"))
-YOLO_DETECT_EPOCHS   = int(os.getenv("BERTH_YOLO_DETECT_EPOCHS", "50"))
+YOLO_DETECT_EPOCHS   = int(os.getenv("BERTH_YOLO_DETECT_EPOCHS", "30"))
 BATCH_SIZE           = int(os.getenv("BERTH_BATCH_SIZE", "32"))
 LEARNING_RATE        = float(os.getenv("BERTH_LR", "1e-3"))
 WEIGHT_DECAY         = 1e-4          # L2 regularization
@@ -155,16 +156,25 @@ CAPTURE_INTERVAL_SECS = float(os.getenv("BERTH_CAPTURE_INTERVAL", "300"))  # 5 m
 # ---------------------------------------------------------------------------
 # Inference / streaming
 # ---------------------------------------------------------------------------
-# Edge profile uses lower resolution + FPS to stay within ARM CPU budget.
-FRAME_WIDTH   = 960  if DEPLOYMENT_PROFILE == "edge" else 1280
-FRAME_HEIGHT  = 540  if DEPLOYMENT_PROFILE == "edge" else 720
-STREAM_FPS    = 10   if DEPLOYMENT_PROFILE == "edge" else 20
+# Edge profile uses lower resolution + FPS to stay within ARM CPU budget. The
+# per-profile values are defaults only — override per board via env so a single
+# arm64 image can run on both a Pi 5 and a much weaker Pi Zero 2 W (separate
+# compose files supply the tuning).
+FRAME_WIDTH   = int(os.getenv("BERTH_FRAME_WIDTH",  "960" if DEPLOYMENT_PROFILE == "edge" else "1280"))
+FRAME_HEIGHT  = int(os.getenv("BERTH_FRAME_HEIGHT", "540" if DEPLOYMENT_PROFILE == "edge" else "720"))
+STREAM_FPS    = int(os.getenv("BERTH_STREAM_FPS",   "10"  if DEPLOYMENT_PROFILE == "edge" else "20"))
 JPEG_QUALITY  = 90   if DEPLOYMENT_PROFILE == "edge" else 80  # edge raised for sharpness; server keeps bandwidth-optimised 80
 
 # Inference rate, decoupled from STREAM_FPS. Parking occupancy changes slowly, so
 # running the model on every decoded frame wastes CPU; the display loop reuses the
 # last result between inferences. Lower on edge to keep ARM cores free for the API.
 INFER_FPS = float(os.getenv("BERTH_INFER_FPS", "3" if DEPLOYMENT_PROFILE == "edge" else "8"))
+
+# Cadence for the poorly-parked anomaly pass (YOLO26 detect), decoupled from
+# INFER_FPS. The detect pass is far heavier than the per-slot classify and
+# mis-parking changes slowly, so run it sparingly to keep ARM cores free for the
+# API and the occupancy loop. 0.2 = one detect pass every 5 s.
+ANOMALY_FPS = float(os.getenv("BERTH_ANOMALY_FPS", "0.2"))
 
 # Cap on concurrent active cameras. Each active camera runs its own decode +
 # inference loop; too many saturate a few-core edge box and starve the API.

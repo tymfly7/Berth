@@ -15,9 +15,6 @@ opencv-python-headless>=4.9.0   # headless = no GUI deps (saves ~150 MB on RPi)
 Pillow>=10.0.0
 numpy>=1.26.0
 
-# ── YOLO inference (Ultralytics handles its own runtime) ───────────────────────
-ultralytics>=8.3.0
-
 # ── Stream resolution ──────────────────────────────────────────────────────────
 yt-dlp>=2024.1.0
 
@@ -25,12 +22,13 @@ yt-dlp>=2024.1.0
 pyyaml>=6.0.0
 tqdm>=4.66.0
 
-# ── Removed from full requirements.txt (training-only) ─────────────────────────
-# torch / torchvision / timm    — no direct dep; CNN inference runs on ncnn.
-#                                 (NOTE: ultralytics above still pulls torch in
-#                                  transitively. For a lean, torch-free edge image
-#                                  drop ultralytics too — YOLO detect/anomaly then
-#                                  become hub-only; CNN occupancy still works.)
+# ── Removed from full requirements.txt (training-only / torch-free edge) ───────
+# torch / torchvision / timm    — no direct dep; ALL models run on ncnn at the
+#                                 edge (CNN + YOLO26 classify via EdgeYoloClassifier,
+#                                 YOLO26 detect via EdgeYoloDetector).
+# ultralytics                   — dropped: it imports torch. YOLO classify + detect
+#                                 (incl. poorly-parked anomaly) run on the exported
+#                                 NCNN models instead, so the edge image is torch-free.
 # scikit-learn                  — evaluation metrics, not needed on edge
 # matplotlib / seaborn          — visualisation, not needed on edge
 # openpyxl                      — Excel export, not needed on edge
