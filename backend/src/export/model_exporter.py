@@ -9,8 +9,8 @@ YOLO models: Ultralytics export → {weights_stem}_ncnn_model/
 
 Usage (called automatically by train_manager after a successful run):
     from src.export.model_exporter import export_pytorch_model, export_yolo_model
-    export_pytorch_model("mobilenetv4s", config.MOBILENETV4_PATH)
-    export_yolo_model("yolo26_classify", config.YOLO26_CLASSIFY_PATH)
+    export_pytorch_model("mobilenetv4s", config.MOBILENETV4S_PATH)
+    export_yolo_model("yolo26s_classify", config.YOLO26S_CLASSIFY_PATH)
 """
 
 import logging
@@ -27,7 +27,7 @@ logger = logging.getLogger("berth.exporter")
 
 _EXAMPLE_INPUT = torch.zeros(1, 3, config.CNN_INPUT_SIZE, config.CNN_INPUT_SIZE)
 
-_PYTORCH_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4s"}
+_PYTORCH_MODELS = {"cnn_scratch", "resnet18", "resnet50", "mobilenetv4s", "mobilenetv4m"}
 
 
 def export_pytorch_model(model_name: str, weights_path: Path) -> Path:

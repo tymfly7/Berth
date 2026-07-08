@@ -12,7 +12,7 @@ Features:
   - API key auth (optional via BERTH_API_KEY)
   - Rate limiting on uploads
   - Training management endpoints
-  - Model switching (cnn_scratch / resnet50 / mobilenetv4 / yolo26_classify / yolo26)
+  - Model switching (cnn_scratch / resnet18 / resnet50 / mobilenetv4s / mobilenetv4m / yolo26{n,s,m}_classify)
   - Multi-camera registry with persistent activation
 """
 

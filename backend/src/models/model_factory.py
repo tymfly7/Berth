@@ -4,17 +4,26 @@ Model Factory — Create Models by Name
 Provides a unified interface to instantiate any supported model architecture.
 """
 
+from functools import partial
+
 import torch
 import config
 from src.models.cnn_scratch import ParkingCNN
 from src.models.cnn_transfer import ParkingResNet, ParkingMobileNetV4
 
 
+# torch/timm classifiers only — the YOLO26 classify heads train and load via the
+# Ultralytics path (train_manager / torch_classifier), not this factory.
 MODEL_REGISTRY = {
     "cnn_scratch": ParkingCNN,
-    "resnet50": ParkingResNet,
-    "mobilenetv4s": ParkingMobileNetV4,
+    "resnet18": partial(ParkingResNet, depth=18),
+    "resnet50": partial(ParkingResNet, depth=50),
+    "mobilenetv4s": partial(ParkingMobileNetV4, variant="conv_small"),
+    "mobilenetv4m": partial(ParkingMobileNetV4, variant="conv_medium"),
 }
+
+# Transfer models accept a `pretrained` flag; cnn_scratch does not.
+_PRETRAINED_MODELS = {"resnet18", "resnet50", "mobilenetv4s", "mobilenetv4m"}
 
 
 def create_model(name, **kwargs):
@@ -22,7 +31,7 @@ def create_model(name, **kwargs):
     Create a model by name.
 
     Args:
-        name (str): Model name — one of 'cnn_scratch', 'resnet50', 'mobilenetv4s'.
+        name (str): Model name — a key of MODEL_REGISTRY.
         **kwargs: Additional arguments passed to the model constructor
 
     Returns:
@@ -42,8 +51,10 @@ def get_model_path(name):
     """Get the default save path for a model by name."""
     paths = {
         "cnn_scratch": config.CNN_SCRATCH_PATH,
+        "resnet18": config.RESNET18_PATH,
         "resnet50": config.RESNET50_PATH,
-        "mobilenetv4s": config.MOBILENETV4_PATH,
+        "mobilenetv4s": config.MOBILENETV4S_PATH,
+        "mobilenetv4m": config.MOBILENETV4M_PATH,
     }
     return paths.get(name)
 
@@ -63,7 +74,7 @@ def load_model(name, device=None, **kwargs):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    if name in ("resnet50", "mobilenetv4s"):
+    if name in _PRETRAINED_MODELS:
         kwargs.setdefault("pretrained", False)
     model = create_model(name, **kwargs)
     model_path = get_model_path(name)

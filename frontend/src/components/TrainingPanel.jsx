@@ -3,11 +3,15 @@ import { apiFetch } from '../api'
 import DataAugmentPanel from './DataAugmentPanel'
 
 const MODELS = [
-  { id: 'cnn_scratch',     label: 'CNN Scratch'     },
-  { id: 'resnet50',        label: 'ResNet-50'       },
-  { id: 'mobilenetv4s',    label: 'MobileNetV4'     },
-  { id: 'yolo26_classify', label: 'YOLO26 Classify' },
-  { id: 'yolo26_detect',   label: 'YOLO26 Detect'   },
+  { id: 'cnn_scratch',      label: 'CNN Scratch'      },
+  { id: 'resnet18',         label: 'ResNet-18'        },
+  { id: 'resnet50',         label: 'ResNet-50'        },
+  { id: 'mobilenetv4s',     label: 'MobileNetV4-S'    },
+  { id: 'mobilenetv4m',     label: 'MobileNetV4-M'    },
+  { id: 'yolo26n_classify', label: 'YOLO26n Classify' },
+  { id: 'yolo26s_classify', label: 'YOLO26s Classify' },
+  { id: 'yolo26m_classify', label: 'YOLO26m Classify' },
+  { id: 'yolo26_detect',    label: 'YOLO26 Detect'    },
 ]
 
 function fmtElapsed(sec) {

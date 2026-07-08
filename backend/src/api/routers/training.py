@@ -47,11 +47,23 @@ def use_model(model_name: str):
 
 @router.post("/api/test-model/{model_name}", dependencies=[Depends(verify_api_key)])
 def test_model(model_name: str):
-    if model_name in ("yolo26", "yolo26_detect"):
+    if model_name == "yolo26_detect":
         raise HTTPException(400, "YOLO26 detect uses a detection interface — per-patch accuracy testing is not supported.")
     if model_name not in config.TESTABLE_MODELS:
         raise HTTPException(400, f"Unknown model '{model_name}'. Testable: {list(config.TESTABLE_MODELS)}")
     try:
+        # YOLO26 classify heads aren't torch nn.Modules — evaluate them via the
+        # Ultralytics .val() path on the internal split instead of load_model().
+        if model_name.startswith("yolo26") and model_name.endswith("_classify"):
+            ckpt = config.YOLO26_CLASSIFY_PATHS[model_name[len("yolo26")]]
+            if not ckpt.exists():
+                raise FileNotFoundError(
+                    f"No trained weights for '{model_name}' at {ckpt}. Train it first."
+                )
+            from src.eval.evaluator import evaluate_yolo_classify
+            metrics = evaluate_yolo_classify(ckpt)
+            return {"model": model_name, **metrics}
+
         import torch
         from src.models.model_factory import load_model
         from src.data_prep.preprocessor import prepare_dataset
@@ -68,12 +80,31 @@ def test_model(model_name: str):
         raise HTTPException(500, f"Test failed: {e}")
 
 
+@router.get("/api/eval/datasets", dependencies=[Depends(verify_api_key)])
+def eval_datasets():
+    """List datasets the operator can evaluate against: the internal split plus
+    any external benchmark datasets dropped under backend/data/."""
+    from src.eval.external_datasets import list_external_datasets, STANDARD_ID
+    return {
+        "datasets": [
+            {"id": STANDARD_ID, "label": "Standard split", "has_classifier": True, "has_detector": True},
+            *list_external_datasets(),
+        ]
+    }
+
+
 @router.post("/api/evaluate/all", dependencies=[Depends(verify_api_key)])
-def evaluate_all():
+def evaluate_all(dataset: str = "standard"):
     if config.DEPLOYMENT_PROFILE == "edge":
         raise HTTPException(403, "Evaluation is not available on edge nodes. Use the hub server.")
+    # Validate an external dataset choice up front so the operator gets a clear
+    # 400 instead of a silent standard-split run.
+    if dataset != "standard":
+        from src.eval.external_datasets import resolve
+        if resolve(dataset) is None:
+            raise HTTPException(400, f"Unknown or invalid benchmark dataset '{dataset}'.")
     from src.train.train_manager import TrainManager
-    result = TrainManager().start_evaluation()
+    result = TrainManager().start_evaluation(dataset=dataset)
     if result.get("status") == "error":
         raise HTTPException(400, result["message"])
 
@@ -119,11 +150,15 @@ def export_ncnn():
 
     from src.export.model_exporter import export_pytorch_model, export_yolo_model
     models = [
-        ("cnn_scratch",     config.CNN_SCRATCH_PATH,    export_pytorch_model),
-        ("resnet50",        config.RESNET50_PATH,       export_pytorch_model),
-        ("mobilenetv4s",    config.MOBILENETV4_PATH,     export_pytorch_model),
-        ("yolo26_classify", config.YOLO26_CLASSIFY_PATH, export_yolo_model),
-        ("yolo26_detect",   config.YOLO26_DETECT_PATH,   export_yolo_model),
+        ("cnn_scratch",      config.CNN_SCRATCH_PATH,       export_pytorch_model),
+        ("resnet18",         config.RESNET18_PATH,          export_pytorch_model),
+        ("resnet50",         config.RESNET50_PATH,          export_pytorch_model),
+        ("mobilenetv4s",     config.MOBILENETV4S_PATH,      export_pytorch_model),
+        ("mobilenetv4m",     config.MOBILENETV4M_PATH,      export_pytorch_model),
+        ("yolo26n_classify", config.YOLO26N_CLASSIFY_PATH,  export_yolo_model),
+        ("yolo26s_classify", config.YOLO26S_CLASSIFY_PATH,  export_yolo_model),
+        ("yolo26m_classify", config.YOLO26M_CLASSIFY_PATH,  export_yolo_model),
+        ("yolo26_detect",    config.YOLO26_DETECT_PATH,     export_yolo_model),
     ]
 
     _export_state.update(status="running", message="Starting export…")
@@ -192,11 +227,14 @@ def model_info():
         def _ncnn_ready(path: Path) -> bool:
             return (path / "model.ncnn.param").exists()
         available_models = {
-            "cnn_scratch":     _ncnn_ready(config.EDGE_MODEL_DIR / "edge_cnn_scratch_ncnn_model"),
-            "resnet50":        _ncnn_ready(config.EDGE_MODEL_DIR / "edge_resnet50_ncnn_model"),
-            "mobilenetv4s":    _ncnn_ready(config.EDGE_MODEL_DIR / "edge_mobilenetv4s_ncnn_model"),
-            "yolo26_classify": _ncnn_ready(config.YOLO26_CLASSIFY_NCNN_PATH),
-            "yolo26":          _ncnn_ready(config.YOLO26_DETECT_NCNN_PATH),
+            "cnn_scratch":      _ncnn_ready(config.EDGE_MODEL_DIR / "edge_cnn_scratch_ncnn_model"),
+            "resnet18":         _ncnn_ready(config.EDGE_MODEL_DIR / "edge_resnet18_ncnn_model"),
+            "resnet50":         _ncnn_ready(config.EDGE_MODEL_DIR / "edge_resnet50_ncnn_model"),
+            "mobilenetv4s":     _ncnn_ready(config.EDGE_MODEL_DIR / "edge_mobilenetv4s_ncnn_model"),
+            "mobilenetv4m":     _ncnn_ready(config.EDGE_MODEL_DIR / "edge_mobilenetv4m_ncnn_model"),
+            "yolo26n_classify": _ncnn_ready(config.YOLO26_CLASSIFY_NCNN_PATHS["n"]),
+            "yolo26s_classify": _ncnn_ready(config.YOLO26_CLASSIFY_NCNN_PATHS["s"]),
+            "yolo26m_classify": _ncnn_ready(config.YOLO26_CLASSIFY_NCNN_PATHS["m"]),
         }
         dataset_ready = False
         dataset_count = occupied_count = vacant_count = 0
@@ -207,11 +245,14 @@ def model_info():
         dataset_count  = occupied_count + vacant_count
         dataset_ready  = dataset_count > 0
         available_models = {
-            "cnn_scratch":     config.CNN_SCRATCH_PATH.exists(),
-            "resnet50":        config.RESNET50_PATH.exists(),
-            "mobilenetv4s":    config.MOBILENETV4_PATH.exists(),
-            "yolo26_classify": config.YOLO26_CLASSIFY_PATH.exists(),
-            "yolo26":          config.YOLO26_DETECT_PATH.exists(),
+            "cnn_scratch":      config.CNN_SCRATCH_PATH.exists(),
+            "resnet18":         config.RESNET18_PATH.exists(),
+            "resnet50":         config.RESNET50_PATH.exists(),
+            "mobilenetv4s":     config.MOBILENETV4S_PATH.exists(),
+            "mobilenetv4m":     config.MOBILENETV4M_PATH.exists(),
+            "yolo26n_classify": config.YOLO26N_CLASSIFY_PATH.exists(),
+            "yolo26s_classify": config.YOLO26S_CLASSIFY_PATH.exists(),
+            "yolo26m_classify": config.YOLO26M_CLASSIFY_PATH.exists(),
         }
 
     comparison_path = config.OUTPUT_DIR / "model_comparison.json"

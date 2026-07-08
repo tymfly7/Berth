@@ -151,7 +151,13 @@ class EdgeYoloClassifier:
     # ── Loading ───────────────────────────────────────────────────────────────
 
     def load(self):
-        model_dir  = config.YOLO26_CLASSIFY_NCNN_PATH
+        # model_name is one of yolo26{n,s,m}_classify — the char after "yolo26"
+        # is the scale that selects the per-scale NCNN export.
+        scale = self.model_name[len("yolo26")] if self.model_name.startswith("yolo26") else "s"
+        model_dir  = config.YOLO26_CLASSIFY_NCNN_PATHS.get(scale)
+        if model_dir is None:
+            logger.warning(f"Unknown YOLO classify model '{self.model_name}' — no NCNN export mapping.")
+            return
         param_path = model_dir / "model.ncnn.param"
         bin_path   = model_dir / "model.ncnn.bin"
 

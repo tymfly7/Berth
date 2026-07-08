@@ -39,7 +39,7 @@ class ParkingClassifier:
     IMAGENET_MEAN = [0.485, 0.456, 0.406]
     IMAGENET_STD  = [0.229, 0.224, 0.225]
 
-    _INFERENCE_MODELS = {"cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26"}
+    _INFERENCE_MODELS = set(config.CLASSIFY_MODELS)
 
     def __init__(self, model_name=None, device=None, confidence_threshold=None):
         candidate = model_name or config.ACTIVE_MODEL
@@ -65,13 +65,9 @@ class ParkingClassifier:
         if self.model_name is None:
             self.model = None
             self._yolo_classify = None
-            self._yolo_detect = None
             return
-        if self.model_name == "yolo26_classify":
-            self._load_yolo_classify()
-            return
-        if self.model_name == "yolo26":
-            self._load_yolo_classify()
+        if self.model_name.startswith("yolo26") and self.model_name.endswith("_classify"):
+            self._load_yolo_classify(self.model_name[len("yolo26")])  # scale: n|s|m
             return
         from src.models.model_factory import load_model
         try:
@@ -82,47 +78,27 @@ class ParkingClassifier:
             logger.warning(f"⚠️  {e}")
             self.model = None
         self._yolo_classify = None
-        self._yolo_detect = None
 
-    def _load_yolo_classify(self):
-        """Load a YOLO26 classify model (Ultralytics API)."""
+    def _load_yolo_classify(self, scale):
+        """Load a YOLO26 classify model at the given scale ('n'|'s'|'m')."""
         try:
             from ultralytics import YOLO
-            if config.DEPLOYMENT_PROFILE == "edge" and config.YOLO26_CLASSIFY_NCNN_PATH.exists():
-                model_path = config.YOLO26_CLASSIFY_NCNN_PATH
+            ncnn_path = config.YOLO26_CLASSIFY_NCNN_PATHS[scale]
+            if config.DEPLOYMENT_PROFILE == "edge" and ncnn_path.exists():
+                model_path = ncnn_path
             else:
-                model_path = config.YOLO26_CLASSIFY_PATH
+                model_path = config.YOLO26_CLASSIFY_PATHS[scale]
                 if not model_path.exists():
                     raise FileNotFoundError(
                         f"YOLO26 classify weights not found at '{model_path}'. Train it first."
                     )
             self._yolo_classify = YOLO(str(model_path), task="classify")
             self._loaded = True
-            logger.info(f"✅ Loaded YOLO26 classify model on {self.device}")
+            logger.info(f"✅ Loaded yolo26{scale}_classify model on {self.device}")
         except Exception as e:
             logger.warning(f"⚠️  YOLO26 classify failed to load: {e}")
             self.model = None
             self._yolo_classify = None
-
-    def _load_yolo_detect(self):
-        """Load a YOLO26 detect model (Ultralytics API)."""
-        try:
-            from ultralytics import YOLO
-            if config.DEPLOYMENT_PROFILE == "edge" and config.YOLO26_DETECT_NCNN_PATH.exists():
-                model_path = config.YOLO26_DETECT_NCNN_PATH
-            else:
-                model_path = config.YOLO26_DETECT_PATH
-                if not model_path.exists():
-                    raise FileNotFoundError(
-                        f"YOLO26 detect weights not found at '{model_path}'. Train it first."
-                    )
-            self._yolo_detect = YOLO(str(model_path), task="detect")
-            self._loaded = True
-            logger.info(f"✅ Loaded YOLO26 detect model on {self.device}")
-        except Exception as e:
-            logger.warning(f"⚠️  YOLO26 detect failed to load: {e}")
-            self.model = None
-            self._yolo_detect = None
 
     def is_loaded(self):
         return self._loaded
@@ -161,14 +137,6 @@ class ParkingClassifier:
             return {"status": "occupied", "confidence": round(prob_occupied, 4), "probability": round(prob_occupied, 4)}
         return {"status": "vacant", "confidence": round(1.0 - prob_occupied, 4), "probability": round(prob_occupied, 4)}
 
-    def _yolo_detect_to_dict(self, result) -> dict:
-        """Convert a YOLO26 detect result on a crop to occupied/vacant."""
-        boxes = result.boxes
-        if boxes is not None and len(boxes) > 0:
-            conf = float(boxes.conf.max().cpu().numpy())
-            return {"status": "occupied", "confidence": round(conf, 4), "probability": round(conf, 4)}
-        return {"status": "vacant", "confidence": 1.0, "probability": 0.0}
-
     @torch.no_grad()
     def predict(self, image):
         """Classify a parking space image. Returns {status, confidence, probability}."""
@@ -180,12 +148,6 @@ class ParkingClassifier:
             with self._infer_lock:
                 results = self._yolo_classify.predict(pil_img, verbose=False)
             return self._yolo_result_to_dict(results[0])
-
-        if getattr(self, "_yolo_detect", None) is not None:
-            pil_img = self._to_pil(image)
-            with self._infer_lock:
-                results = self._yolo_detect.predict(pil_img, verbose=False, conf=0.3, classes=[1])
-            return self._yolo_detect_to_dict(results[0])
 
         pil_img = self._to_pil(image)
         tensor = self.transform(pil_img).unsqueeze(0).to(self.device)
@@ -221,12 +183,6 @@ class ParkingClassifier:
             # "list index out of range" per frame. Loop one image at a time
             # through the single-image path instead.
             return [self.predict(img) for img in images]
-
-        if getattr(self, "_yolo_detect", None) is not None:
-            pil_images = [self._to_pil(img) for img in images]
-            with self._infer_lock:
-                results = self._yolo_detect.predict(pil_images, verbose=False, conf=0.3, classes=[1])
-            return [self._yolo_detect_to_dict(r) for r in results]
 
         # Preprocess all images
         tensors = []

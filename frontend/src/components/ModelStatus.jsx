@@ -83,11 +83,26 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   const pollRef                     = useRef(null)
   const exportPollRef               = useRef(null)
 
+  // Dataset to evaluate against: the internal split or an external benchmark.
+  const [datasets, setDatasets]             = useState([{ id: 'standard', label: 'Standard split' }])
+  const [selectedDataset, setSelectedDataset] = useState('standard')
+  const [benchResult, setBenchResult]       = useState(null)   // null | { label, rows }
+
   // Clean up polling on unmount
   useEffect(() => () => {
     clearTimeout(pollRef.current)
     clearTimeout(exportPollRef.current)
   }, [])
+
+  // Load the list of evaluatable datasets (internal split + external benchmarks)
+  useEffect(() => {
+    let alive = true
+    apiFetch(`${apiBase}/api/eval/datasets`)
+      .then(r => r.json())
+      .then(d => { if (alive && Array.isArray(d.datasets)) setDatasets(d.datasets) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [apiBase])
 
   if (!modelInfo) {
     return (
@@ -100,11 +115,14 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   const isEdge = modelInfo.deployment_profile === 'edge'
 
   const models = [
-    { name: 'cnn_scratch',     label: 'CNN Scratch',      available: modelInfo.available_models?.cnn_scratch     },
-    { name: 'resnet50',        label: 'ResNet-50',        available: modelInfo.available_models?.resnet50        },
-    { name: 'mobilenetv4s',    label: 'MobileNetV4',      available: modelInfo.available_models?.mobilenetv4s    },
-    { name: 'yolo26_classify', label: 'YOLO26 Classify',  available: modelInfo.available_models?.yolo26_classify },
-    { name: 'yolo26',          label: 'YOLO26 Detect',    available: modelInfo.available_models?.yolo26          },
+    { name: 'cnn_scratch',      label: 'CNN Scratch',       available: modelInfo.available_models?.cnn_scratch      },
+    { name: 'resnet18',         label: 'ResNet-18',         available: modelInfo.available_models?.resnet18         },
+    { name: 'resnet50',         label: 'ResNet-50',         available: modelInfo.available_models?.resnet50         },
+    { name: 'mobilenetv4s',     label: 'MobileNetV4-S',     available: modelInfo.available_models?.mobilenetv4s     },
+    { name: 'mobilenetv4m',     label: 'MobileNetV4-M',     available: modelInfo.available_models?.mobilenetv4m     },
+    { name: 'yolo26n_classify', label: 'YOLO26n Classify',  available: modelInfo.available_models?.yolo26n_classify },
+    { name: 'yolo26s_classify', label: 'YOLO26s Classify',  available: modelInfo.available_models?.yolo26s_classify },
+    { name: 'yolo26m_classify', label: 'YOLO26m Classify',  available: modelInfo.available_models?.yolo26m_classify },
   ]
 
   const toggle = (name) => setExpanded(prev => prev === name ? null : name)
@@ -120,6 +138,12 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
       } else {
         // Done or error — refresh model info so comparison table updates
         fetchModelInfo?.()
+        // External benchmark results aren't written to the standard comparison,
+        // so capture them from the live status for a dedicated results block.
+        if (data.status === 'done' && selectedDataset !== 'standard' && Array.isArray(data.comparison)) {
+          const ds = datasets.find(d => d.id === selectedDataset)
+          setBenchResult({ label: ds?.label || selectedDataset, rows: data.comparison })
+        }
         if (data.status === 'done') {
           setTimeout(() => setEvalStatus(null), 5000)
         }
@@ -130,9 +154,10 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   }
 
   const handleEvaluateAll = async () => {
+    setBenchResult(null)
     setEvalStatus({ status: 'training', message: 'Starting evaluation…' })
     try {
-      await apiFetch(`${apiBase}/api/evaluate/all`, { method: 'POST' })
+      await apiFetch(`${apiBase}/api/evaluate/all?dataset=${encodeURIComponent(selectedDataset)}`, { method: 'POST' })
       pollEvalStatus()
     } catch (e) {
       setEvalStatus({ status: 'error', message: String(e) })
@@ -281,9 +306,24 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
         )
       })}
 
-      {/* ── Evaluate All + Excel ────────────────────────────────────────────── */}
+      {/* ── Export NCNN — own row, separate from evaluation controls ─────────── */}
       {!isEdge && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+            disabled={isExporting}
+            onClick={handleExportNcnn}
+            title="Export trained models to NCNN for edge deployment"
+          >
+            {isExporting ? 'Exporting…' : 'Export NCNN'}
+          </button>
+        </div>
+      )}
+
+      {/* ── Evaluate All + Excel ────────────────────────────────────────────── */}
+      {!isEdge && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
           {hasComparison && (
             <button
               className="btn btn-ghost btn-sm"
@@ -294,6 +334,18 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
               Excel
             </button>
           )}
+          <select
+            className="btn btn-ghost btn-sm"
+            style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+            value={selectedDataset}
+            disabled={isEvaluating}
+            onChange={e => setSelectedDataset(e.target.value)}
+            title="Dataset to evaluate against"
+          >
+            {datasets.map(d => (
+              <option key={d.id} value={d.id}>{d.label}</option>
+            ))}
+          </select>
           <button
             className="btn btn-ghost-blue btn-sm"
             style={{ fontSize: '0.72rem', padding: '3px 8px' }}
@@ -301,15 +353,6 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
             onClick={handleEvaluateAll}
           >
             {isEvaluating ? 'Evaluating…' : 'Evaluate All'}
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            style={{ fontSize: '0.72rem', padding: '3px 8px' }}
-            disabled={isExporting}
-            onClick={handleExportNcnn}
-            title="Export trained models to NCNN for edge deployment"
-          >
-            {isExporting ? 'Exporting…' : 'Export NCNN'}
           </button>
         </div>
       )}
@@ -355,6 +398,37 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
               }} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── External benchmark results (kept separate from the standard split) ── */}
+      {benchResult && (
+        <div style={{ marginTop: 14, overflow: 'hidden' }}>
+          <div className="section-title" style={{ marginBottom: 6 }}>
+            Benchmark — {benchResult.label}
+          </div>
+          <table style={style.compTable}>
+            <thead>
+              <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)' }}>
+                <th style={{ textAlign: 'left',  padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Model</th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Acc/mAP</th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Prec</th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Rec</th>
+                <th style={{ textAlign: 'right', padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>F1</th>
+              </tr>
+            </thead>
+            <tbody>
+              {benchResult.rows.map(r => (
+                <tr key={r.model} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                  <td style={{ padding: '4px 4px', fontWeight: 600, fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 0 }} title={r.model}>{r.model}</td>
+                  <td style={{ padding: '4px 2px', textAlign: 'right', color: 'var(--color-vacant)', fontWeight: 600 }}>{r.test_accuracy != null ? `${r.test_accuracy.toFixed(1)}%` : '—'}</td>
+                  <td style={{ padding: '4px 2px', textAlign: 'right' }}>{r.test_precision != null ? `${r.test_precision.toFixed(1)}%` : '—'}</td>
+                  <td style={{ padding: '4px 2px', textAlign: 'right' }}>{r.test_recall != null ? `${r.test_recall.toFixed(1)}%` : '—'}</td>
+                  <td style={{ padding: '4px 4px', textAlign: 'right' }}>{r.test_f1 != null ? `${r.test_f1.toFixed(1)}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

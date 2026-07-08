@@ -59,18 +59,26 @@ def build_comparison_excel(comparison: list) -> bytes:
     ]
 
     MODEL_LABELS = {
-        "cnn_scratch":     "CNN Scratch",
-        "resnet50":        "ResNet-50",
-        "mobilenetv4s":     "MobileNetV4",
-        "yolo26_classify": "YOLO26 Classify",
-        "yolo26":          "YOLO26 Detect",
+        "cnn_scratch":      "CNN Scratch",
+        "resnet18":         "ResNet-18",
+        "resnet50":         "ResNet-50",
+        "mobilenetv4s":     "MobileNetV4-S",
+        "mobilenetv4m":     "MobileNetV4-M",
+        "yolo26n_classify": "YOLO26n Classify",
+        "yolo26s_classify": "YOLO26s Classify",
+        "yolo26m_classify": "YOLO26m Classify",
+        "yolo26_detect":    "YOLO26 Detect",
     }
     ROW_BG = {
-        "cnn_scratch":     CNN_BG,
-        "resnet50":        CNN_BG,
+        "cnn_scratch":      CNN_BG,
+        "resnet18":         CNN_BG,
+        "resnet50":         CNN_BG,
         "mobilenetv4s":     CNN_BG,
-        "yolo26_classify": YCLS_BG,
-        "yolo26":          YDET_BG,
+        "mobilenetv4m":     CNN_BG,
+        "yolo26n_classify": YCLS_BG,
+        "yolo26s_classify": YCLS_BG,
+        "yolo26m_classify": YCLS_BG,
+        "yolo26_detect":    YDET_BG,
     }
 
     from openpyxl.utils import get_column_letter
@@ -178,13 +186,16 @@ def load_model_training_details() -> dict:
             "total_time_s":     round(sum(h.get("epoch_times", [])), 1),
         }
 
-    yolo_classify_csv = config.YOLO26_CLASSIFY_RUN_DIR / "results.csv"
-    if yolo_classify_csv.exists():
+    for scale in ("n", "s", "m"):
+        model_name = f"yolo26{scale}_classify"
+        yolo_classify_csv = config.OUTPUT_DIR / model_name / "run" / "results.csv"
+        if not yolo_classify_csv.exists():
+            continue
         with open(yolo_classify_csv) as f:
             rows = list(csv.DictReader(f))
         if rows:
             last = {k.strip(): v.strip() for k, v in rows[-1].items()}
-            details["yolo26_classify"] = {
+            details[model_name] = {
                 "epochs":           int(float(last.get("epoch", len(rows)))),
                 "final_val_acc":    round(float(last["metrics/accuracy_top1"]) * 100, 2) if last.get("metrics/accuracy_top1") else None,
                 "final_train_loss": round(float(last["train/loss"]), 4)  if last.get("train/loss") else None,
@@ -198,7 +209,7 @@ def load_model_training_details() -> dict:
             rows = list(csv.DictReader(f))
         if rows:
             last = {k.strip(): v.strip() for k, v in rows[-1].items()}
-            details["yolo26"] = {
+            details["yolo26_detect"] = {
                 "epochs":      int(float(last.get("epoch", len(rows)))),
                 "map50":       round(float(last["metrics/mAP50(B)"]) * 100, 2)    if last.get("metrics/mAP50(B)")    else None,
                 "precision":   round(float(last["metrics/precision(B)"]) * 100, 2) if last.get("metrics/precision(B)") else None,
@@ -210,15 +221,15 @@ def load_model_training_details() -> dict:
     # (e.g. outputs were cleaned). The evaluate-all comparison still holds the
     # YOLO detect mAP@50 (stored as test_accuracy), so surface it from there so
     # the model card keeps showing mAP instead of going blank.
-    if "yolo26" not in details:
+    if "yolo26_detect" not in details:
         comp_path = config.OUTPUT_DIR / "model_comparison.json"
         if comp_path.exists():
             try:
                 with open(comp_path) as f:
                     comp = json.load(f)
-                entry = next((m for m in comp if m.get("model") == "yolo26"), None)
+                entry = next((m for m in comp if m.get("model") == "yolo26_detect"), None)
                 if entry and entry.get("test_accuracy") is not None:
-                    details["yolo26"] = {
+                    details["yolo26_detect"] = {
                         "map50":     entry.get("test_accuracy"),
                         "precision": entry.get("test_precision"),
                         "recall":    entry.get("test_recall"),

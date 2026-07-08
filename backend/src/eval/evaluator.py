@@ -114,3 +114,48 @@ def evaluate_model(model, test_loader, device=None):
         "all_probabilities": all_probs.tolist(),
         "total_samples":    len(all_labels),
     }
+
+
+def evaluate_yolo_classify(weights_path, split="val", imgsz=None):
+    """Evaluate a YOLO26 classify checkpoint on the internal classify split.
+
+    Ultralytics classify models can't go through evaluate_model() (they aren't
+    torch nn.Modules with a sigmoid head), so this runs the native .val() and
+    returns the same metric shape. occupied = class 0 (alphabetical) = positive.
+    """
+    import config
+    from ultralytics import YOLO
+    from src.data_prep.preprocessor import build_classify_split
+
+    imgsz = imgsz or config.YOLO_CLASSIFY_IMG_SIZE
+    build_classify_split()  # idempotent; ensures the split folders exist
+    model = YOLO(str(weights_path))
+    res = model.val(
+        data=str(config.CLASSIFY_SPLIT_DIR),
+        split=split,
+        imgsz=imgsz,
+        verbose=False,
+    )
+
+    metrics = {"accuracy": round(float(res.top1) * 100, 2)}
+    # Derive P/R/F1 from the confusion matrix: cm[actual][predicted], class 0 = occupied.
+    try:
+        raw_cm = res.confusion_matrix
+        cm = getattr(raw_cm, "matrix", None)
+        if cm is None:
+            cm = getattr(raw_cm, "data", None)
+        if cm is None:
+            raise AttributeError(f"Cannot read confusion matrix from {type(raw_cm)}")
+        tp = float(cm[0][0]); fp = float(cm[1][0]); fn = float(cm[0][1])
+        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+        metrics.update({
+            "precision": round(prec * 100, 2),
+            "recall":    round(rec * 100, 2),
+            "f1_score":  round(f1 * 100, 2),
+        })
+    except Exception as cm_err:
+        logger.warning(f"YOLO classify eval: could not compute P/R/F1 — {cm_err}")
+
+    return metrics

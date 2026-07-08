@@ -211,9 +211,10 @@ def propose_from_frames(
     Propose candidate parking-spot ROIs from one or more BGR frames.
 
     Detection pipeline:
-      1. Ultralytics YOLO with pretrained COCO weights (auto-downloaded on first
-         call; ~6 MB for yolo11n). Falls back to contour detection if ultralytics
-         is not installed or all model candidates fail to load.
+      1. Ultralytics YOLO — the project's YOLO26 detect weights first, then
+         COCO-pretrained yolo26s.pt (auto-downloaded on first call). Falls back
+         to contour detection if ultralytics is not installed or all model
+         candidates fail to load.
       2. Detections are accumulated across all frames and clustered by IoU.
       3. Angled-parking handling:
            - use_line_detection=True: each cluster is snapped to painted

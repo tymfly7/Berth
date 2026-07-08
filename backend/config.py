@@ -54,34 +54,64 @@ AUTH_SECRET = os.getenv("BERTH_AUTH_SECRET", "") or secrets.token_urlsafe(32)  #
 AUTH_TOKEN_TTL = int(os.getenv("BERTH_AUTH_TTL", "315360000"))  # admin session length, seconds (8h)
 
 # ---------------------------------------------------------------------------
-# Active model  ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify", "yolo26")
+# Active model — an occupancy classifier from CLASSIFY_MODELS below.
 # ---------------------------------------------------------------------------
-ACTIVE_MODEL = os.getenv("BERTH_MODEL", "yolo26_classify")
+ACTIVE_MODEL = os.getenv("BERTH_MODEL", "yolo26s_classify")
 
 # Model identifiers — single source of truth. Endpoints validate against these
-# instead of re-listing literals, so the membership never drifts. Note the
-# three audiences differ: 'yolo26' is the detect interface used at inference
-# time, while training refers to it as 'yolo26_detect'.
-CLASSIFY_MODELS  = ("cnn_scratch", "resnet50", "mobilenetv4s", "yolo26_classify")
-SUPPORTED_MODELS = CLASSIFY_MODELS + ("yolo26",)        # selectable for inference
+# instead of re-listing literals, so the membership never drifts. Every name
+# maps 1:1 to its own trained checkpoint (paths below). The YOLO26 *detect*
+# model is a separate audience: it is trainable ('yolo26_detect') and drives the
+# misparked-vehicle pass + ROI proposer, but is NOT an occupancy classifier.
+CLASSIFY_MODELS  = (
+    "cnn_scratch", "resnet18", "resnet50", "mobilenetv4s", "mobilenetv4m",
+    "yolo26n_classify", "yolo26s_classify", "yolo26m_classify",
+)
+SUPPORTED_MODELS = CLASSIFY_MODELS                       # selectable for inference
 TESTABLE_MODELS  = CLASSIFY_MODELS                       # per-patch accuracy eval
-TRAINABLE_MODELS = CLASSIFY_MODELS + ("yolo26_detect",)  # 'yolo26' → 'yolo26_detect'
+TRAINABLE_MODELS = CLASSIFY_MODELS + ("yolo26_detect",)  # classifiers + the detector
 
 # ---------------------------------------------------------------------------
-# Model paths
+# Model paths — one checkpoint per model name.
 # ---------------------------------------------------------------------------
 CNN_SCRATCH_PATH      = MODEL_DIR / "best_cnn_scratch.pth"
+RESNET18_PATH         = MODEL_DIR / "best_resnet18.pth"
 RESNET50_PATH         = MODEL_DIR / "best_resnet50.pth"
-MOBILENETV4_PATH      = MODEL_DIR / "best_mobilenetv4.pth"
-YOLO26_CLASSIFY_PATH      = MODEL_DIR / "best_yolo26_classify.pt"
+MOBILENETV4S_PATH     = MODEL_DIR / "best_mobilenetv4s.pth"
+MOBILENETV4M_PATH     = MODEL_DIR / "best_mobilenetv4m.pth"
+# Per-scale YOLO26 classify checkpoints. yolo26m is the heaviest — it targets
+# Pi 5 edge nodes; it is too heavy for the Pi Zero 2 W (use yolo26n there).
+YOLO26N_CLASSIFY_PATH = MODEL_DIR / "best_yolo26n_classify.pt"
+YOLO26S_CLASSIFY_PATH = MODEL_DIR / "best_yolo26s_classify.pt"
+YOLO26M_CLASSIFY_PATH = MODEL_DIR / "best_yolo26m_classify.pt"
 YOLO26_DETECT_PATH        = MODEL_DIR / "best_yolo26_detect.pt"
-YOLO26_CLASSIFY_NCNN_PATH = EDGE_MODEL_DIR / "best_yolo26_classify_ncnn_model"
+YOLO26N_CLASSIFY_NCNN_PATH = EDGE_MODEL_DIR / "best_yolo26n_classify_ncnn_model"
+YOLO26S_CLASSIFY_NCNN_PATH = EDGE_MODEL_DIR / "best_yolo26s_classify_ncnn_model"
+YOLO26M_CLASSIFY_NCNN_PATH = EDGE_MODEL_DIR / "best_yolo26m_classify_ncnn_model"
 YOLO26_DETECT_NCNN_PATH   = EDGE_MODEL_DIR / "best_yolo26_detect_ncnn_model"
+# Scale → checkpoint lookups so callers can resolve a yolo26{n,s,m}_classify
+# name to its .pt / NCNN export without re-listing the literals.
+YOLO26_CLASSIFY_PATHS = {"n": YOLO26N_CLASSIFY_PATH, "s": YOLO26S_CLASSIFY_PATH, "m": YOLO26M_CLASSIFY_PATH}
+YOLO26_CLASSIFY_NCNN_PATHS = {"n": YOLO26N_CLASSIFY_NCNN_PATH, "s": YOLO26S_CLASSIFY_NCNN_PATH, "m": YOLO26M_CLASSIFY_NCNN_PATH}
 YOLO_DATASET_DIR         = DATA_DIR  / "yolo_detect_dataset"
 CLASSIFY_SPLIT_DIR       = DATA_DIR  / "classify_split"
 CLASSIFY_SUBSET_DIR      = DATA_DIR  / "classify_subset"   # capped, class-balanced copy for YOLO classify
-YOLO26_CLASSIFY_RUN_DIR  = OUTPUT_DIR / "yolo26_classify" / "run"
 YOLO26_DETECT_RUN_DIR    = OUTPUT_DIR / "yolo26_detect"   / "run"
+
+# One-time migration to the per-scale roster: the pre-split single classify
+# checkpoint (best_yolo26_classify.pt) was the s-scale model, and the mobilenet
+# checkpoint was the conv_small (s) model. Rename them (and the yolo NCNN export)
+# to the scale-specific names so existing trained weights aren't orphaned.
+def _migrate_checkpoint(old, new):
+    try:
+        if old.exists() and not new.exists():
+            old.rename(new)
+    except OSError:
+        pass
+
+_migrate_checkpoint(MODEL_DIR / "best_yolo26_classify.pt", YOLO26S_CLASSIFY_PATH)
+_migrate_checkpoint(EDGE_MODEL_DIR / "best_yolo26_classify_ncnn_model", YOLO26S_CLASSIFY_NCNN_PATH)
+_migrate_checkpoint(MODEL_DIR / "best_mobilenetv4.pth", MOBILENETV4S_PATH)
 # Input resolution shared by all three PyTorch classifiers (cnn_scratch,
 # resnet50, mobilenetv4s) for both training and inference. Kept at 224 because
 # resnet50/mobilenetv4s are ImageNet-pretrained and expect ~224. A from-scratch

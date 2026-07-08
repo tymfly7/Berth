@@ -29,9 +29,8 @@ class ProcessorService:
 
     # ── Classifier cache — one loaded instance per model name ─────────────
     def get_classifier(self, model_name: str):
-        # 'yolo26' and 'yolo26_classify' load the same weights — share one
-        # cached instance so the model isn't held in memory twice.
-        cache_key = "yolo26_classify" if model_name in ("yolo26", "yolo26_classify") else model_name
+        # Each model name maps 1:1 to its own weights, so cache by the plain name.
+        cache_key = model_name
         with self._clf_lock:
             if cache_key not in self._clf_cache:
                 from src.inference.classifier import get_classifier
@@ -52,10 +51,10 @@ class ProcessorService:
         if self.active_mode in config.SUPPORTED_MODELS:
             return self.active_mode
         for name, path in [
-            ("yolo26_classify", config.YOLO26_CLASSIFY_PATH),
+            ("yolo26s_classify", config.YOLO26S_CLASSIFY_PATH),
             ("cnn_scratch", config.CNN_SCRATCH_PATH),
             ("resnet50", config.RESNET50_PATH),
-            ("mobilenetv4s", config.MOBILENETV4_PATH),
+            ("mobilenetv4s", config.MOBILENETV4S_PATH),
         ]:
             if path.exists():
                 return name

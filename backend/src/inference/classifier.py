@@ -11,10 +11,10 @@ on the app startup graph (video_processor → slot_detector → classifier).
 
 import config
 
-# CNN classifiers exported to NCNN for edge.
-_EDGE_CNN_MODELS  = {"cnn_scratch", "resnet50", "mobilenetv4s"}
-# YOLO26 classify head — shares one NCNN export for both selectable names.
-_EDGE_YOLO_MODELS = {"yolo26_classify", "yolo26"}
+# CNN/transfer classifiers exported to NCNN for edge.
+_EDGE_CNN_MODELS  = {"cnn_scratch", "resnet18", "resnet50", "mobilenetv4s", "mobilenetv4m"}
+# YOLO26 classify heads — one NCNN export per scale.
+_EDGE_YOLO_MODELS = {"yolo26n_classify", "yolo26s_classify", "yolo26m_classify"}
 
 
 def get_classifier(model_name=None, **kwargs):

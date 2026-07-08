@@ -102,8 +102,9 @@ class TrainManager:
 
         if compare_all:
             thread = threading.Thread(target=self._compare_all, daemon=True)
-        elif model_name == "yolo26_classify":
-            thread = threading.Thread(target=self._train_yolo26_classify, daemon=True)
+        elif model_name in ("yolo26n_classify", "yolo26s_classify", "yolo26m_classify"):
+            scale = model_name[len("yolo26")]  # 'n' | 's' | 'm'
+            thread = threading.Thread(target=self._train_yolo26_classify, args=(scale,), daemon=True)
         elif model_name == "yolo26_detect":
             thread = threading.Thread(target=self._train_yolo26_detect, daemon=True)
         else:
@@ -191,8 +192,10 @@ class TrainManager:
                 from src.export.model_exporter import export_pytorch_model
                 weights_map = {
                     "cnn_scratch":  config.CNN_SCRATCH_PATH,
+                    "resnet18":     config.RESNET18_PATH,
                     "resnet50":     config.RESNET50_PATH,
-                    "mobilenetv4s":  config.MOBILENETV4_PATH,
+                    "mobilenetv4s": config.MOBILENETV4S_PATH,
+                    "mobilenetv4m": config.MOBILENETV4M_PATH,
                 }
                 if model_name in weights_map:
                     export_pytorch_model(model_name, weights_map[model_name])
@@ -222,12 +225,15 @@ class TrainManager:
                 except Exception:
                     pass
 
-    def _train_yolo26_classify(self):
+    def _train_yolo26_classify(self, scale="s"):
         """
-        Train YOLO26 in classification mode using the existing occupied/vacant dataset.
-        Uses Ultralytics Python API — no CLI required.
-        Output: config.YOLO26_CLASSIFY_PATH
+        Train a YOLO26 classify model at the given scale ('n'|'s'|'m') on the
+        occupied/vacant crops. Uses Ultralytics Python API — no CLI required.
+        Fine-tunes the ImageNet-pretrained yolo26{scale}-cls.pt checkpoint (first
+        run downloads it). Output: config.YOLO26_CLASSIFY_PATHS[scale].
         """
+        model_name = f"yolo26{scale}_classify"
+        run_dir    = config.OUTPUT_DIR / model_name
         run_id = None
         try:
             from ultralytics import YOLO
@@ -244,13 +250,13 @@ class TrainManager:
             classify_data_dir = build_classify_subset()  # capped & class-balanced — matches the CNN classifiers' ~500-batch volume
 
             with _lock:
-                _state["message"] = "Starting YOLO26 classification training..."
+                _state["message"] = f"Starting {model_name} training..."
 
             try:
-                run_id = db.start_training_run("yolo26_classify")
+                run_id = db.start_training_run(model_name)
             except Exception:
                 pass
-            model = YOLO("yolo26s-cls.yaml")  # build from scratch, no pretrained weights
+            model = YOLO(f"yolo26{scale}-cls.pt")  # ImageNet-pretrained; downloaded on first use
 
             def on_batch_end(trainer):
                 if self._should_cancel():
@@ -298,17 +304,17 @@ class TrainManager:
                 cache="ram",
                 workers=min(8, config.NUM_WORKERS * 4),
                 amp=True,
-                project=str(config.OUTPUT_DIR / "yolo26_classify"),
+                project=str(run_dir),
                 name="run",
                 exist_ok=True,
                 verbose=False,
             )
 
             if self._should_cancel():
-                logger.info("⏹️ YOLO26 classify training cancelled")
+                logger.info(f"⏹️ {model_name} training cancelled")
                 with _lock:
                     _state["status"]  = "cancelled"
-                    _state["message"] = "YOLO26 classification training cancelled by user."
+                    _state["message"] = f"{model_name} training cancelled by user."
                 if run_id:
                     try:
                         db.finish_training_run(run_id, "cancelled")
@@ -317,15 +323,15 @@ class TrainManager:
                 return
 
             # Copy best weights to model dir
-            best_src = config.OUTPUT_DIR / "yolo26_classify" / "run" / "weights" / "best.pt"
+            best_src = run_dir / "run" / "weights" / "best.pt"
             if not best_src.exists():
                 raise FileNotFoundError(f"Training finished but best.pt not found at {best_src}")
             import shutil
-            shutil.copy2(best_src, config.YOLO26_CLASSIFY_PATH)
+            shutil.copy2(best_src, config.YOLO26_CLASSIFY_PATHS[scale])
 
             with _lock:
                 _state["status"]  = "done"
-                _state["message"] = "YOLO26 classification training complete!"
+                _state["message"] = f"{model_name} training complete!"
                 _state["results"] = {"best_val_acc": _state["val_acc"]}
 
             if run_id:
@@ -336,20 +342,20 @@ class TrainManager:
                 except Exception:
                     pass
 
-            # Export to ONNX for edge inference — non-fatal
+            # Export to NCNN for edge inference — non-fatal
             try:
                 from src.export.model_exporter import export_yolo_model
-                export_yolo_model("yolo26_classify", config.YOLO26_CLASSIFY_PATH)
+                export_yolo_model(model_name, config.YOLO26_CLASSIFY_PATHS[scale])
             except Exception as _exp_err:
                 logger.warning(f"Edge export skipped: {_exp_err}")
 
-            logger.info("✅ YOLO26 classify training complete")
+            logger.info(f"✅ {model_name} training complete")
 
         except Exception as e:
-            logger.exception(f"❌ YOLO26 classify training failed: {e}")
+            logger.exception(f"❌ {model_name} training failed: {e}")
             with _lock:
                 _state["status"]  = "error"
-                _state["message"] = f"YOLO26 classify training failed: {e}"
+                _state["message"] = f"{model_name} training failed: {e}"
             if run_id:
                 try:
                     db.finish_training_run(run_id, "failed")
@@ -610,8 +616,14 @@ class TrainManager:
 
     # ── Evaluate-only (no retraining) ─────────────────────────────────────────
 
-    def start_evaluation(self):
-        """Evaluate all trained models without retraining. Returns initial status dict."""
+    def start_evaluation(self, dataset="standard"):
+        """Evaluate all trained models without retraining. Returns initial status dict.
+
+        Args:
+            dataset (str): "standard" for the internal 70/15/15 split, or an
+                           external benchmark dataset id (see
+                           src.eval.external_datasets).
+        """
         with _lock:
             if _state.get("status") == "training":
                 return {"status": "error", "message": "A training/evaluation job is already running."}
@@ -621,54 +633,86 @@ class TrainManager:
             _state["epoch"]      = 0
             _state["results"]    = None
             _state["comparison"] = None
-        thread = threading.Thread(target=self._evaluate_all, daemon=True)
+            _state["dataset"]    = dataset
+        thread = threading.Thread(target=self._evaluate_all, args=(dataset,), daemon=True)
         thread.start()
         return {"status": "training", "message": "Evaluation started"}
 
-    def _evaluate_all(self):
-        """Load saved weights for every trained model and evaluate — no retraining."""
+    def _evaluate_all(self, dataset="standard"):
+        """Load saved weights for every trained model and evaluate — no retraining.
+
+        With dataset="standard" the internal 70/15/15 split is used. With an
+        external benchmark id every model is scored against that dataset instead;
+        models the dataset can't cover (no classifier crops / no detect labels)
+        are skipped.
+        """
         import csv as csv_mod
+        from src.eval import external_datasets
         try:
+            ext = external_datasets.resolve(dataset)      # None → standard split
+            ds_label = ext["label"] if ext else "Standard split"
+
             cnn_candidates = [
                 ("cnn_scratch",  config.CNN_SCRATCH_PATH),
+                ("resnet18",     config.RESNET18_PATH),
                 ("resnet50",     config.RESNET50_PATH),
-                ("mobilenetv4s",  config.MOBILENETV4_PATH),
+                ("mobilenetv4s", config.MOBILENETV4S_PATH),
+                ("mobilenetv4m", config.MOBILENETV4M_PATH),
             ]
             cnn_present = [(n, p) for n, p in cnn_candidates if p.exists()]
-            yolo_cl_present = config.YOLO26_CLASSIFY_PATH.exists()
+            # One entry per trained YOLO26 classify scale (n/s/m).
+            yolo_cl_candidates = [(f"yolo26{s}_classify", config.YOLO26_CLASSIFY_PATHS[s]) for s in ("n", "s", "m")]
+            yolo_cl_present = [(n, p) for n, p in yolo_cl_candidates if p.exists()]
             yolo_dt_present = config.YOLO26_DETECT_PATH.exists()
-            total = len(cnn_present) + yolo_cl_present + yolo_dt_present
+
+            # An external dataset gates which models can run: classifier crops
+            # drive the classify models, detect labels drive the detector.
+            allow_classify = ext is None or ext["has_classifier"]
+            allow_detect   = ext is None or ext["has_detector"]
+            eval_cnn     = bool(cnn_present) and allow_classify
+            eval_yolo_cl = bool(yolo_cl_present) and allow_classify
+            eval_yolo_dt = yolo_dt_present  and allow_detect
+            total = ((len(cnn_present) if eval_cnn else 0)
+                     + (len(yolo_cl_present) if eval_yolo_cl else 0)
+                     + eval_yolo_dt)
 
             if total == 0:
                 with _lock:
                     _state["status"]  = "error"
-                    _state["message"] = "No trained models found. Train at least one model first."
+                    _state["message"] = (
+                        "No trained models found. Train at least one model first."
+                        if ext is None else
+                        f"No trained models match the '{ds_label}' dataset."
+                    )
                 return
 
-            # Load dataset only if CNN models need it
-            data = device = None
-            if cnn_present:
+            # Load the CNN test set only if CNN models will run.
+            device = test_loader = None
+            if eval_cnn:
                 with _lock:
                     _state["message"] = "Loading dataset for evaluation…"
                 import torch
                 from src.models.model_factory import load_model
-                from src.data_prep.preprocessor import prepare_dataset
                 from src.eval.evaluator import evaluate_model
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                data = prepare_dataset()
+                if ext is None:
+                    from src.data_prep.preprocessor import prepare_dataset
+                    test_loader = prepare_dataset()["test_loader"]
+                else:
+                    test_loader = external_datasets.build_external_test_loader(ext["classifier_dir"])
 
             results = []
             done = 0
 
             # ── CNN / transfer models ─────────────────────────────────────────
-            for name, _ in cnn_present:
+            for name, _ in (cnn_present if eval_cnn else []):
                 done += 1
                 with _lock:
                     _state["message"]    = f"Evaluating {name} ({done}/{total})…"
                     _state["model_name"] = name
 
                 model    = load_model(name, device=device)
-                eval_res = evaluate_model(model, data["test_loader"], device=device)
+                eval_res = evaluate_model(model, test_loader, device=device)
 
                 # Read supplementary info from history JSON
                 history_path = config.OUTPUT_DIR / f"history_{name}.json"
@@ -698,20 +742,17 @@ class TrainManager:
                     "trainable_params": params["trainable"],
                 })
 
-            # ── YOLO Classify ─────────────────────────────────────────────────
-            if yolo_cl_present:
+            # ── YOLO Classify (one pass per trained scale) ────────────────────
+            for cl_name, cl_ckpt in (yolo_cl_present if eval_yolo_cl else []):
                 done += 1
                 with _lock:
-                    _state["message"]    = f"Evaluating yolo26_classify ({done}/{total})…"
-                    _state["model_name"] = "yolo26_classify"
+                    _state["message"]    = f"Evaluating {cl_name} ({done}/{total})…"
+                    _state["model_name"] = cl_name
 
-                from ultralytics import YOLO
-                from src.data_prep.preprocessor import build_classify_split
-
-                entry = {"model": "yolo26_classify", "type": "classification"}
+                entry = {"model": cl_name, "type": "classification"}
 
                 # Supplementary training info from CSV (epochs, train_time only)
-                csv_path = config.OUTPUT_DIR / "yolo26_classify" / "run" / "results.csv"
+                csv_path = config.OUTPUT_DIR / cl_name / "run" / "results.csv"
                 if csv_path.exists():
                     with open(csv_path) as fh:
                         rows = list(csv_mod.DictReader(fh))
@@ -722,45 +763,62 @@ class TrainManager:
                             "train_time": round(float(last.get("time", 0)), 1),
                         })
 
-                # Actual evaluation — run inference on the val split
-                build_classify_split()                      # idempotent; ensures the folders exist
-                classify_data_dir = config.CLASSIFY_SPLIT_DIR
-                yolo_cl = YOLO(str(config.YOLO26_CLASSIFY_PATH))
-                val_res = yolo_cl.val(
-                    data=str(classify_data_dir),
-                    split="val",
-                    imgsz=config.YOLO_CLASSIFY_IMG_SIZE,
-                    verbose=False,
-                )
-                entry["test_accuracy"] = round(float(val_res.top1) * 100, 2)
+                if ext is None:
+                    from ultralytics import YOLO
+                    from src.data_prep.preprocessor import build_classify_split
 
-                # Derive precision/recall/F1 from the confusion matrix.
-                # Ultralytics classify: cm.matrix shape (nc, nc), cm[actual][predicted].
-                # Class 0 = occupied (alphabetical), treated as positive.
-                try:
-                    # Ultralytics classify ConfusionMatrix: try .matrix, fall back to .data
-                    raw_cm = val_res.confusion_matrix
-                    cm = getattr(raw_cm, "matrix", None) or getattr(raw_cm, "data", None)
-                    if cm is None:
-                        raise AttributeError(f"Cannot read confusion matrix from {type(raw_cm)}")
-                    tp = float(cm[0][0])
-                    fp = float(cm[1][0])
-                    fn = float(cm[0][1])
-                    prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-                    rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-                    f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
-                    entry.update({
-                        "test_precision": round(prec * 100, 2),
-                        "test_recall":    round(rec * 100, 2),
-                        "test_f1":        round(f1 * 100, 2),
-                    })
-                except Exception as _cm_err:
-                    logger.warning(f"yolo26_classify: could not compute P/R/F1 from confusion matrix — {_cm_err}")
+                    # Actual evaluation — run inference on the val split
+                    build_classify_split()                  # idempotent; ensures the folders exist
+                    classify_data_dir = config.CLASSIFY_SPLIT_DIR
+                    yolo_cl = YOLO(str(cl_ckpt))
+                    val_res = yolo_cl.val(
+                        data=str(classify_data_dir),
+                        split="val",
+                        imgsz=config.YOLO_CLASSIFY_IMG_SIZE,
+                        verbose=False,
+                    )
+                    entry["test_accuracy"] = round(float(val_res.top1) * 100, 2)
+
+                    # Derive precision/recall/F1 from the confusion matrix.
+                    # Ultralytics classify: cm.matrix shape (nc, nc), cm[actual][predicted].
+                    # Class 0 = occupied (alphabetical), treated as positive.
+                    try:
+                        # Ultralytics classify ConfusionMatrix: try .matrix, fall back to .data
+                        raw_cm = val_res.confusion_matrix
+                        cm = getattr(raw_cm, "matrix", None) or getattr(raw_cm, "data", None)
+                        if cm is None:
+                            raise AttributeError(f"Cannot read confusion matrix from {type(raw_cm)}")
+                        tp = float(cm[0][0])
+                        fp = float(cm[1][0])
+                        fn = float(cm[0][1])
+                        prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                        rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                        f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
+                        entry.update({
+                            "test_precision": round(prec * 100, 2),
+                            "test_recall":    round(rec * 100, 2),
+                            "test_f1":        round(f1 * 100, 2),
+                        })
+                    except Exception as _cm_err:
+                        logger.warning(f"{cl_name}: could not compute P/R/F1 from confusion matrix — {_cm_err}")
+                else:
+                    # External dataset: per-crop predict + sklearn metrics.
+                    m = external_datasets.evaluate_yolo_classify_external(
+                        cl_ckpt, ext["classifier_dir"]
+                    )
+                    if m:
+                        entry.update({
+                            "test_accuracy":  m["accuracy"],
+                            "test_precision": m["precision"],
+                            "test_recall":    m["recall"],
+                            "test_f1":        m["f1_score"],
+                            "total_samples":  m["total_samples"],
+                        })
 
                 results.append(entry)
 
             # ── YOLO Detect ───────────────────────────────────────────────────
-            if yolo_dt_present:
+            if eval_yolo_dt:
                 done += 1
                 with _lock:
                     _state["message"]    = f"Evaluating yolo26_detect ({done}/{total})…"
@@ -768,7 +826,7 @@ class TrainManager:
 
                 from ultralytics import YOLO
 
-                entry = {"model": "yolo26", "type": "detection"}
+                entry = {"model": "yolo26_detect", "type": "detection"}
 
                 # Supplementary training info from CSV (epochs, train_time only)
                 csv_path = config.OUTPUT_DIR / "yolo26_detect" / "run" / "results.csv"
@@ -782,12 +840,18 @@ class TrainManager:
                             "train_time": round(float(last.get("time", 0)), 1),
                         })
 
-                # Actual evaluation — run inference on the test split
-                yaml_path = config.YOLO_DATASET_DIR / "dataset.yaml"
+                # Actual evaluation. Standard uses the internal detect test split;
+                # an external dataset supplies its own data.yaml (val = its images).
+                if ext is None:
+                    yaml_path = config.YOLO_DATASET_DIR / "dataset.yaml"
+                    split = "test"
+                else:
+                    yaml_path = ext["detector_yaml"]
+                    split = "val"
                 yolo_dt = YOLO(str(config.YOLO26_DETECT_PATH))
                 val_res = yolo_dt.val(
                     data=str(yaml_path),
-                    split="test",
+                    split=split,
                     verbose=False,
                 )
                 entry.update({
@@ -798,16 +862,23 @@ class TrainManager:
                 results.append(entry)
 
             # ── Persist ───────────────────────────────────────────────────────
-            comparison_path = config.OUTPUT_DIR / "model_comparison.json"
+            # Standard results are the canonical model_comparison.json (read by
+            # /api/model/info); external results go to a per-dataset file so they
+            # never clobber the standard comparison.
+            comparison_path = config.OUTPUT_DIR / (
+                "model_comparison.json" if ext is None
+                else f"model_comparison_{dataset}.json"
+            )
             with open(comparison_path, "w") as fh:
                 json.dump(results, fh, indent=2)
 
             with _lock:
                 _state["status"]     = "done"
-                _state["message"]    = f"Evaluation complete — {len(results)} model(s) evaluated."
+                _state["message"]    = f"Evaluation complete — {len(results)} model(s) on {ds_label}."
                 _state["comparison"] = results
+                _state["dataset"]    = dataset
 
-            logger.info(f"✅ Evaluate-all complete: {[r['model'] for r in results]}")
+            logger.info(f"✅ Evaluate-all complete on {ds_label}: {[r['model'] for r in results]}")
 
         except Exception as e:
             logger.exception(f"❌ Evaluate-all failed: {e}")
