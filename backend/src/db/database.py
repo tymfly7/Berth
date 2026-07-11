@@ -20,6 +20,10 @@ def _conn() -> sqlite3.Connection:
         _local.conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
         _local.conn.row_factory = sqlite3.Row
         _local.conn.execute("PRAGMA journal_mode=WAL")
+        # Every worker thread pins its own connection for the process lifetime,
+        # and SQLite's default page cache is ~2MB per connection — across a full
+        # threadpool that's tens of MB for tables that are tiny. Cap it at 256KB.
+        _local.conn.execute("PRAGMA cache_size=-256")
     return _local.conn
 
 

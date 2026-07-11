@@ -872,6 +872,11 @@ class TrainManager:
             with open(comparison_path, "w") as fh:
                 json.dump(results, fh, indent=2)
 
+            # Archive a timestamped snapshot so this run stays browsable after
+            # the next Evaluate-All overwrites the canonical comparison file.
+            from src.eval.history_store import save_eval_snapshot
+            save_eval_snapshot(dataset, results)
+
             with _lock:
                 _state["status"]     = "done"
                 _state["message"]    = f"Evaluation complete — {len(results)} model(s) on {ds_label}."

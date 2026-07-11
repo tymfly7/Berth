@@ -126,18 +126,74 @@ def evaluate_all(dataset: str = "standard"):
 
 
 @router.get("/api/evaluate/excel", dependencies=[Depends(verify_api_key)])
-def download_evaluation_excel():
-    comparison_path = config.OUTPUT_DIR / "model_comparison.json"
-    if not comparison_path.exists():
-        raise HTTPException(404, "No evaluation results found. Run 'Evaluate All' first.")
-    with open(comparison_path) as f:
-        comparison = json.load(f)
+def download_evaluation_excel(dataset: str = "standard", file: str | None = None):
+    from src.eval import external_datasets
+    if file:
+        # Export a specific archived run chosen from the "Past runs" picker.
+        # load_eval_snapshot validates the filename + blocks path traversal.
+        from src.eval.history_store import load_eval_snapshot
+        snap = load_eval_snapshot(file)
+        if snap is None:
+            raise HTTPException(404, f"No evaluation snapshot '{file}'.")
+        comparison = snap.get("results") or []
+        stem = file[:-5] if file.endswith(".json") else file
+        fname = f"model_comparison_{stem}.xlsx"
+    else:
+        if dataset == external_datasets.STANDARD_ID:
+            comparison_path = config.OUTPUT_DIR / "model_comparison.json"
+            fname = "model_comparison.xlsx"
+        else:
+            # Validate against the discovered datasets (same guard the POST uses)
+            # so the id can't traverse out of the outputs dir via the filename.
+            if external_datasets.resolve(dataset) is None:
+                raise HTTPException(400, f"Unknown dataset '{dataset}'.")
+            comparison_path = config.OUTPUT_DIR / f"model_comparison_{dataset}.json"
+            fname = f"model_comparison_{dataset}.xlsx"
+        if not comparison_path.exists():
+            raise HTTPException(404, "No evaluation results found. Run 'Evaluate All' first.")
+        with open(comparison_path) as f:
+            comparison = json.load(f)
     xlsx_bytes = build_comparison_excel(comparison)
     return Response(
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=model_comparison.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
     )
+
+
+# ── Run history (timestamped snapshots of past eval / training runs) ──────────
+@router.get("/api/eval/history", dependencies=[Depends(verify_api_key)])
+def eval_history(dataset: str = "standard"):
+    """List archived Evaluate-All runs for a dataset, newest first."""
+    from src.eval.history_store import list_eval_snapshots
+    return {"snapshots": list_eval_snapshots(dataset)}
+
+
+@router.get("/api/eval/history/item", dependencies=[Depends(verify_api_key)])
+def eval_history_item(file: str):
+    """Return one archived evaluation snapshot by filename."""
+    from src.eval.history_store import load_eval_snapshot
+    snap = load_eval_snapshot(file)
+    if snap is None:
+        raise HTTPException(404, f"No evaluation snapshot '{file}'.")
+    return snap
+
+
+@router.get("/api/train/history", dependencies=[Depends(verify_api_key)])
+def train_history(model: str):
+    """List archived training runs for a model, newest first."""
+    from src.eval.history_store import list_train_snapshots
+    return {"snapshots": list_train_snapshots(model)}
+
+
+@router.get("/api/train/history/item", dependencies=[Depends(verify_api_key)])
+def train_history_item(file: str):
+    """Return one archived training snapshot by filename."""
+    from src.eval.history_store import load_train_snapshot
+    snap = load_train_snapshot(file)
+    if snap is None:
+        raise HTTPException(404, f"No training snapshot '{file}'.")
+    return snap
 
 
 # ── NCNN export (hub only — produces the edge NCNN models) ───────────

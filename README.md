@@ -51,7 +51,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 
 | Feature | Description |
 |---------|-------------|
-| 4 Classifier Architectures | CNN from scratch, ResNet-50, MobileNetV4-Small, YOLO26 Classify |
+| 8 Classifier Architectures | CNN from scratch, ResNet-18/50, MobileNetV4 Small/Medium, and per-scale YOLO26 Classify (n/s/m) |
 | YOLO26 Detector | Bounding-box vehicle detector used for misparked-vehicle (anomaly) detection |
 | Real-Time Detection | Per-camera WebSocket video stream (~20 FPS server / ~10 FPS edge) with slot-wise occupancy overlay |
 | ROI Editor | Draw, edit, and manage custom parking slot polygons per camera |
@@ -65,6 +65,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 | Usage Heatmap | Per-slot occupancy frequency heatmap |
 | Augmentation Preview | Live preview of training-time augmentations (shadow, night, flip, rotation, jitter) |
 | Model Comparison | Train all models, evaluate side-by-side, export to Excel |
+| Run History | Timestamped snapshots of past evaluation and training runs, browsable by date/time |
 | Edge / Hub Mode | Inference-only edge nodes run NCNN models and sync occupancy/alerts to a central hub |
 | SQLite Persistence | Trends, alerts, and training runs stored across restarts |
 | Backend Auth | Admin password validated server-side → short-lived signed Bearer token; static `X-API-Key` for machine clients (edge→hub sync) |
@@ -74,43 +75,38 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 ## Architecture
 
 ```
-┌─────────────────────────────┐
-│   Browser                   │
-│  /            → PublicView  │  REST polling (30 s) + per-camera WS (metrics only)
-│  /admin       → AdminView   │  WebSocket + REST  (Bearer token from login)
-│  /admin/docs  → DocsPage    │
-└────────────┬────────────────┘
-             │ HTTP / WebSocket
-             ▼
-┌──────────────────────────────────────────────┐
-│   FastAPI Backend (:8001)                     │
-│   main.py — app assembly, WS, SPA fallback    │
-├──────────────────────────────────────────────┤
-│  src/api/routers/  inference · analytics ·    │  REST endpoints
-│                    training · cameras · roi   │
-│  src/api/          processor_service · deps · │  shared state + helpers
-│                    operations                 │
-├──────────────────────────────────────────────┤
-│  CameraRegistry      Multi-source lifecycle   │
-│  VideoProcessor      Frame loop per camera    │
-│  InferencePool       Shared detection workers │
-│  SlotDetector        ROI-crop classification  │
-│  ParkingClassifier / NcnnClassifier           │  CNN / MobileNet / YOLO / NCNN
-│  ParkingYOLO26       Detector (anomaly)       │
-│  RoiStore            Per-camera ROI JSON       │
-│  SyncWorker          edge → hub push (edge)   │
-│  SQLite (berth.db)   Trends, alerts, runs     │
-└──────────────────────────────────────────────┘
+┌────────────────────────────┐
+│ Browser                    │
+│ /            → PublicView  │   REST poll (30 s) · per-camera WS
+│ /admin       → AdminView   │   WebSocket · REST (Bearer token)
+│ /admin/docs  → DocsPage    │
+└─────────────┬──────────────┘
+              │ HTTP / WebSocket
+              ▼
+┌──────────────────────────────────────────────────────┐
+│ FastAPI Backend  (:8001)                             │
+│ main.py — app assembly · WebSockets · SPA fallback   │
+├──────────────────────────────────────────────────────┤
+│ src/api/routers/   inference · analytics · training  │
+│                    cameras · roi                     │
+│ src/api/           processor_service · deps · ops    │
+├──────────────────────────────────────────────────────┤
+│ CameraRegistry      multi-source lifecycle           │
+│ VideoProcessor      per-camera frame loop            │
+│ InferencePool       shared detection workers         │
+│ SlotDetector        ROI-crop classification          │
+│ ParkingClassifier   CNN · MobileNet · YOLO           │
+│ NcnnClassifier      torch-free NCNN (edge)           │
+│ ParkingYOLO26       detector (anomaly)               │
+│ RoiStore            per-camera ROI JSON              │
+│ SyncWorker          edge → hub push (edge)           │
+│ SQLite (berth.db)   trends · alerts · runs           │
+└──────────────────────────────────────────────────────┘
 ```
 
 In production (Docker) the backend serves the built frontend from `static/`, so
 the whole app runs on a single origin. In local dev, Vite serves the frontend on
 `:5173` and talks to the backend on `:8001`.
-
-All authentication is handled by the backend. The admin password is validated
-server-side (`POST /api/auth/login`) and never shipped to the browser; on success
-the backend returns a short-lived signed Bearer token the frontend stores and
-sends on subsequent requests. See [Authentication](#authentication).
 
 ### Views
 
@@ -245,30 +241,47 @@ Data** subsection browses on-disk dataset folders and counts.
 
 ## Training Models
 
-Five model targets are supported. Training is launched from the Admin UI or via
-REST. Note the naming: the detector is referred to as `yolo26` at **inference**
-time and `yolo26_detect` at **training** time.
+Nine model targets are supported — eight occupancy classifiers plus the detector.
+Training is launched from the Admin UI or via REST. Note the naming: the detector
+is referred to as `yolo26` at **inference** time and `yolo26_detect` at
+**training** time.
 
 | Training ID | Architecture | Notes |
 |-------------|-------------|-------|
 | `cnn_scratch` | Custom CNN (SE blocks) | Trained from scratch on the binary dataset |
+| `resnet18` | ResNet-18 | Transfer learning; lighter ResNet |
 | `resnet50` | ResNet-50 | Transfer learning |
 | `mobilenetv4s` | MobileNetV4-Small (timm) | Lightweight; default model on edge nodes |
-| `yolo26_classify` | YOLO26 Classify | NMS-free, edge-optimized; **default active model** |
+| `mobilenetv4m` | MobileNetV4-Medium (timm) | Higher-capacity MobileNet variant |
+| `yolo26n_classify` | YOLO26 Classify (nano) | NMS-free; smallest — targets the Pi Zero 2 W |
+| `yolo26s_classify` | YOLO26 Classify (small) | NMS-free, edge-optimized; **default active model** |
+| `yolo26m_classify` | YOLO26 Classify (medium) | NMS-free; heaviest classify scale — targets the Pi 5 |
 | `yolo26_detect` | YOLO26 Detect (`yolo26s.pt`) | Object detector for anomaly / misparked detection |
+
+The three YOLO26 classify scales share one training path and fine-tune the
+ImageNet-pretrained `yolo26{n,s,m}-cls.pt` checkpoint (downloaded on first use).
+Pick the scale to match the target edge board — nano for the Pi Zero 2 W, medium
+for the Pi 5.
 
 ### Train via API
 
 ```bash
 # Start training a single model
 curl -X POST "http://localhost:8001/api/train/start?model_name=cnn_scratch"
+curl -X POST "http://localhost:8001/api/train/start?model_name=resnet18"
 curl -X POST "http://localhost:8001/api/train/start?model_name=resnet50"
 curl -X POST "http://localhost:8001/api/train/start?model_name=mobilenetv4s"
-curl -X POST "http://localhost:8001/api/train/start?model_name=yolo26_classify"
+curl -X POST "http://localhost:8001/api/train/start?model_name=mobilenetv4m"
+curl -X POST "http://localhost:8001/api/train/start?model_name=yolo26n_classify"
+curl -X POST "http://localhost:8001/api/train/start?model_name=yolo26s_classify"
+curl -X POST "http://localhost:8001/api/train/start?model_name=yolo26m_classify"
 curl -X POST "http://localhost:8001/api/train/start?model_name=yolo26_detect"
 
 # Check training progress
 curl http://localhost:8001/api/train/status
+
+# Cancel an in-progress training run
+curl -X POST http://localhost:8001/api/train/cancel
 ```
 
 Train every model in sequence from the CLI with `python train_all.py`.
@@ -289,17 +302,26 @@ curl -o comparison.xlsx http://localhost:8001/api/evaluate/excel
 
 ```
 outputs/
-├── history_cnn_scratch.json       # Epoch-level loss + accuracy logs
-├── history_resnet50.json
-├── history_mobilenetv4s.json
-├── model_comparison.json          # Cross-model metrics
-├── yolo26_classify/run/           # YOLO classify training artifacts
+├── history_<model>.json           # Epoch-level loss + accuracy logs (one per torch classifier)
+├── model_comparison.json          # Cross-model metrics (latest evaluate-all)
+├── eval_history/                  # Timestamped evaluate-all snapshots (see Run History)
+├── train_history/                 # Timestamped per-model training snapshots
+├── yolo26s_classify/run/          # YOLO classify training artifacts (one dir per trained scale)
 │   ├── results.csv
 │   └── weights/best.pt
 └── yolo26_detect/run/             # YOLO detect training artifacts
     ├── results.csv
     └── weights/best.pt
 ```
+
+### Run history
+
+Evaluate-all overwrites `model_comparison.json` and each training run overwrites
+its `history_<model>.json`, so only the latest result was ever kept. Every run is
+now additionally archived as a timestamped JSON snapshot under
+`outputs/eval_history/` and `outputs/train_history/`, so past runs stay browsable
+by date/time (via the Admin UI or the history endpoints below). Snapshots are
+small, so retention defaults to "keep everything"; cap it with `BERTH_HISTORY_MAX`.
 
 ### Training environment variables
 
@@ -310,8 +332,9 @@ outputs/
 | `BERTH_YOLO_DETECT_EPOCHS` | `30` | Max epochs for YOLO detect |
 | `BERTH_BATCH_SIZE` | `32` | Batch size |
 | `BERTH_LR` | `0.001` | Learning rate |
-| `BERTH_SUBSET` | `12000` | CNN subset size (0 = full dataset) |
+| `BERTH_SUBSET` | `25000` | CNN subset size (0 = full dataset) |
 | `BERTH_WORKERS` | `2` | DataLoader workers |
+| `BERTH_CACHE_DATASET` | `1` | Cache decoded/resized images in RAM after first read (`0` to disable) |
 | `BERTH_YOLO_CLASSIFY_IMGSZ` | `64` | Input size for YOLO classify (spots are pre-cropped) |
 | `BERTH_YOLO_DETECT_IMGSZ` | `960` | Input size for YOLO detect (recovers small-object recall) |
 | `BERTH_YOLO_DETECT_MODEL` | `yolo26s.pt` | Base weights for YOLO detect fine-tuning |
@@ -500,16 +523,21 @@ The **hub** receives those rows via the ingest endpoints (`POST
 
 Trained models are exported to NCNN (CNN models via `torch.jit.trace` + pnnx,
 YOLO models via Ultralytics export). This happens automatically after a
-successful training run, or run it manually:
+successful training run, or run it manually — via the CLI or the export endpoint:
 
 ```bash
 cd backend
-python export_models.py        # writes *_ncnn_model/ dirs into models/
+python export_models.py        # writes *_ncnn_model/ dirs into edge_models/
+
+# Or trigger an export over REST and poll its progress
+curl -X POST http://localhost:8001/api/export/ncnn
+curl http://localhost:8001/api/export/status
 ```
 
-Copy the resulting `*_ncnn_model/` directories into the edge node's `models/`
-before its first run. See [Docker Deployment](#docker-deployment) for the RPi
-image.
+Exports land in `backend/edge_models/`. Copy the resulting `*_ncnn_model/`
+directories into the edge node's `edge_models/` before its first run — pick the
+YOLO26 classify scale that matches the board (nano for the Pi Zero 2 W, medium for
+the Pi 5). See [Docker Deployment](#docker-deployment) for the RPi image.
 
 ---
 
@@ -578,8 +606,21 @@ image.
 | POST | `/api/test-model/{name}` | Per-patch accuracy eval of a trained classifier |
 | POST | `/api/train/start` | Start training (`?model_name=&compare_all=`) — server only |
 | GET | `/api/train/status` | Training progress |
+| POST | `/api/train/cancel` | Cancel an in-progress training run — server only |
 | POST | `/api/evaluate/all` | Evaluate all trained models — server only |
-| GET | `/api/evaluate/excel` | Download comparison as an Excel file |
+| GET | `/api/eval/datasets` | List datasets available for evaluation |
+| GET | `/api/evaluate/excel` | Download comparison as an Excel file (`?file=` for an archived snapshot) |
+| POST | `/api/export/ncnn` | Export trained models to NCNN for the edge — server only |
+| GET | `/api/export/status` | NCNN export progress |
+
+### Run history
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/eval/history` | List archived evaluation snapshots (`?dataset=`) |
+| GET | `/api/eval/history/item` | Fetch one evaluation snapshot (`?file=`) |
+| GET | `/api/train/history` | List archived training snapshots (`?model=`) |
+| GET | `/api/train/history/item` | Fetch one training snapshot (`?file=`) |
 
 ### ROI management
 
@@ -634,7 +675,8 @@ School Project/
 │   ├── export_models.py                 # CLI: export trained models to NCNN for edge
 │   ├── verify.py                        # CLI: environment / structure sanity check
 │   ├── berth.db                         # SQLite — trends, alerts, training runs
-│   ├── models/                          # Trained weights (*.pth / *.pt) + *_ncnn_model/ dirs
+│   ├── models/                          # Trained weights (*.pth / *.pt)
+│   ├── edge_models/                     # NCNN exports (*_ncnn_model/ dirs) for edge deployment
 │   ├── src/
 │   │   ├── api/
 │   │   │   ├── routers/
@@ -655,12 +697,14 @@ School Project/
 │   │   │   ├── cnn_scratch.py           # Custom CNN architecture
 │   │   │   ├── cnn_transfer.py          # ResNet-50 + MobileNetV4-Small via transfer learning
 │   │   │   ├── model_factory.py         # Model creation factory
-│   │   │   └── yolo_detector.py         # YOLO26 detect wrapper (ParkingYOLO26)
+│   │   │   ├── yolo_detector.py         # YOLO26 detect wrapper (ParkingYOLO26)
+│   │   │   └── yolo_detector_ncnn.py    # Torch-free NCNN detect wrapper (ARM64 edge)
 │   │   ├── train/
 │   │   │   ├── trainer.py               # Training loop + early stopping
 │   │   │   └── train_manager.py         # Background training + evaluation
 │   │   ├── eval/
 │   │   │   ├── evaluator.py             # Metrics computation
+│   │   │   ├── history_store.py         # Timestamped eval/train run snapshots
 │   │   │   └── visualizer.py            # Loss / accuracy plots
 │   │   ├── inference/
 │   │   │   ├── classifier.py            # ParkingClassifier (CNN + YOLO classify)
@@ -670,7 +714,9 @@ School Project/
 │   │   │   ├── video_processor.py       # Per-camera frame loop + metrics
 │   │   │   ├── parking_geometry.py      # Slot/vehicle overlap logic (anomaly)
 │   │   │   └── roi_proposer.py          # Auto-propose candidate ROI polygons
-│   │   ├── roi/roi_store.py             # Read/write per-camera ROI JSON + snapshots
+│   │   ├── roi/
+│   │   │   ├── roi_store.py             # Read/write per-camera ROI JSON + snapshots
+│   │   │   └── roi_crop.py              # Shared ROI crop logic (training + both inference paths)
 │   │   ├── cameras/
 │   │   │   ├── camera_registry.py       # Multi-camera lifecycle management
 │   │   │   └── youtube_resolver.py      # YouTube watch URL → cached HLS stream
@@ -744,17 +790,23 @@ environment variables.
 | `BERTH_PORT` | `8001` | Backend port |
 | `BERTH_ADMIN_PASSWORD` | _(empty — login returns 503)_ | Admin password, validated server-side by `/api/auth/login` |
 | `BERTH_AUTH_SECRET` | _(random per start)_ | Signing key for session tokens; set it to keep logins valid across restarts |
-| `BERTH_AUTH_TTL` | `28800` | Admin session token lifetime in seconds (8 h) |
+| `BERTH_AUTH_TTL` | `315360000` | Admin session token lifetime in seconds (~10 years by default, so local logins don't expire; lower it for network-facing deployments) |
 | `BERTH_API_KEY` | _(empty — static-key path open)_ | Static service key (`X-API-Key`) for machine clients (edge→hub sync) + WS token |
 | `BERTH_ALLOWED_ORIGIN` | _(empty)_ | Extra explicit CORS origin (LAN ranges allowed by default) |
 | `BERTH_UPLOAD_RATE_LIMIT` | `10/minute` | Rate limit on upload endpoints |
-| `BERTH_MODEL` | `yolo26_classify` | Default active model on startup |
+| `BERTH_MODEL` | `yolo26s_classify` | Default active model on startup |
 | `BERTH_DB_PATH` | `backend/berth.db` | SQLite database path |
 | `BERTH_DEPLOYMENT` | `server` | `server` (full) or `edge` (inference-only) |
 | `BERTH_EDGE_HUB_URL` | _(empty)_ | Hub URL for edge→hub sync (edge profile only) |
 | `BERTH_INFERENCE_WORKERS` | `min(cpu-1, 4)` | Shared inference pool worker count |
 | `BERTH_MAX_ACTIVE_CAMERAS` | `8` server / `2` edge | Max cameras allowed active at once |
 | `BERTH_OCCUPANCY_THRESHOLD` | `0.40` | YOLO-classify "occupied" decision threshold |
+| `BERTH_INFER_FPS` | `8` server / `3` edge | Inference rate, decoupled from stream FPS |
+| `BERTH_ANOMALY_FPS` | `0.2` | Anomaly (YOLO detect) pass cadence — one pass every 5 s by default |
+| `BERTH_HISTORY_MAX` | `0` | Max run-history snapshots kept per dataset/model (`0` = keep all) |
+| `BERTH_API_THREADS` | `8` edge / `0` server | Cap on the anyio threadpool for sync endpoints (`0` = anyio default) |
+| `BERTH_CAPTURE_DIR` | `~/berth_captures` | Base directory for per-camera data-gathering captures |
+| `BERTH_CAPTURE_INTERVAL` | `300` | Seconds between capture frames when a camera has gathering enabled |
 | `BERTH_YT_CACHE_TTL` | `240` | YouTube HLS URL cache lifetime (seconds) |
 | `BERTH_RELOAD` | `0` | Set `1` to enable uvicorn auto-reload (dev) |
 | `BERTH_CAM_SOURCE_<ID>` | _(empty)_ | Per-camera runtime source override (keeps credentials off disk) |
@@ -854,9 +906,11 @@ session token from login, so there is nothing to bake into the bundle.
 | Model | Type | Params | Notes |
 |-------|------|--------|-------|
 | CNN Scratch | Classifier | ~1.5 M | Trained from scratch (SE blocks) |
+| ResNet-18 | Classifier | ~11 M | Transfer learning; lighter ResNet |
 | ResNet-50 | Classifier | ~25 M | Transfer learning |
 | MobileNetV4-Small | Classifier | ~3 M | Lightweight; default on edge nodes |
-| YOLO26 Classify | Classifier | — | NMS-free; default active model |
+| MobileNetV4-Medium | Classifier | ~10 M | Higher-capacity MobileNet variant |
+| YOLO26 Classify (n/s/m) | Classifier | — | NMS-free, per-scale; `yolo26s_classify` is the default active model |
 | YOLO26 Detect | Detector | — | Bounding-box detector; used for anomaly detection |
 
 Run `POST /api/evaluate/all` from the Admin UI or API to compare all trained
@@ -876,7 +930,7 @@ classifiers side-by-side. Download results as a formatted Excel file from
 | CUDA out of memory | Reduce `BERTH_BATCH_SIZE` or use CPU-only PyTorch |
 | No images found | Run dataset preparation first |
 | WebSocket won't connect | Start the backend before the frontend; check the `:8001` port |
-| YOLO26 weights not found | Train `yolo26_detect` / `yolo26_classify` via the Training panel first |
+| YOLO26 weights not found | Train `yolo26_detect` / `yolo26{n,s,m}_classify` via the Training panel first |
 | Anomaly detection 400 error | YOLO26 Detect weights are missing — train it first |
 | Training/evaluation 403 | The node is in `edge` profile — use the hub server |
 | YouTube stream errors | URL may have expired; HLS URLs are cached for `BERTH_YT_CACHE_TTL` seconds |
@@ -930,7 +984,7 @@ docker compose -f docker-compose.rpi.yml up -d --build
 The app is then reachable at `http://<pi-ip>:8001`. Required env (set via the
 compose `.env`): `BERTH_ADMIN_PASSWORD` (else login → `503`); recommended:
 `BERTH_AUTH_SECRET`, `BERTH_API_KEY`, and `BERTH_EDGE_HUB_URL` to point the node at
-the hub. Pre-populate `backend/models/` with the exported `*_ncnn_model/`
+the hub. Pre-populate `backend/edge_models/` with the exported `*_ncnn_model/`
 directories (see [Edge / Hub Deployment](#edge--hub-deployment)) before the first
 run.
 

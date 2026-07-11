@@ -64,6 +64,33 @@ const style = {
     marginTop: 6,
     overflow: 'hidden',
   },
+  // "%" rendered on its own line beneath a metric header, so all columns align.
+  pctSub: { display: 'block', fontWeight: 400, opacity: 0.6 },
+}
+
+function fmtTs(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? iso : d.toLocaleString()
+}
+
+// Derive the accordion summary fields from a raw per-epoch training history
+// (mirrors backend src/reports/model_report.py). Accuracies are stored in %.
+function summarizeHistory(h) {
+  if (!h) return null
+  const ta = h.train_acc || [], va = h.val_acc || []
+  const tl = h.train_loss || [], vl = h.val_loss || []
+  const et = h.epoch_times || []
+  const last = (a) => (a.length ? a[a.length - 1] : null)
+  return {
+    epochs:           ta.length || va.length || null,
+    final_train_acc:  last(ta),
+    final_val_acc:    last(va),
+    best_val_acc:     va.length ? Math.max(...va) : null,
+    final_train_loss: last(tl),
+    final_val_loss:   last(vl),
+    total_time_s:     et.length ? et.reduce((s, x) => s + x, 0) : null,
+  }
 }
 
 function DetailRow({ label, value, highlight }) {
@@ -73,6 +100,43 @@ function DetailRow({ label, value, highlight }) {
       <span className="text-muted">{label}</span>
       <span style={highlight ? { color: 'var(--color-vacant)', fontWeight: 600 } : {}}>{value}</span>
     </>
+  )
+}
+
+// Compact per-model results table, shared by the live benchmark view and the
+// historical run view.
+function CompResultsTable({ rows }) {
+  const th = { textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }
+  return (
+    <table style={style.compTable}>
+      <colgroup>
+        <col style={{ width: '34%' }} />
+        <col style={{ width: '18%' }} />
+        <col style={{ width: '16%' }} />
+        <col style={{ width: '16%' }} />
+        <col style={{ width: '16%' }} />
+      </colgroup>
+      <thead>
+        <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)', verticalAlign: 'top' }}>
+          <th style={{ ...th, textAlign: 'left', padding: '5px 4px' }}>Model</th>
+          <th style={th}>Acc/mAP<span style={style.pctSub}>%</span></th>
+          <th style={th}>Prec<span style={style.pctSub}>%</span></th>
+          <th style={th}>Rec<span style={style.pctSub}>%</span></th>
+          <th style={{ ...th, padding: '5px 4px' }}>F1<span style={style.pctSub}>%</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(r => (
+          <tr key={r.model} style={{ borderBottom: '1px solid var(--border-color)' }}>
+            <td style={{ padding: '4px 4px', fontWeight: 600, fontSize: '0.72rem', overflowWrap: 'anywhere', lineHeight: 1.25 }} title={r.model}>{r.model}</td>
+            <td style={{ padding: '4px 2px', textAlign: 'right', color: 'var(--color-vacant)', fontWeight: 600 }}>{r.test_accuracy != null ? r.test_accuracy.toFixed(1) : '—'}</td>
+            <td style={{ padding: '4px 2px', textAlign: 'right' }}>{r.test_precision != null ? r.test_precision.toFixed(1) : '—'}</td>
+            <td style={{ padding: '4px 2px', textAlign: 'right' }}>{r.test_recall != null ? r.test_recall.toFixed(1) : '—'}</td>
+            <td style={{ padding: '4px 4px', textAlign: 'right' }}>{r.test_f1 != null ? r.test_f1.toFixed(1) : '—'}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   )
 }
 
@@ -87,6 +151,16 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   const [datasets, setDatasets]             = useState([{ id: 'standard', label: 'Standard split' }])
   const [selectedDataset, setSelectedDataset] = useState('standard')
   const [benchResult, setBenchResult]       = useState(null)   // null | { label, rows }
+
+  // Past-run history for the selected dataset.
+  const [historySnapshots, setHistorySnapshots] = useState([])   // [{file, timestamp, count}]
+  const [selectedRun, setSelectedRun]           = useState('')   // '' = Latest
+  const [historyView, setHistoryView]           = useState(null) // null | {label, timestamp, rows}
+
+  // Past training runs for whichever model accordion is expanded.
+  const [trainHistory, setTrainHistory]         = useState([])   // [{file, timestamp, count}]
+  const [selectedTrainRun, setSelectedTrainRun] = useState('')   // '' = none
+  const [trainRunView, setTrainRunView]         = useState(null) // null | {timestamp, details}
 
   // Clean up polling on unmount
   useEffect(() => () => {
@@ -103,6 +177,62 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
       .catch(() => {})
     return () => { alive = false }
   }, [apiBase])
+
+  const refreshHistory = (dsId) =>
+    apiFetch(`${apiBase}/api/eval/history?dataset=${encodeURIComponent(dsId)}`)
+      .then(r => r.json())
+      .then(d => setHistorySnapshots(Array.isArray(d.snapshots) ? d.snapshots : []))
+      .catch(() => setHistorySnapshots([]))
+
+  // Refresh the past-run list whenever the selected dataset changes; reset any
+  // historical view back to "Latest".
+  useEffect(() => {
+    setSelectedRun('')
+    setHistoryView(null)
+    setBenchResult(null)   // the benchmark box belongs to a specific dataset
+    refreshHistory(selectedDataset)
+  }, [selectedDataset, apiBase])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load a chosen past run ('' = Latest → clear the historical view).
+  useEffect(() => {
+    if (!selectedRun) { setHistoryView(null); return }
+    let alive = true
+    apiFetch(`${apiBase}/api/eval/history/item?file=${encodeURIComponent(selectedRun)}`)
+      .then(r => r.json())
+      .then(d => {
+        if (!alive) return
+        const ds = datasets.find(x => x.id === selectedDataset)
+        setHistoryView({ label: ds?.label || selectedDataset, timestamp: d.timestamp, rows: d.results || [] })
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [selectedRun])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load archived training runs for whichever model accordion is expanded, and
+  // reset any previously-selected run. Only torch classifiers archive these, so
+  // the list stays empty (and the picker hidden) for YOLO classify models.
+  useEffect(() => {
+    setSelectedTrainRun('')
+    setTrainRunView(null)
+    if (!expanded) { setTrainHistory([]); return }
+    let alive = true
+    apiFetch(`${apiBase}/api/train/history?model=${encodeURIComponent(expanded)}`)
+      .then(r => r.json())
+      .then(d => { if (alive) setTrainHistory(Array.isArray(d.snapshots) ? d.snapshots : []) })
+      .catch(() => { if (alive) setTrainHistory([]) })
+    return () => { alive = false }
+  }, [expanded, apiBase])
+
+  // Load a chosen past training run ('' = none) and derive its summary.
+  useEffect(() => {
+    if (!selectedTrainRun) { setTrainRunView(null); return }
+    let alive = true
+    apiFetch(`${apiBase}/api/train/history/item?file=${encodeURIComponent(selectedTrainRun)}`)
+      .then(r => r.json())
+      .then(d => { if (alive) setTrainRunView({ timestamp: d.timestamp, details: summarizeHistory(d.history) }) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [selectedTrainRun])   // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!modelInfo) {
     return (
@@ -145,6 +275,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
           setBenchResult({ label: ds?.label || selectedDataset, rows: data.comparison })
         }
         if (data.status === 'done') {
+          refreshHistory(selectedDataset)   // the new run is now archived
           setTimeout(() => setEvalStatus(null), 5000)
         }
       }
@@ -196,13 +327,19 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
 
   const handleDownloadExcel = async () => {
     try {
-      const res = await apiFetch(`${apiBase}/api/evaluate/excel`)
+      // A chosen past run exports that snapshot; "Latest" exports the canonical file.
+      const qs = selectedRun
+        ? `file=${encodeURIComponent(selectedRun)}`
+        : `dataset=${encodeURIComponent(selectedDataset)}`
+      const res = await apiFetch(`${apiBase}/api/evaluate/excel?${qs}`)
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const blob = await res.blob()
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
       a.href     = url
-      a.download = 'model_comparison.xlsx'
+      a.download = selectedRun
+        ? `model_comparison_${selectedRun.replace(/\.json$/, '')}.xlsx`
+        : (selectedDataset === 'standard' ? 'model_comparison.xlsx' : `model_comparison_${selectedDataset}.xlsx`)
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
@@ -213,6 +350,9 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   const isEvaluating  = evalStatus?.status === 'training'
   const isExporting   = exportStatus?.status === 'running'
   const hasComparison = modelInfo.comparison && modelInfo.comparison.length > 0
+  // A loaded past run is always exportable; otherwise the standard split uses the
+  // canonical comparison and an external dataset needs its benchmark box showing.
+  const canDownloadExcel = !!historyView || (selectedDataset === 'standard' ? hasComparison : !!benchResult)
   const classRows     = modelInfo.comparison?.filter(r => r.type !== 'detection') ?? []
   const detectRows    = modelInfo.comparison?.filter(r => r.type === 'detection')  ?? []
 
@@ -300,6 +440,43 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                     <DetailRow label="F1 Score"      value={compResult?.test_f1        != null ? `${compResult.test_f1.toFixed(1)}%`        : null} />
                   </div>
                 )}
+
+                {/* Past training runs — browse an archived curve by date/time */}
+                {trainHistory.length > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6 }}>
+                      <span className="text-muted" style={{ fontSize: '0.7rem' }}>Past training:</span>
+                      <select
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+                        value={selectedTrainRun}
+                        onChange={e => setSelectedTrainRun(e.target.value)}
+                        title="Browse a past training run"
+                      >
+                        <option value="">Latest</option>
+                        {trainHistory.map(s => (
+                          <option key={s.file} value={s.file}>{fmtTs(s.timestamp)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {trainRunView?.details && (
+                      <div style={{ marginTop: 8 }}>
+                        <div className="text-muted" style={{ fontSize: '0.68rem', marginBottom: 4 }}>
+                          Training run — {fmtTs(trainRunView.timestamp)}
+                        </div>
+                        <div style={style.detailGrid}>
+                          <DetailRow label="Epochs"        value={trainRunView.details.epochs} />
+                          <DetailRow label="Train Acc"     value={trainRunView.details.final_train_acc  != null ? `${trainRunView.details.final_train_acc.toFixed(1)}%`  : null} />
+                          <DetailRow label="Val Acc"       value={trainRunView.details.final_val_acc    != null ? `${trainRunView.details.final_val_acc.toFixed(1)}%`    : null} highlight />
+                          <DetailRow label="Best Val Acc"  value={trainRunView.details.best_val_acc     != null ? `${trainRunView.details.best_val_acc.toFixed(1)}%`     : null} highlight />
+                          <DetailRow label="Train Loss"    value={trainRunView.details.final_train_loss != null ? trainRunView.details.final_train_loss.toFixed(4)       : null} />
+                          <DetailRow label="Val Loss"      value={trainRunView.details.final_val_loss   != null ? trainRunView.details.final_val_loss.toFixed(4)         : null} />
+                          <DetailRow label="Train Time"    value={trainRunView.details.total_time_s     != null ? fmtDuration(trainRunView.details.total_time_s)          : null} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -324,7 +501,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
       {/* ── Evaluate All + Excel ────────────────────────────────────────────── */}
       {!isEdge && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
-          {hasComparison && (
+          {canDownloadExcel && (
             <button
               className="btn btn-ghost btn-sm"
               style={{ fontSize: '0.72rem', padding: '3px 8px' }}
@@ -401,34 +578,42 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
         </div>
       )}
 
+      {/* ── Past-run history picker (date/time) ─────────────────────────────── */}
+      {!isEdge && historySnapshots.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 6 }}>
+          <span className="text-muted" style={{ fontSize: '0.7rem' }}>Past runs:</span>
+          <select
+            className="btn btn-ghost btn-sm"
+            style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+            value={selectedRun}
+            onChange={e => setSelectedRun(e.target.value)}
+            title="Browse a past evaluation run"
+          >
+            <option value="">Latest</option>
+            {historySnapshots.map(s => (
+              <option key={s.file} value={s.file}>{fmtTs(s.timestamp)} · {s.count} models</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* ── Historical run view (a past snapshot chosen above) ──────────────── */}
+      {historyView && (
+        <div style={{ marginTop: 14, overflow: 'hidden' }}>
+          <div className="section-title" style={{ marginBottom: 6 }}>
+            Past run — {historyView.label} · {fmtTs(historyView.timestamp)}
+          </div>
+          <CompResultsTable rows={historyView.rows} />
+        </div>
+      )}
+
       {/* ── External benchmark results (kept separate from the standard split) ── */}
       {benchResult && (
         <div style={{ marginTop: 14, overflow: 'hidden' }}>
           <div className="section-title" style={{ marginBottom: 6 }}>
             Benchmark — {benchResult.label}
           </div>
-          <table style={style.compTable}>
-            <thead>
-              <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)' }}>
-                <th style={{ textAlign: 'left',  padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Model</th>
-                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Acc/mAP</th>
-                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Prec</th>
-                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Rec</th>
-                <th style={{ textAlign: 'right', padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>F1</th>
-              </tr>
-            </thead>
-            <tbody>
-              {benchResult.rows.map(r => (
-                <tr key={r.model} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                  <td style={{ padding: '4px 4px', fontWeight: 600, fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 0 }} title={r.model}>{r.model}</td>
-                  <td style={{ padding: '4px 2px', textAlign: 'right', color: 'var(--color-vacant)', fontWeight: 600 }}>{r.test_accuracy != null ? `${r.test_accuracy.toFixed(1)}%` : '—'}</td>
-                  <td style={{ padding: '4px 2px', textAlign: 'right' }}>{r.test_precision != null ? `${r.test_precision.toFixed(1)}%` : '—'}</td>
-                  <td style={{ padding: '4px 2px', textAlign: 'right' }}>{r.test_recall != null ? `${r.test_recall.toFixed(1)}%` : '—'}</td>
-                  <td style={{ padding: '4px 4px', textAlign: 'right' }}>{r.test_f1 != null ? `${r.test_f1.toFixed(1)}%` : '—'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <CompResultsTable rows={benchResult.rows} />
         </div>
       )}
 
@@ -438,20 +623,20 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
           <div className="section-title" style={{ marginBottom: 6 }}>Evaluation Results</div>
           <table style={style.compTable}>
             <colgroup>
-              <col style={{ width: '28%' }} />
-              <col style={{ width: '14%' }} />
-              <col style={{ width: '15%' }} />
+              <col style={{ width: '32%' }} />
               <col style={{ width: '14%' }} />
               <col style={{ width: '14%' }} />
-              <col style={{ width: '15%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '14%' }} />
             </colgroup>
             <thead>
-              <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)' }}>
+              <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)', verticalAlign: 'top' }}>
                 <th style={{ textAlign: 'left',  padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Model</th>
-                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Acc</th>
-                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Prec</th>
-                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Rec</th>
-                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>F1</th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Acc<span style={style.pctSub}>%</span></th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Prec<span style={style.pctSub}>%</span></th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Rec<span style={style.pctSub}>%</span></th>
+                <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>F1<span style={style.pctSub}>%</span></th>
                 <th style={{ textAlign: 'right', padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Time</th>
               </tr>
             </thead>
@@ -467,24 +652,24 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                       background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent',
                     }}
                   >
-                    <td style={{ padding: '4px 4px', fontWeight: isActive ? 700 : 600, fontSize: '0.72rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 0 }}
+                    <td style={{ padding: '4px 4px', fontWeight: isActive ? 700 : 600, fontSize: '0.72rem', overflowWrap: 'anywhere', lineHeight: 1.25 }}
                         title={r.model}>
                       {r.model}
                       {isActive && <span className="badge badge-info" style={{ marginLeft: 4, fontSize: '0.6rem', padding: '1px 4px' }}>ACTIVE</span>}
                     </td>
                     <td style={{ padding: '4px 2px', textAlign: 'right', color: 'var(--color-vacant)', fontWeight: 600 }}>
-                      {r.test_accuracy != null ? `${r.test_accuracy.toFixed(1)}%` : '—'}
+                      {r.test_accuracy != null ? r.test_accuracy.toFixed(1) : '—'}
                     </td>
                     {hasPRF ? (
                       <>
                         <td style={{ padding: '4px 2px', textAlign: 'right' }}>
-                          {r.test_precision != null ? `${r.test_precision.toFixed(1)}%` : '—'}
+                          {r.test_precision != null ? r.test_precision.toFixed(1) : '—'}
                         </td>
                         <td style={{ padding: '4px 2px', textAlign: 'right' }}>
-                          {r.test_recall != null ? `${r.test_recall.toFixed(1)}%` : '—'}
+                          {r.test_recall != null ? r.test_recall.toFixed(1) : '—'}
                         </td>
                         <td style={{ padding: '4px 2px', textAlign: 'right' }}>
-                          {r.test_f1 != null ? `${r.test_f1.toFixed(1)}%` : '—'}
+                          {r.test_f1 != null ? r.test_f1.toFixed(1) : '—'}
                         </td>
                       </>
                     ) : (
@@ -514,7 +699,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                 <span style={{ fontWeight: 600 }}>YOLO26 Detect</span>
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>object detection model</span>
               </div>
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 12px' }}>
                 <span>
                   <span style={{ color: 'var(--text-muted)' }}>mAP@50 </span>
                   <span style={{ color: 'var(--color-vacant)', fontWeight: 600 }}>

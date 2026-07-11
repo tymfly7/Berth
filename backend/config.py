@@ -35,6 +35,10 @@ DATASET_ROOT = os.getenv("DATASET_ROOT", "")
 for d in (DATA_DIR, UPLOAD_DIR, MODEL_DIR, EDGE_MODEL_DIR, CONFIG_DIR, ROI_CONFIG_DIR, OUTPUT_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
+# Run-history retention: max timestamped eval/train snapshots kept per
+# dataset/model (see src/eval/history_store.py). 0 = keep everything.
+HISTORY_MAX_SNAPSHOTS = int(os.getenv("BERTH_HISTORY_MAX", "0"))
+
 # ---------------------------------------------------------------------------
 # Server
 # ---------------------------------------------------------------------------
@@ -51,7 +55,7 @@ UPLOAD_RATE_LIMIT = os.getenv("BERTH_UPLOAD_RATE_LIMIT", "10/minute")
 # shipped to the browser; a successful login returns a short-lived signed token.
 ADMIN_PASSWORD = os.getenv("BERTH_ADMIN_PASSWORD", "")   # empty = admin login disabled (503)
 AUTH_SECRET = os.getenv("BERTH_AUTH_SECRET", "") or secrets.token_urlsafe(32)  # token signing key
-AUTH_TOKEN_TTL = int(os.getenv("BERTH_AUTH_TTL", "315360000"))  # admin session length, seconds (8h)
+AUTH_TOKEN_TTL = int(os.getenv("BERTH_AUTH_TTL", "315360000"))  # admin session length, seconds (~10 years — local logins don't expire; lower for network-facing deployments)
 
 # ---------------------------------------------------------------------------
 # Active model — an occupancy classifier from CLASSIFY_MODELS below.
@@ -210,8 +214,24 @@ ANOMALY_FPS = float(os.getenv("BERTH_ANOMALY_FPS", "0.2"))
 # inference loop; too many saturate a few-core edge box and starve the API.
 MAX_ACTIVE_CAMERAS = int(os.getenv("BERTH_MAX_ACTIVE_CAMERAS", "2" if DEPLOYMENT_PROFILE == "edge" else "8"))
 
+# Cap the anyio threadpool FastAPI uses for sync endpoints. Each pooled thread
+# lives forever and pins its own SQLite connection, page cache, stack, and
+# malloc arena — on a low-RAM edge box the default 40 threads is a slow leak.
+# 0 = leave anyio's default untouched (dev/server behavior unchanged).
+API_THREADS = int(os.getenv("BERTH_API_THREADS", "8" if DEPLOYMENT_PROFILE == "edge" else "0"))
+
 # Live YouTube HLS URLs expire; cache resolved stream URLs for this long.
 YOUTUBE_STREAM_CACHE_TTL = int(os.getenv("BERTH_YT_CACHE_TTL", "240"))  # seconds
+
+# Cap YouTube stream height: full-quality (1080p) decode overwhelms low-RAM
+# edge boxes. Pick the best rendition at or below this height.
+YOUTUBE_MAX_HEIGHT = int(os.getenv("BERTH_MAX_STREAM_HEIGHT", "480"))
+
+# Cap ingested frame height for every source (file / USB / RTSP / YouTube):
+# raw frames fill the jitter buffer and the inference slot, so a native-
+# resolution upload (e.g. 3200x1800 ≈ 17 MB/frame) blows the edge RAM budget.
+# ROIs are normalized, so downscaling is safe for slot crops. 0 = no cap.
+MAX_FRAME_HEIGHT = int(os.getenv("BERTH_MAX_FRAME_HEIGHT", "720" if DEPLOYMENT_PROFILE == "edge" else "0"))
 
 # ---------------------------------------------------------------------------
 # Alerts

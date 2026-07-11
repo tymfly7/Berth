@@ -759,7 +759,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
             border: '1px solid var(--border-color)',
           }}>
             <div style={{
-              display: 'flex', alignItems: 'center',
+              display: 'flex', alignItems: 'center', flexWrap: 'wrap',
               padding: '8px 12px', borderBottom: '1px solid var(--border-color)',
               flexShrink: 0, gap: 8,
             }}>
@@ -773,6 +773,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 style={{
                   ...inputStyle,
                   flex: 1,
+                  minWidth: 0,
                   fontSize: '0.85rem',
                   fontWeight: 700,
                 }}

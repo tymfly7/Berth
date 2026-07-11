@@ -255,9 +255,11 @@ export default function RoiEditor({
     const canvas = canvasRef.current
     if (!canvas) return [0, 0]
     const rect = canvas.getBoundingClientRect()
+    // Touch events carry coords on touches/changedTouches; mouse falls through to e.
+    const src = e.touches?.[0] || e.changedTouches?.[0] || e
     return [
-      (e.clientX - rect.left) / rect.width,
-      (e.clientY - rect.top) / rect.height,
+      (src.clientX - rect.left) / rect.width,
+      (src.clientY - rect.top) / rect.height,
     ]
   }, [])
 
@@ -800,6 +802,24 @@ export default function RoiEditor({
     setLiveRect(null)
   }, [mode, rectStart, rois, proposals, makeRoi, getPoint, editPolygon, commitChange])
 
+  // Touch → mouse bridge: reuse the pointer logic so drawing/editing works with a
+  // finger. touch-action:none on the canvas keeps a drag from scrolling the page.
+  const handleTouchStart = useCallback((e) => {
+    if (e.touches.length === 1) handleMouseDown(e)
+  }, [handleMouseDown])
+
+  const handleTouchMove = useCallback((e) => {
+    if (e.touches.length === 1) handleMouseMove(e)
+  }, [handleMouseMove])
+
+  const handleTouchEnd = useCallback((e) => {
+    // Finish any drag, then register the tap as a click. preventDefault suppresses
+    // the browser's emulated click so a polygon point isn't added twice per tap.
+    e.preventDefault()
+    handleMouseUp(e)
+    handleClick(e)
+  }, [handleMouseUp, handleClick])
+
   const changeMode = (m) => {
     setMode(m)
     setInProgress([])
@@ -1060,12 +1080,16 @@ export default function RoiEditor({
             width: '100%',
             height: overlay ? '100%' : undefined,
             cursor: mode === 'edit' ? 'default' : 'crosshair',
+            touchAction: 'none',
           }}
           onClick={handleClick}
           onDoubleClick={handleDblClick}
           onMouseMove={handleMouseMove}
           onMouseDown={handleMouseDown}
           onMouseUp={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
         />
       </div>
     </div>

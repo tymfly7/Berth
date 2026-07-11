@@ -248,6 +248,7 @@ README1.md
 log_combined.md
 log_monetization_plan.md
 log_docker_todo.md
+log_pi_zero_setup.md
 lResearch.md
 OPERATIONS.md
 
@@ -288,3 +289,5 @@ runs/
 # Trained model weights — large binaries, distributed outside git
 backend/models/*.pth
 backend/models/*.pt
+backend/yolo26m-cls.pt
+backend/yolo26n-cls.pt

@@ -17,6 +17,7 @@ from src.api.deps import (
 )
 from src.api.operations import finish_op, register_op
 from src.api.processor_service import processor_service
+from src.roi.roi_crop import crop_roi
 from src.roi.roi_store import RoiStore
 
 logger = logging.getLogger("berth.inference")
@@ -217,7 +218,10 @@ async def analyze_roi(
             x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
             if x2 <= x1 or y2 <= y1:
                 continue
-            valid.append({"roi": roi, "crop": frame[y1:y2, x1:x2],
+            crop = crop_roi(frame, polygon)  # perspective-warped — matches training
+            if crop is None or crop.size == 0:
+                continue
+            valid.append({"roi": roi, "crop": crop,
                           "xs": xs, "ys": ys, "polygon": polygon})
 
         # Single batched forward pass — all N crops classified in one model call

@@ -290,6 +290,13 @@ class VideoProcessor:
 
     def _ingest_raw_frame(self, frame: np.ndarray):
         """Push frame into the jitter buffer (display) and update latest_raw (inference)."""
+        if config.MAX_FRAME_HEIGHT and frame.shape[0] > config.MAX_FRAME_HEIGHT:
+            scale = config.MAX_FRAME_HEIGHT / frame.shape[0]
+            frame = cv2.resize(
+                frame,
+                (int(frame.shape[1] * scale), config.MAX_FRAME_HEIGHT),
+                interpolation=cv2.INTER_AREA,
+            )
         with self._latest_raw_lock:
             self._latest_raw = frame
         with self._jitter_lock:

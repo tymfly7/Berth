@@ -70,6 +70,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if config.API_THREADS:
+        # Sync endpoints run on anyio's default threadpool (40 tokens). The pool
+        # never shrinks, and each thread pins a SQLite connection + malloc arena,
+        # so on the edge profile we bound it (dashboard polling needs only a few).
+        from anyio import to_thread
+        to_thread.current_default_thread_limiter().total_tokens = config.API_THREADS
     db.init_db()
     if not config.API_KEY:
         logger.warning(

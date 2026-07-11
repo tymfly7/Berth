@@ -344,6 +344,10 @@ class Trainer:
             json.dump(self.history, f, indent=2)
         logger.info(f"📊 Training history saved to {history_path}")
 
+        # Archive a timestamped snapshot so a retrain doesn't clobber this curve.
+        from src.eval.history_store import save_train_snapshot
+        save_train_snapshot(self.model_name, self.history)
+
     def _plot_curves(self):
         """Generate and save training/validation loss and accuracy curves."""
         epochs = range(1, len(self.history["train_loss"]) + 1)

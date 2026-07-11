@@ -6,9 +6,9 @@ Returns empty results when no ROIs are defined for the camera.
 """
 
 import logging
-import cv2
 import numpy as np
 from src.inference.classifier import get_classifier
+from src.roi.roi_crop import crop_roi
 from src.roi.roi_store import RoiStore
 
 logger = logging.getLogger("berth.slot_detector")
@@ -32,6 +32,7 @@ class SlotDetector:
 
         for roi in rois:
             polygon = roi["polygon"]
+            # Axis-aligned bbox — the frontend overlay draws from this field.
             xs = [p[0] for p in polygon]
             ys = [p[1] for p in polygon]
             x1 = max(0, int(min(xs) * fw))
@@ -39,18 +40,9 @@ class SlotDetector:
             x2 = min(fw, int(max(xs) * fw))
             y2 = min(fh, int(max(ys) * fh))
             bw, bh = x2 - x1, y2 - y1
-            if bw > 5 and bh > 5:
-                crop = frame[y1:y2, x1:x2].copy()
-                # Mask pixels outside the exact polygon so diagonal slots don't
-                # bleed adjacent-slot content into this crop.
-                poly_pts = np.array(
-                    [[int(p[0] * fw) - x1, int(p[1] * fh) - y1] for p in polygon],
-                    dtype=np.int32,
-                )
-                mask = np.zeros(crop.shape[:2], dtype=np.uint8)
-                cv2.fillPoly(mask, [poly_pts], 255)
-                crop[mask == 0] = 128  # neutral gray — minimises model bias
-            else:
+            # Perspective-warped deskewed crop — identical to training crops.
+            crop = crop_roi(frame, polygon)
+            if crop is None or crop.shape[1] <= 5 or crop.shape[0] <= 5:
                 crop = None
             crops.append((roi, crop, x1, y1, bw, bh))
 

@@ -341,7 +341,7 @@ body::before {
 /* ── Panel Select (matches btn-ghost btn-sm) ───────────── */
 .panel-select {
   flex: 1;
-  background: var(--bg-glass);
+  background: #131b2e;
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -369,8 +369,8 @@ body::before {
   cursor: not-allowed;
 }
 
-.panel-select option {
-  background: var(--bg-secondary);
+select option {
+  background: #131b2e;
   color: var(--text-primary);
   font-weight: 500;
 }
