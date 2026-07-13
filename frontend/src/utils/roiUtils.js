@@ -1,5 +1,5 @@
-const CANVAS_W = 1000
-const CANVAS_H = 600
+export const CANVAS_W = 1000
+export const CANVAS_H = 600
 
 export function roiToSlot(roi) {
   const pts = roi.polygon.map(([nx, ny]) => [nx * CANVAS_W, ny * CANVAS_H])

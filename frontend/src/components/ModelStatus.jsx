@@ -447,7 +447,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                     <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6 }}>
                       <span className="text-muted" style={{ fontSize: '0.7rem' }}>Past training:</span>
                       <select
-                        className="btn btn-ghost btn-sm"
+                        className="panel-select"
                         style={{ fontSize: '0.72rem', padding: '3px 8px' }}
                         value={selectedTrainRun}
                         onChange={e => setSelectedTrainRun(e.target.value)}
@@ -512,7 +512,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
             </button>
           )}
           <select
-            className="btn btn-ghost btn-sm"
+            className="panel-select"
             style={{ fontSize: '0.72rem', padding: '3px 8px' }}
             value={selectedDataset}
             disabled={isEvaluating}
@@ -583,7 +583,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 6, marginTop: 6 }}>
           <span className="text-muted" style={{ fontSize: '0.7rem' }}>Past runs:</span>
           <select
-            className="btn btn-ghost btn-sm"
+            className="panel-select"
             style={{ fontSize: '0.72rem', padding: '3px 8px' }}
             value={selectedRun}
             onChange={e => setSelectedRun(e.target.value)}

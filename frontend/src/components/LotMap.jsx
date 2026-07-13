@@ -1,3 +1,10 @@
+import { CANVAS_W, CANVAS_H } from '../utils/roiUtils'
+
+const GATE_STYLE = {
+  entry: { fill: 'rgba(16,185,129,0.9)',  label: 'Entry' },
+  exit:  { fill: 'rgba(244,63,94,0.9)',   label: 'Exit'  },
+}
+
 const STATUS_STYLE = {
   vacant:    { fill: 'rgba(16,185,129,0.38)',  stroke: '#10b981', label: 'Vacant'    },
   occupied:  { fill: 'rgba(244,63,94,0.48)',   stroke: '#f43f5e', label: 'Occupied'  },
@@ -15,25 +22,46 @@ function centroid(pts) {
   ]
 }
 
-export default function LotMap({ slots, roiOnly = false, title = null }) {
+// Orientation coords are stored normalized (0–1); slot coords here live in the
+// CANVAS_W×CANVAS_H space that roiToSlot projects into, so scale to match.
+const scaleOrient = (o) => {
+  if (!o) return null
+  const pt = ([x, y]) => [x * CANVAS_W, y * CANVAS_H]
+  return {
+    perimeter: Array.isArray(o.perimeter) ? o.perimeter.map(pt) : null,
+    gates: Array.isArray(o.gates) ? o.gates.map(g => ({ ...g, x: g.x * CANVAS_W, y: g.y * CANVAS_H })) : [],
+    flow: Array.isArray(o.flow) ? o.flow.map(f => ({ ...f, from: pt(f.from), to: pt(f.to) })) : [],
+    anchor: o.anchor ? { ...o.anchor, x: o.anchor.x * CANVAS_W, y: o.anchor.y * CANVAS_H } : null,
+  }
+}
+
+export default function LotMap({ slots, orientation = null, roiOnly = false, title = null }) {
   if (!slots || slots.length === 0) return null
 
+  const orient = scaleOrient(orientation)
+
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  const fold = (x, y) => {
+    if (x < minX) minX = x
+    if (y < minY) minY = y
+    if (x > maxX) maxX = x
+    if (y > maxY) maxY = y
+  }
   for (const s of slots) {
     if (s.polygon) {
-      for (const [px, py] of s.polygon) {
-        if (px < minX) minX = px
-        if (py < minY) minY = py
-        if (px > maxX) maxX = px
-        if (py > maxY) maxY = py
-      }
+      for (const [px, py] of s.polygon) fold(px, py)
     } else {
       const [x, y, w, h] = s.bbox
-      if (x < minX) minX = x
-      if (y < minY) minY = y
-      if (x + w > maxX) maxX = x + w
-      if (y + h > maxY) maxY = y + h
+      fold(x, y)
+      fold(x + w, y + h)
     }
+  }
+  // Fold the orientation frame into the bounds so the perimeter isn't clipped.
+  if (orient?.perimeter) for (const [px, py] of orient.perimeter) fold(px, py)
+  if (orient) {
+    for (const g of orient.gates) fold(g.x, g.y)
+    for (const f of orient.flow) { fold(...f.from); fold(...f.to) }
+    if (orient.anchor) fold(orient.anchor.x, orient.anchor.y)
   }
   const pad = 18
   const vb = `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`
@@ -77,6 +105,71 @@ export default function LotMap({ slots, roiOnly = false, title = null }) {
           width={maxX - minX + pad * 2} height={maxY - minY + pad * 2}
           rx={10} fill="rgba(12,18,28,0.55)" stroke="rgba(255,255,255,0.04)" strokeWidth={1}
         />
+
+        {/* ── Orientation layer (display only — never processed) ── */}
+        {orient && (
+          <g style={{ pointerEvents: 'none' }}>
+            {/* Perimeter / drive lane */}
+            {orient.perimeter && orient.perimeter.length >= 2 && (
+              <polygon
+                points={orient.perimeter.map(([x, y]) => `${x},${y}`).join(' ')}
+                fill="none"
+                stroke="rgba(148,163,184,0.55)"
+                strokeWidth={2.5}
+                strokeDasharray="10,7"
+                strokeLinejoin="round"
+              />
+            )}
+
+            {/* Flow arrows */}
+            {orient.flow.map((f, i) => {
+              const [x1, y1] = f.from
+              const [x2, y2] = f.to
+              const ang = Math.atan2(y2 - y1, x2 - x1)
+              const ah = 13
+              const a1 = ang + Math.PI - 0.4
+              const a2 = ang + Math.PI + 0.4
+              return (
+                <g key={f.id || `flow-${i}`}>
+                  <line x1={x1} y1={y1} x2={x2} y2={y2}
+                    stroke="rgba(56,189,248,0.75)" strokeWidth={3} strokeLinecap="round" />
+                  <polygon
+                    points={`${x2},${y2} ${x2 + ah * Math.cos(a1)},${y2 + ah * Math.sin(a1)} ${x2 + ah * Math.cos(a2)},${y2 + ah * Math.sin(a2)}`}
+                    fill="rgba(56,189,248,0.85)"
+                  />
+                </g>
+              )
+            })}
+
+            {/* Gates */}
+            {orient.gates.map((g, i) => {
+              const gs = GATE_STYLE[g.kind] || GATE_STYLE.entry
+              const text = g.label || gs.label
+              const w = Math.max(38, text.length * 8 + 18)
+              return (
+                <g key={g.id || `gate-${i}`}>
+                  <rect x={g.x - w / 2} y={g.y - 12} width={w} height={24} rx={12} fill={gs.fill} />
+                  <text x={g.x} y={g.y} textAnchor="middle" dominantBaseline="middle"
+                    fill="#fff" fontSize={12} fontFamily="system-ui,sans-serif" fontWeight="700">
+                    {text}
+                  </text>
+                </g>
+              )
+            })}
+
+            {/* Orientation anchor ("you are here") */}
+            {orient.anchor && (
+              <g>
+                <circle cx={orient.anchor.x} cy={orient.anchor.y} r={9}
+                  fill="rgba(250,204,21,0.9)" stroke="#fff" strokeWidth={2} />
+                <text x={orient.anchor.x} y={orient.anchor.y + 24} textAnchor="middle"
+                  fill="rgba(250,204,21,0.95)" fontSize={11} fontFamily="system-ui,sans-serif" fontWeight="700">
+                  {orient.anchor.label || 'You are here'}
+                </text>
+              </g>
+            )}
+          </g>
+        )}
 
         {slots.map(s => {
           const spotType = s.spotType || 'normal'

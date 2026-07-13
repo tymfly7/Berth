@@ -71,6 +71,7 @@ def get_public_lots():
             "cameraId": cam["id"],
             "name": cam.get("name"),
             "rois": RoiStore.get_rois(roi_cam_id),
+            "orientation": RoiStore.get_orientation(roi_cam_id),
             "metrics": proc.get_metrics() if proc else None,
         })
     return out

@@ -233,6 +233,8 @@ export default function RoiEditor({
   onProposalsChange = null,
   overlay = false,
   idPrefix = 'roi',
+  orientation = null,
+  onOrientationChange = null,
 }) {
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -250,6 +252,15 @@ export default function RoiEditor({
   const [past, setPast] = useState([])
   const [future, setFuture] = useState([])
   const [divideN, setDivideN] = useState(4)
+  // ── Orientation layer (display-only frame: perimeter, gates, flow, anchor) ──
+  const orientEnabled = !!onOrientationChange
+  const [layer, setLayer] = useState('slots')            // 'slots' | 'orientation'
+  const [orientTool, setOrientTool] = useState('perimeter')
+  const [perimDraft, setPerimDraft] = useState([])       // perimeter points being drawn
+  const [flowStart, setFlowStart] = useState(null)       // first click of a flow arrow
+  const O = orientation || {}
+  const oGates = O.gates || []
+  const oFlow = O.flow || []
 
   const getPoint = useCallback((e) => {
     const canvas = canvasRef.current
@@ -414,7 +425,86 @@ export default function RoiEditor({
       ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
       ctx.setLineDash([])
     }
-  }, [rois, proposals, selectedId, selectedProposalId, inProgress, livePoint, liveRect, mode, editPolygon])
+
+    // ── Orientation layer ── (dim in slots layer, full while editing it)
+    if (orientEnabled) {
+      const active = layer === 'orientation'
+      const alpha = active ? 1 : 0.4
+      const drawArrow = (x1, y1, x2, y2, color) => {
+        ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 3
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
+        const ang = Math.atan2(y2 - y1, x2 - x1), ah = 13
+        ctx.beginPath()
+        ctx.moveTo(x2, y2)
+        ctx.lineTo(x2 + ah * Math.cos(ang + Math.PI - 0.4), y2 + ah * Math.sin(ang + Math.PI - 0.4))
+        ctx.lineTo(x2 + ah * Math.cos(ang + Math.PI + 0.4), y2 + ah * Math.sin(ang + Math.PI + 0.4))
+        ctx.closePath(); ctx.fill()
+      }
+
+      // committed perimeter
+      if (Array.isArray(O.perimeter) && O.perimeter.length >= 2) {
+        ctx.beginPath()
+        O.perimeter.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x * W, y * H) : ctx.lineTo(x * W, y * H)))
+        ctx.closePath()
+        ctx.setLineDash([10, 7])
+        ctx.strokeStyle = `rgba(148,163,184,${alpha})`
+        ctx.lineWidth = 2.5
+        ctx.stroke()
+        ctx.setLineDash([])
+      }
+      // flow arrows
+      oFlow.forEach(f => drawArrow(f.from[0] * W, f.from[1] * H, f.to[0] * W, f.to[1] * H, `rgba(56,189,248,${alpha})`))
+      // gates
+      oGates.forEach(g => {
+        const gx = g.x * W, gy = g.y * H
+        const text = g.label || (g.kind === 'exit' ? 'Exit' : 'Entry')
+        const bw = Math.max(38, text.length * 8 + 18)
+        ctx.fillStyle = g.kind === 'exit' ? `rgba(244,63,94,${alpha})` : `rgba(16,185,129,${alpha})`
+        ctx.beginPath(); ctx.roundRect(gx - bw / 2, gy - 12, bw, 24, 12); ctx.fill()
+        ctx.fillStyle = `rgba(255,255,255,${alpha})`
+        ctx.font = 'bold 12px system-ui, sans-serif'
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.fillText(text, gx, gy)
+      })
+      // anchor
+      if (O.anchor) {
+        const ax = O.anchor.x * W, ay = O.anchor.y * H
+        ctx.beginPath(); ctx.arc(ax, ay, 9, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(250,204,21,${alpha})`
+        ctx.strokeStyle = `rgba(255,255,255,${alpha})`; ctx.lineWidth = 2
+        ctx.fill(); ctx.stroke()
+        ctx.fillStyle = `rgba(250,204,21,${alpha})`
+        ctx.font = 'bold 11px system-ui, sans-serif'
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.fillText(O.anchor.label || 'You are here', ax, ay + 22)
+      }
+
+      // in-progress perimeter draft + flow preview (only while editing)
+      if (active) {
+        if (perimDraft.length > 0) {
+          const pts = perimDraft.map(([x, y]) => [x * W, y * H])
+          ctx.beginPath()
+          pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
+          if (livePoint) ctx.lineTo(livePoint[0] * W, livePoint[1] * H)
+          ctx.setLineDash([6, 4])
+          ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5
+          ctx.stroke(); ctx.setLineDash([])
+          pts.forEach(([x, y], i) => {
+            const near = i === 0 && livePoint && pts.length >= 3 &&
+              ptDistPx(livePoint[0], livePoint[1], perimDraft[0][0], perimDraft[0][1], W, H) < 15
+            ctx.beginPath(); ctx.arc(x, y, near ? 8 : 4, 0, Math.PI * 2)
+            ctx.fillStyle = near ? '#2ecc71' : '#ffffff'; ctx.fill()
+          })
+        }
+        if (flowStart && livePoint) {
+          ctx.setLineDash([6, 4])
+          drawArrow(flowStart[0] * W, flowStart[1] * H, livePoint[0] * W, livePoint[1] * H, 'rgba(56,189,248,0.8)')
+          ctx.setLineDash([])
+        }
+      }
+    }
+  }, [rois, proposals, selectedId, selectedProposalId, inProgress, livePoint, liveRect, mode, editPolygon,
+      orientEnabled, layer, orientation, perimDraft, flowStart, O.perimeter, O.anchor, oGates, oFlow])
 
   const syncSize = useCallback(() => {
     const container = containerRef.current
@@ -624,12 +714,61 @@ export default function RoiEditor({
     commitChange(rois.map(r => r.id === selectedId ? { ...r, owner: name.trim() } : r))
   }, [selectedId, rois, commitChange])
 
+  // ── Orientation authoring ──
+  const commitOrient = useCallback((patch) => {
+    onOrientationChange?.({
+      perimeter: O.perimeter || null, gates: oGates, flow: oFlow, anchor: O.anchor || null,
+      ...patch,
+    })
+  }, [onOrientationChange, O.perimeter, O.anchor, oGates, oFlow])
+
+  const handleOrientClick = useCallback((pt) => {
+    const [x, y] = pt
+    const canvas = canvasRef.current
+    const W = canvas ? canvas.width : 1
+    const H = canvas ? canvas.height : 1
+    const oid = () => `o_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+    const near = (ax, ay) => ptDistPx(x, y, ax, ay, W, H) < 16
+
+    if (orientTool === 'perimeter') {
+      if (perimDraft.length >= 3 && ptDistPx(x, y, perimDraft[0][0], perimDraft[0][1], W, H) < 15) {
+        commitOrient({ perimeter: perimDraft })
+        setPerimDraft([]); setLivePoint(null)
+        return
+      }
+      setPerimDraft(prev => [...prev, pt])
+    } else if (orientTool === 'entry' || orientTool === 'exit') {
+      commitOrient({ gates: [...oGates, { id: oid(), x, y, kind: orientTool, label: orientTool === 'exit' ? 'Exit' : 'Entry' }] })
+    } else if (orientTool === 'flow') {
+      if (!flowStart) setFlowStart(pt)
+      else { commitOrient({ flow: [...oFlow, { id: oid(), from: flowStart, to: pt }] }); setFlowStart(null) }
+    } else if (orientTool === 'anchor') {
+      commitOrient({ anchor: { x, y, label: 'You are here' } })
+    } else if (orientTool === 'erase') {
+      const gi = oGates.findIndex(g => near(g.x, g.y))
+      if (gi >= 0) { commitOrient({ gates: oGates.filter((_, i) => i !== gi) }); return }
+      if (O.anchor && near(O.anchor.x, O.anchor.y)) { commitOrient({ anchor: null }); return }
+      const fi = oFlow.findIndex(f =>
+        near(f.from[0], f.from[1]) || near(f.to[0], f.to[1]) ||
+        near((f.from[0] + f.to[0]) / 2, (f.from[1] + f.to[1]) / 2))
+      if (fi >= 0) commitOrient({ flow: oFlow.filter((_, i) => i !== fi) })
+    }
+  }, [orientTool, perimDraft, flowStart, oGates, oFlow, O.anchor, commitOrient])
+
+  const changeLayer = useCallback((l) => {
+    setLayer(l)
+    setPerimDraft([]); setFlowStart(null); setLivePoint(null)
+    setInProgress([]); setSelectedId(null); setSelectedProposalId(null)
+  }, [])
+
   const handleClick = useCallback((e) => {
     if (didDragRef.current) {
       didDragRef.current = false
       return
     }
     const pt = getPoint(e)
+
+    if (layer === 'orientation') { handleOrientClick(pt); return }
 
     if (mode === 'edit') {
       if (proposals.length > 0) {
@@ -679,18 +818,28 @@ export default function RoiEditor({
 
       setInProgress(prev => [...prev, pt])
     }
-  }, [mode, inProgress, rois, proposals, getPoint, makeRoi])
+  }, [mode, inProgress, rois, proposals, getPoint, makeRoi, layer, handleOrientClick])
 
   const handleDblClick = useCallback((e) => {
+    if (layer === 'orientation') {
+      e.preventDefault()
+      if (orientTool === 'perimeter' && perimDraft.length >= 3) {
+        commitOrient({ perimeter: perimDraft })
+        setPerimDraft([]); setLivePoint(null)
+      }
+      return
+    }
     if (mode !== 'polygon') return
     e.preventDefault()
     const pts = inProgress.length > 0 ? inProgress.slice(0, -1) : inProgress
     if (pts.length >= 3) makeRoi(pts)
     setInProgress([])
-  }, [mode, inProgress, makeRoi])
+  }, [mode, inProgress, makeRoi, layer, orientTool, perimDraft, commitOrient])
 
   const handleMouseMove = useCallback((e) => {
     const pt = getPoint(e)
+
+    if (layer === 'orientation') { setLivePoint(pt); return }
 
     if (mode === 'edit' && dragRef.current) {
       const { type, vertexIdx, origPolygon, startPt } = dragRef.current
@@ -714,7 +863,7 @@ export default function RoiEditor({
     } else if (mode === 'rect' && rectStart) {
       setLiveRect({ x1: rectStart[0], y1: rectStart[1], x2: pt[0], y2: pt[1] })
     }
-  }, [mode, rectStart, getPoint])
+  }, [mode, rectStart, getPoint, layer])
 
   const handleMouseDown = useCallback((e) => {
     if (mode === 'edit') {
@@ -871,6 +1020,19 @@ export default function RoiEditor({
       {/* ── Toolbar layer: in overlay it stacks above the canvas (flex column)
           so it never covers the image. ── */}
       <div style={overlay ? { flexShrink: 0, zIndex: 2 } : {}}>
+      {/* ── Layer switch (Slots vs Orientation frame) ── */}
+      {orientEnabled && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', pointerEvents: 'auto' } : {}) }}>
+          <button style={btnStyle(layer === 'slots')} onClick={() => changeLayer('slots')}
+            title="Draw parking slots (these get processed)">Slots</button>
+          <button style={btnStyle(layer === 'orientation')} onClick={() => changeLayer('orientation')}
+            title="Draw the orientation frame — perimeter, gates, flow, anchor. Display only; never processed.">
+            🧭 Orientation frame
+          </button>
+        </div>
+      )}
+
+      {(!orientEnabled || layer === 'slots') && (<>
       {/* ── ROI drawing toolbar ── */}
       <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', pointerEvents: 'auto' } : {}) }}>
         <button style={btnStyle(mode === 'polygon')} onClick={() => changeMode('polygon')}>
@@ -1066,6 +1228,34 @@ export default function RoiEditor({
           Edit mode — click to select, drag a vertex (circle) or edge midpoint (square) to reshape, drag inside to move. Delete key removes selected.
         </div>
       )}
+      </>)}
+
+      {/* ── Orientation toolbar ── */}
+      {orientEnabled && layer === 'orientation' && (<>
+        <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', alignItems: 'center', ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', pointerEvents: 'auto' } : {}) }}>
+          <button style={btnStyle(orientTool === 'perimeter')} onClick={() => { setOrientTool('perimeter'); setFlowStart(null) }}
+            title="Draw the lot perimeter / drive lane — click points, click the first point or double-click to close">Perimeter</button>
+          <button style={btnStyle(orientTool === 'entry')} onClick={() => { setOrientTool('entry'); setFlowStart(null) }}
+            title="Click to drop an entry gate">＋ Entry gate</button>
+          <button style={btnStyle(orientTool === 'exit')} onClick={() => { setOrientTool('exit'); setFlowStart(null) }}
+            title="Click to drop an exit gate">＋ Exit gate</button>
+          <button style={btnStyle(orientTool === 'flow')} onClick={() => { setOrientTool('flow'); setFlowStart(null) }}
+            title="Click a start then an end point to draw a flow arrow">→ Flow arrow</button>
+          <button style={btnStyle(orientTool === 'anchor')} onClick={() => { setOrientTool('anchor'); setFlowStart(null) }}
+            title="Click to place the 'you are here' anchor">✷ Anchor</button>
+          <button style={btnStyle(orientTool === 'erase')} onClick={() => { setOrientTool('erase'); setFlowStart(null) }}
+            title="Click a gate, flow arrow, or anchor to remove it">Erase</button>
+          <button style={btnStyle(false)} onClick={() => { commitOrient({ perimeter: null }); setPerimDraft([]) }}
+            title="Remove the perimeter">Clear perimeter</button>
+          <button style={btnStyle(false)}
+            onClick={() => { onOrientationChange?.({ perimeter: null, gates: [], flow: [], anchor: null }); setPerimDraft([]); setFlowStart(null) }}
+            title="Clear the entire orientation frame">Clear frame</button>
+        </div>
+        <div style={{ fontSize: '0.72rem', color: 'rgba(120,200,255,0.85)', marginBottom: 8, paddingLeft: 2 }}>
+          Orientation frame — a visual aid only. It is stored separately and <strong>never</strong> sent for detection.
+          {orientTool === 'flow' && flowStart && ' Click the arrow end point.'}
+        </div>
+      </>)}
 
       </div>
       {/* ── Canvas ── */}

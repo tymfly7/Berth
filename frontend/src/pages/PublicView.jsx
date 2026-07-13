@@ -70,7 +70,7 @@ export default function PublicView() {
             ? l.rois.filter(roi => roi.polygon?.length >= 3).map(roiToSlot)
             : []
           if (slots.length === 0) return
-          cams.push({ cameraId: l.cameraId, name: l.name, slots })
+          cams.push({ cameraId: l.cameraId, name: l.name, slots, orientation: l.orientation || null })
           if (l.metrics) {
             metricsById[l.cameraId] = l.metrics
             if (Array.isArray(l.metrics.slots)) slotsById[l.cameraId] = l.metrics.slots
@@ -244,7 +244,7 @@ export default function PublicView() {
                   style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', zIndex: 2, fontSize: '1.2rem', padding: '6px 14px' }}
                   onClick={() => setLotMapIdx(i => (i + 1) % allCameraSlots.length)}>›</button>
               </>}
-              <LotMap slots={slots} roiOnly={liveForCam.length === 0} title={multi ? cam.name : null} />
+              <LotMap slots={slots} orientation={cam.orientation} roiOnly={liveForCam.length === 0} title={multi ? cam.name : null} />
             </div>
           </div>
         )

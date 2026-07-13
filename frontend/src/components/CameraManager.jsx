@@ -187,6 +187,7 @@ export default function CameraManager({ onCamerasChange, onRoisSaved, compact = 
 
   const [roiEditCam, setRoiEditCam] = useState(null)
   const [editRois, setEditRois] = useState([])
+  const [editOrient, setEditOrient] = useState(null)
   const [editBg, setEditBg] = useState(null)
   const [roiMsg, setRoiMsg] = useState(null)
   const [proposing, setProposing] = useState(false)
@@ -282,6 +283,7 @@ export default function CameraManager({ onCamerasChange, onRoisSaved, compact = 
     // Open the editor immediately so a slow or missing snapshot never blocks
     // launch — the background loads in afterwards.
     setEditRois([])
+    setEditOrient(null)
     setEditBg(null)
     setEditProposals([])
     setRoiEditCam(cam)
@@ -295,6 +297,11 @@ export default function CameraManager({ onCamerasChange, onRoisSaved, compact = 
     apiFetch(`${API_BASE}/api/roi/${cameraId}`)
       .then(res => res.ok ? res.json() : [])
       .then(data => setEditRois(Array.isArray(data) ? data : []))
+      .catch(() => {})
+
+    apiFetch(`${API_BASE}/api/roi/${cameraId}/orientation`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => setEditOrient(data && Object.keys(data).length ? data : null))
       .catch(() => {})
 
     // Background: saved snapshot first, otherwise grab one live frame over HTTP
@@ -317,6 +324,7 @@ export default function CameraManager({ onCamerasChange, onRoisSaved, compact = 
     setRoiEditCam(null)
     setEditBg(null)
     setEditRois([])
+    setEditOrient(null)
     setEditProposals([])
     setRoiMsg(null)
   }
@@ -332,6 +340,12 @@ export default function CameraManager({ onCamerasChange, onRoisSaved, compact = 
       })
       if (!res.ok) throw new Error('Save failed')
       const data = await res.json()
+      // Persist the orientation frame too (separate file; never processed).
+      await apiFetch(`${API_BASE}/api/roi/${cameraId}/orientation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orientation: editOrient || {} }),
+      }).catch(() => {})
       showRoiMsg(`Saved ${data.saved} ROI${data.saved !== 1 ? 's' : ''}`)
       onRoisSaved?.()
     } catch (e) { showRoiMsg(`Error: ${e.message}`) }
@@ -559,6 +573,8 @@ export default function CameraManager({ onCamerasChange, onRoisSaved, compact = 
               onRoisChange={setEditRois}
               proposals={editProposals}
               onProposalsChange={setEditProposals}
+              orientation={editOrient}
+              onOrientationChange={setEditOrient}
               idPrefix="cam-reg"
             />
           </div>

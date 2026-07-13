@@ -57,6 +57,24 @@ async def save_rois(camera_id: str, request: Request):
     return {"saved": len(rois)}
 
 
+@router.get("/api/roi/{camera_id}/orientation", dependencies=[Depends(verify_api_key)])
+def get_orientation(camera_id: str):
+    """Orientation layer (perimeter / gates / flow / anchor) for a lot — a display
+    aid only. Kept separate from ROIs and never fed to inference."""
+    return RoiStore.get_orientation(camera_id)
+
+
+@router.post("/api/roi/{camera_id}/orientation", dependencies=[Depends(verify_api_key)])
+async def save_orientation(camera_id: str, request: Request):
+    body = await request.json()
+    orientation = body.get("orientation", {})
+    try:
+        RoiStore.save_orientation(camera_id, orientation)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"saved": True}
+
+
 @router.delete("/api/roi/{camera_id}/{roi_id}", dependencies=[Depends(verify_api_key)])
 def delete_roi(camera_id: str, roi_id: str):
     if not RoiStore.delete_roi(camera_id, roi_id):

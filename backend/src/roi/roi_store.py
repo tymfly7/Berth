@@ -37,6 +37,11 @@ class RoiStore:
         return cls._ensure_dir() / f"{camera_id}_snapshot.jpg"
 
     @classmethod
+    def _orientation_path(cls, camera_id: str) -> Path:
+        _validate_camera_id(camera_id)
+        return cls._ensure_dir() / f"{camera_id}_orientation.json"
+
+    @classmethod
     def list_camera_ids(cls) -> list[str]:
         """All camera/lot ids that have a saved ROI config (one .json each)."""
         roi_dir = config.ROI_CONFIG_DIR
@@ -64,6 +69,26 @@ class RoiStore:
         logger.info(f"Saved {len(rois)} ROIs for camera '{camera_id}'")
 
     @classmethod
+    def get_orientation(cls, camera_id: str) -> dict:
+        """Orientation layer (perimeter, gates, flow arrows, anchor) for a lot.
+
+        Purely a display aid to help users orient themselves — it is stored in a
+        separate file from the ROIs and is NEVER passed to inference/geometry, so
+        the outer frame can never be classified as a parking slot.
+        """
+        path = cls._orientation_path(camera_id)
+        if not path.exists():
+            return {}
+        with open(path) as f:
+            return json.load(f)
+
+    @classmethod
+    def save_orientation(cls, camera_id: str, orientation: dict) -> None:
+        with open(cls._orientation_path(camera_id), "w") as f:
+            json.dump(orientation, f)
+        logger.info(f"Saved orientation layer for camera '{camera_id}'")
+
+    @classmethod
     def delete_roi(cls, camera_id: str, roi_id: str) -> bool:
         rois = cls.get_rois(camera_id)
         new_rois = [r for r in rois if r.get("id") != roi_id]
@@ -81,11 +106,14 @@ class RoiStore:
         config file existed."""
         roi_path = cls._roi_path(camera_id)
         snap_path = cls._snapshot_path(camera_id)
+        orient_path = cls._orientation_path(camera_id)
         existed = roi_path.exists()
         if existed:
             roi_path.unlink()
         if snap_path.exists():
             snap_path.unlink()
+        if orient_path.exists():
+            orient_path.unlink()
         if existed:
             logger.info(f"Deleted ROI config and snapshot for '{camera_id}'")
         return existed

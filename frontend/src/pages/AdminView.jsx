@@ -94,7 +94,9 @@ export default function AdminView() {
           const slots = Array.isArray(rois)
             ? rois.filter(r => r.polygon?.length >= 3).map(roiToSlot)
             : []
-          return slots.length > 0 ? { cameraId: cam.id, name: cam.name, active: cam.active, slots } : null
+          const orientation = await apiFetch(`${API_BASE}/api/roi/${cameraId}/orientation`)
+            .then(r => (r.ok ? r.json() : null)).catch(() => null)
+          return slots.length > 0 ? { cameraId: cam.id, name: cam.name, active: cam.active, slots, orientation } : null
         } catch { return null }
       })
     )
@@ -246,7 +248,7 @@ export default function AdminView() {
                       style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 2, fontSize: '1.1rem', padding: '4px 10px' }}
                       onClick={() => setLotMapIdx(i => (i + 1) % allCameraSlots.length)}>›</button>
                   </>}
-                  <LotMap slots={slots} roiOnly={liveForCam.length === 0} title={multi ? cam.name : null} />
+                  <LotMap slots={slots} orientation={cam.orientation} roiOnly={liveForCam.length === 0} title={multi ? cam.name : null} />
                 </div>
               </>
             )
