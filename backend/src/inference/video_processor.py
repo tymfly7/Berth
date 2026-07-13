@@ -13,7 +13,6 @@ the inference thread runs the model in the background and updates the cache.
 import os
 import re
 import sys
-import base64
 import threading
 import time
 import logging
@@ -758,17 +757,6 @@ class VideoProcessor:
                 self._heatmap[sid]["occupied_seconds"] += elapsed
 
     # ── Public getters ─────────────────────────────────────────────────────
-
-    def get_latest_frame_base64(self):
-        """Base64-encoded latest JPEG. Retained for non-WS callers; the live
-        WebSocket path uses get_frame_jpeg_and_seq() to send raw bytes."""
-        with self._lock:
-            return base64.b64encode(self._frame_jpeg).decode("utf-8") if self._frame_jpeg else None
-
-    def get_frame_seq(self) -> int:
-        """Increments each time a new JPEG is encoded. Use to detect new frames."""
-        with self._lock:
-            return self._frame_seq
 
     def get_frame_jpeg_and_seq(self) -> tuple:
         """Atomically returns (jpeg_bytes, frame_seq) under a single lock.

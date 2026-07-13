@@ -57,47 +57,6 @@ def plot_confusion_matrix(cm, model_name="model", save_dir=None):
     return str(path)
 
 
-def plot_training_curves(history, model_name="model", save_dir=None):
-    """
-    Plot training and validation loss/accuracy curves from history dict.
-
-    Args:
-        history (dict): Training history with train_loss, val_loss, train_acc, val_acc
-        model_name (str): Model name for title
-        save_dir (str): Output directory
-    """
-    save_dir = Path(save_dir or config.OUTPUT_DIR)
-    epochs = range(1, len(history["train_loss"]) + 1)
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    fig.suptitle(f"Training History — {model_name}", fontsize=14, fontweight="bold")
-
-    # Loss
-    ax1.plot(epochs, history["train_loss"], "b-o", label="Train", markersize=3)
-    ax1.plot(epochs, history["val_loss"], "r-o", label="Validation", markersize=3)
-    ax1.set_xlabel("Epoch")
-    ax1.set_ylabel("Loss")
-    ax1.set_title("Binary Cross-Entropy Loss")
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-
-    # Accuracy
-    ax2.plot(epochs, history["train_acc"], "b-o", label="Train", markersize=3)
-    ax2.plot(epochs, history["val_acc"], "r-o", label="Validation", markersize=3)
-    ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("Accuracy (%)")
-    ax2.set_title("Classification Accuracy")
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    path = save_dir / f"training_curves_{model_name}.png"
-    plt.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close()
-    logger.info(f"📈 Training curves saved to {path}")
-    return str(path)
-
-
 def visualize_predictions(model, test_loader, device=None, num_images=16,
                           model_name="model", save_dir=None):
     """
