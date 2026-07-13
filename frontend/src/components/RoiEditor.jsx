@@ -1,229 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import {
+  ROI_COLOR, HIT_PX,
+  pointInPolygon, getCentroid, ptDistPx,
+  divideQuad, smoothRois, regularizeRows,
+} from './roiGeometry'
+import { drawScene } from './roiDraw'
+import RoiToolbar from './RoiToolbar'
 
-const ROI_COLOR = '#10b981'
-const SPOT_TYPE_COLORS = { normal: null, reserved: '#e6a817', handicap: '#1a7fc1' }
-const HIT_PX = 10
-
-function hexToRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1, 3), 16)
-  const g = parseInt(hex.slice(3, 5), 16)
-  const b = parseInt(hex.slice(5, 7), 16)
-  return `rgba(${r},${g},${b},${alpha})`
-}
-
-function pointInPolygon(px, py, polygon) {
-  let inside = false
-  const n = polygon.length
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const [xi, yi] = polygon[i]
-    const [xj, yj] = polygon[j]
-    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
-      inside = !inside
-    }
-  }
-  return inside
-}
-
-function getCentroid(pts) {
-  return [
-    pts.reduce((s, [x]) => s + x, 0) / pts.length,
-    pts.reduce((s, [, y]) => s + y, 0) / pts.length,
-  ]
-}
-
-function ptDistPx(ax, ay, bx, by, W, H) {
-  const dx = (ax - bx) * W
-  const dy = (ay - by) * H
-  return Math.sqrt(dx * dx + dy * dy)
-}
-
-// Split a 4-corner quad into n stalls along its longer axis. Returns an array
-// of n polygons, or null if the input isn't a quad / n < 2. Interpolating along
-// the drawn edges keeps dividers converging toward the vanishing point, so
-// stalls stay even on an oblique (trapezoidal) row. `aspect` is canvas H/W, used
-// only to compare edge lengths in pixel space (normalized x/y scale differently).
-export function divideQuad(polygon, n, aspect = 1) {
-  if (!polygon || polygon.length !== 4 || n < 2) return null
-  const len = (a, b) => Math.hypot(a[0] - b[0], (a[1] - b[1]) * aspect)
-  const [p0, p1, p2, p3] = polygon
-  // opposite-edge pairs: X = (p0-p1, p2-p3), Y = (p1-p2, p3-p0)
-  const pairX = len(p0, p1) + len(p2, p3)
-  const pairY = len(p1, p2) + len(p3, p0)
-  // rotate so the long axis is the a0->a1 / a3->a2 pair
-  const [a0, a1, a2, a3] = pairX >= pairY ? [p0, p1, p2, p3] : [p1, p2, p3, p0]
-  const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
-  const A = (t) => lerp(a0, a1, t)
-  const B = (t) => lerp(a3, a2, t)
-  const stalls = []
-  for (let i = 0; i < n; i++) {
-    const t0 = i / n
-    const t1 = (i + 1) / n
-    stalls.push([A(t0), A(t1), B(t1), B(t0)])
-  }
-  return stalls
-}
-
-// "Magic smooth": weld corners of *different* ROIs that sit within `thresh` of
-// each other to their shared average, so adjacent stalls end up sharing one clean
-// straight edge (like Divide output). `thresh` is a fraction of image width;
-// `aspect` (canvas H/W) corrects the y distance. Returns a new rois array, or
-// null if nothing was close enough to change.
-export function smoothRois(rois, thresh = 0.015, aspect = 1) {
-  const nodes = []
-  rois.forEach((roi, ri) => roi.polygon.forEach((p, vi) => nodes.push({ ri, vi, x: p[0], y: p[1] })))
-  const dist = (a, b) => Math.hypot(a.x - b.x, (a.y - b.y) * aspect)
-
-  const parent = nodes.map((_, i) => i)
-  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i] } return i }
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = i + 1; j < nodes.length; j++) {
-      if (nodes[i].ri === nodes[j].ri) continue // never weld a polygon to itself
-      if (dist(nodes[i], nodes[j]) <= thresh) parent[find(i)] = find(j)
-    }
-  }
-
-  const groups = new Map()
-  nodes.forEach((_, i) => {
-    const r = find(i)
-    if (!groups.has(r)) groups.set(r, [])
-    groups.get(r).push(i)
-  })
-
-  const newPolys = rois.map(r => r.polygon.map(p => [...p]))
-  let changed = false
-  for (const idxs of groups.values()) {
-    if (idxs.length < 2) continue
-    const counts = {}
-    idxs.forEach(i => { counts[nodes[i].ri] = (counts[nodes[i].ri] || 0) + 1 })
-    const rois_ = Object.keys(counts)
-    // require >1 ROI and skip clusters that would collapse an edge of one ROI
-    if (rois_.length < 2 || rois_.some(r => counts[r] > 1)) continue
-    const cx = idxs.reduce((s, i) => s + nodes[i].x, 0) / idxs.length
-    const cy = idxs.reduce((s, i) => s + nodes[i].y, 0) / idxs.length
-    idxs.forEach(i => { newPolys[nodes[i].ri][nodes[i].vi] = [cx, cy] })
-    changed = true
-  }
-  return changed ? rois.map((r, i) => ({ ...r, polygon: newPolys[i] })) : null
-}
-
-function median(arr) {
-  const s = [...arr].sort((a, b) => a - b)
-  const n = s.length
-  return n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2
-}
-
-// Least-squares fit v = a*u + b over [u,v] points. Well-conditioned because the
-// baselines run roughly along u (the row direction), so v varies slowly with u.
-function fitLine(pts) {
-  const n = pts.length
-  let su = 0, sv = 0, suu = 0, suv = 0
-  for (const [u, v] of pts) { su += u; sv += v; suu += u * u; suv += u * v }
-  const denom = n * suu - su * su
-  if (Math.abs(denom) < 1e-12) return [0, sv / n]
-  const a = (n * suv - su * sv) / denom
-  return [a, (sv - a * su) / n]
-}
-
-// Regularize roughly-drawn / detected stalls into clean rows while keeping the
-// perspective fan. We estimate a row direction (PCA over centers), split items
-// into depth-rows by their cross-row offset, then per row fit the two long curb
-// lines and snap every top corner onto the front curb and every bottom corner
-// onto the back curb. Each stall keeps its own width and each divider keeps its
-// own slope, so an oblique lot's converging stalls are aligned, not flattened
-// into parallel rectangles. Same id/label kept; only polygons change. Returns
-// null if no row had >= 2 items to align. `aspect` = canvas H/W (y is scaled so
-// distances are pixel-proportional). No gaps are filled — one stall per item.
-export function regularizeRows(items, aspect = 1) {
-  if (!items || items.length < 2) return null
-  const toP = ([x, y]) => [x, y * aspect]
-  const clamp = (n) => Math.max(0, Math.min(1, n))
-  const dot = (p, w) => p[0] * w[0] + p[1] * w[1]
-
-  const centers = items.map(it => {
-    const ps = it.polygon.map(toP)
-    return [
-      ps.reduce((s, p) => s + p[0], 0) / ps.length,
-      ps.reduce((s, p) => s + p[1], 0) / ps.length,
-    ]
-  })
-
-  // principal axis (row direction) via PCA over centers
-  const mean = [
-    centers.reduce((s, c) => s + c[0], 0) / centers.length,
-    centers.reduce((s, c) => s + c[1], 0) / centers.length,
-  ]
-  let sxx = 0, sxy = 0, syy = 0
-  for (const c of centers) {
-    const dx = c[0] - mean[0], dy = c[1] - mean[1]
-    sxx += dx * dx; sxy += dx * dy; syy += dy * dy
-  }
-  const theta = 0.5 * Math.atan2(2 * sxy, sxx - syy)
-  const u = [Math.cos(theta), Math.sin(theta)]
-  const v = [-Math.sin(theta), Math.cos(theta)]
-
-  const meta = items.map((it, i) => {
-    const ps = it.polygon.map(toP)
-    const us = ps.map(p => dot(p, u))
-    const vs = ps.map(p => dot(p, v))
-    return {
-      i,
-      cv: dot(centers[i], v),
-      depth: Math.max(...vs) - Math.min(...vs),
-      us, vs,
-    }
-  })
-  const medianDepth = median(meta.map(m => m.depth))
-
-  // cluster into depth-rows by cross-row offset: sort by v, split on a gap. Two
-  // depth-rows of a lot share their middle curb, so their depths overlap and their
-  // centers sit only ~half a depth apart — split on half-depth, not full depth.
-  const sorted = [...meta].sort((a, b) => a.cv - b.cv)
-  const rows = [[sorted[0]]]
-  for (let k = 1; k < sorted.length; k++) {
-    if (sorted[k].cv - sorted[k - 1].cv > medianDepth * 0.5) rows.push([])
-    rows[rows.length - 1].push(sorted[k])
-  }
-
-  const newPolys = items.map(it => it.polygon)
-  let changed = false
-  for (const row of rows) {
-    if (row.length < 2) continue
-    // per stall, split its corners into a top half (low v) and a bottom half
-    // (high v); record each side seam's along-row position at top and at bottom.
-    const topPts = [], botPts = []
-    const seams = []
-    for (const m of row) {
-      const order = m.vs.map((vv, k) => [vv, k]).sort((a, b) => a[0] - b[0]).map(p => p[1])
-      const half = Math.max(1, Math.floor(order.length / 2))
-      const topK = order.slice(0, half), botK = order.slice(order.length - half)
-      topK.forEach(k => topPts.push([m.us[k], m.vs[k]]))
-      botK.forEach(k => botPts.push([m.us[k], m.vs[k]]))
-      const topU = topK.map(k => m.us[k]), botU = botK.map(k => m.us[k])
-      seams.push({
-        i: m.i,
-        uTL: Math.min(...topU), uTR: Math.max(...topU),
-        uBL: Math.min(...botU), uBR: Math.max(...botU),
-      })
-    }
-    // fit the row's two long curbs; snap every top corner onto the front curb and
-    // every bottom corner onto the back curb, keeping each stall's own width and
-    // each divider's own slope (uTL != uBL stays slanted -> perspective fan kept).
-    const [at, bt] = fitLine(topPts)
-    const [ab, bb] = fitLine(botPts)
-    for (const s of seams) {
-      const quadUV = [
-        [s.uTL, at * s.uTL + bt], [s.uTR, at * s.uTR + bt],
-        [s.uBR, ab * s.uBR + bb], [s.uBL, ab * s.uBL + bb],
-      ]
-      newPolys[s.i] = quadUV.map(([uu, vv]) => [
-        clamp(uu * u[0] + vv * v[0]),
-        clamp((uu * u[1] + vv * v[1]) / aspect),
-      ])
-      changed = true
-    }
-  }
-  return changed ? items.map((it, i) => ({ ...it, polygon: newPolys[i] })) : null
-}
+// Re-exported so existing importers (and the test suite) keep pulling these from
+// this module; the implementations live in roiGeometry.
+export { divideQuad, smoothRois, regularizeRows }
 
 export default function RoiEditor({
   backgroundImage = null,
@@ -278,231 +64,12 @@ export default function RoiEditor({
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
-    const W = canvas.width
-    const H = canvas.height
-    ctx.clearRect(0, 0, W, H)
-
-    if (bgImgRef.current) {
-      ctx.drawImage(bgImgRef.current, 0, 0, W, H)
-    }
-
-    // Draw confirmed ROIs
-    rois.forEach((roi, _idx) => {
-      const isSelected = roi.id === selectedId
-      const isDrawing = inProgress.length > 0
-      const spotType = roi.spotType || 'normal'
-      const typeColor = SPOT_TYPE_COLORS[spotType]
-      const baseColor = typeColor || ROI_COLOR
-      const color = isDrawing && !isSelected ? '#2ecc71' : baseColor
-      const fillColor = isDrawing && !isSelected ? 'rgba(46,204,113,0.25)' : hexToRgba(color, 0.3)
-      const poly = (isSelected && editPolygon) ? editPolygon : roi.polygon
-      const pts = poly.map(([x, y]) => [x * W, y * H])
-
-      ctx.beginPath()
-      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
-      ctx.closePath()
-      ctx.fillStyle = fillColor
-      ctx.fill()
-      ctx.strokeStyle = isSelected ? '#ffffff' : color
-      ctx.lineWidth = isSelected ? 3 : 2
-      ctx.stroke()
-
-      const [cx, cy] = getCentroid(pts)
-      ctx.shadowColor = 'rgba(0,0,0,0.8)'
-      ctx.shadowBlur = 3
-      ctx.fillStyle = '#ffffff'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-
-      if (spotType === 'normal') {
-        ctx.font = 'bold 12px sans-serif'
-        ctx.fillText(roi.label, cx, cy)
-      } else {
-        // label on top line, type badge on bottom line
-        ctx.font = 'bold 11px sans-serif'
-        ctx.fillText(roi.label, cx, cy - 8)
-        ctx.font = spotType === 'handicap' ? 'bold 13px sans-serif' : 'bold 10px sans-serif'
-        const badge = spotType === 'handicap'
-          ? '♿'
-          : (roi.owner ? roi.owner : 'RESERVED')
-        ctx.fillText(badge, cx, cy + 7)
-      }
-      ctx.shadowBlur = 0
+    drawScene(ctx, canvas.width, canvas.height, {
+      bgImg: bgImgRef.current,
+      rois, proposals, selectedId, selectedProposalId, inProgress, livePoint,
+      liveRect, mode, editPolygon, orientEnabled, layer, O, oGates, oFlow,
+      perimDraft, flowStart,
     })
-
-    // Draw proposed ROIs with ghost/dashed style
-    proposals.forEach((prop) => {
-      const isSelected = prop.id === selectedProposalId
-      const pts = prop.polygon.map(([x, y]) => [x * W, y * H])
-
-      ctx.beginPath()
-      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
-      ctx.closePath()
-      ctx.fillStyle = isSelected ? 'rgba(100,200,255,0.25)' : 'rgba(100,200,255,0.12)'
-      ctx.fill()
-      ctx.setLineDash([7, 4])
-      ctx.strokeStyle = isSelected ? '#64c8ff' : 'rgba(100,200,255,0.65)'
-      ctx.lineWidth = isSelected ? 2.5 : 1.5
-      ctx.stroke()
-      ctx.setLineDash([])
-
-      const [cx, cy] = getCentroid(pts)
-      ctx.shadowColor = 'rgba(0,0,0,0.8)'
-      ctx.shadowBlur = 3
-      ctx.fillStyle = isSelected ? '#64c8ff' : 'rgba(150,220,255,0.85)'
-      ctx.font = 'bold 11px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.fillText(`? ${prop.label}`, cx, cy)
-      ctx.shadowBlur = 0
-    })
-
-    // Edit mode handles on selected ROI
-    if (mode === 'edit' && selectedId) {
-      const roi = rois.find(r => r.id === selectedId)
-      if (roi) {
-        const poly = editPolygon || roi.polygon
-        const pts = poly.map(([x, y]) => [x * W, y * H])
-
-        // vertex handles
-        pts.forEach(([x, y]) => {
-          ctx.beginPath()
-          ctx.arc(x, y, 6, 0, Math.PI * 2)
-          ctx.fillStyle = '#ffffff'
-          ctx.fill()
-          ctx.strokeStyle = '#3498db'
-          ctx.lineWidth = 2
-          ctx.stroke()
-        })
-
-        // edge midpoint handles
-        pts.forEach(([x, y], i) => {
-          const [nx, ny] = pts[(i + 1) % pts.length]
-          const mx = (x + nx) / 2
-          const my = (y + ny) / 2
-          ctx.beginPath()
-          ctx.rect(mx - 4, my - 4, 8, 8)
-          ctx.fillStyle = 'rgba(255,255,255,0.85)'
-          ctx.fill()
-          ctx.strokeStyle = '#3498db'
-          ctx.lineWidth = 1.5
-          ctx.stroke()
-        })
-      }
-    }
-
-    // In-progress polygon drawing
-    if (inProgress.length > 0) {
-      const pts = inProgress.map(([x, y]) => [x * W, y * H])
-      ctx.beginPath()
-      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
-      if (livePoint) ctx.lineTo(livePoint[0] * W, livePoint[1] * H)
-      ctx.setLineDash([5, 3])
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)'
-      ctx.lineWidth = 1.5
-      ctx.stroke()
-      ctx.setLineDash([])
-      pts.forEach(([x, y], i) => {
-        const isFirst = i === 0
-        const nearClose = isFirst && livePoint && pts.length >= 3 && (() => {
-          const dx = (livePoint[0] - inProgress[0][0]) * W
-          const dy = (livePoint[1] - inProgress[0][1]) * H
-          return Math.sqrt(dx * dx + dy * dy) < 15
-        })()
-        ctx.beginPath()
-        ctx.arc(x, y, nearClose ? 8 : 4, 0, Math.PI * 2)
-        ctx.fillStyle = nearClose ? '#2ecc71' : '#ffffff'
-        ctx.fill()
-      })
-    }
-
-    if (liveRect) {
-      const x1 = liveRect.x1 * W, y1 = liveRect.y1 * H
-      const x2 = liveRect.x2 * W, y2 = liveRect.y2 * H
-      ctx.setLineDash([5, 3])
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)'
-      ctx.lineWidth = 1.5
-      ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
-      ctx.setLineDash([])
-    }
-
-    // ── Orientation layer ── (dim in slots layer, full while editing it)
-    if (orientEnabled) {
-      const active = layer === 'orientation'
-      const alpha = active ? 1 : 0.4
-      const drawArrow = (x1, y1, x2, y2, color) => {
-        ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 3
-        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
-        const ang = Math.atan2(y2 - y1, x2 - x1), ah = 13
-        ctx.beginPath()
-        ctx.moveTo(x2, y2)
-        ctx.lineTo(x2 + ah * Math.cos(ang + Math.PI - 0.4), y2 + ah * Math.sin(ang + Math.PI - 0.4))
-        ctx.lineTo(x2 + ah * Math.cos(ang + Math.PI + 0.4), y2 + ah * Math.sin(ang + Math.PI + 0.4))
-        ctx.closePath(); ctx.fill()
-      }
-
-      // committed perimeter
-      if (Array.isArray(O.perimeter) && O.perimeter.length >= 2) {
-        ctx.beginPath()
-        O.perimeter.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x * W, y * H) : ctx.lineTo(x * W, y * H)))
-        ctx.closePath()
-        ctx.setLineDash([10, 7])
-        ctx.strokeStyle = `rgba(148,163,184,${alpha})`
-        ctx.lineWidth = 2.5
-        ctx.stroke()
-        ctx.setLineDash([])
-      }
-      // flow arrows
-      oFlow.forEach(f => drawArrow(f.from[0] * W, f.from[1] * H, f.to[0] * W, f.to[1] * H, `rgba(56,189,248,${alpha})`))
-      // gates
-      oGates.forEach(g => {
-        const gx = g.x * W, gy = g.y * H
-        const text = g.label || (g.kind === 'exit' ? 'Exit' : 'Entry')
-        const bw = Math.max(38, text.length * 8 + 18)
-        ctx.fillStyle = g.kind === 'exit' ? `rgba(244,63,94,${alpha})` : `rgba(16,185,129,${alpha})`
-        ctx.beginPath(); ctx.roundRect(gx - bw / 2, gy - 12, bw, 24, 12); ctx.fill()
-        ctx.fillStyle = `rgba(255,255,255,${alpha})`
-        ctx.font = 'bold 12px system-ui, sans-serif'
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-        ctx.fillText(text, gx, gy)
-      })
-      // anchor
-      if (O.anchor) {
-        const ax = O.anchor.x * W, ay = O.anchor.y * H
-        ctx.beginPath(); ctx.arc(ax, ay, 9, 0, Math.PI * 2)
-        ctx.fillStyle = `rgba(250,204,21,${alpha})`
-        ctx.strokeStyle = `rgba(255,255,255,${alpha})`; ctx.lineWidth = 2
-        ctx.fill(); ctx.stroke()
-        ctx.fillStyle = `rgba(250,204,21,${alpha})`
-        ctx.font = 'bold 11px system-ui, sans-serif'
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-        ctx.fillText(O.anchor.label || 'You are here', ax, ay + 22)
-      }
-
-      // in-progress perimeter draft + flow preview (only while editing)
-      if (active) {
-        if (perimDraft.length > 0) {
-          const pts = perimDraft.map(([x, y]) => [x * W, y * H])
-          ctx.beginPath()
-          pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)))
-          if (livePoint) ctx.lineTo(livePoint[0] * W, livePoint[1] * H)
-          ctx.setLineDash([6, 4])
-          ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.5
-          ctx.stroke(); ctx.setLineDash([])
-          pts.forEach(([x, y], i) => {
-            const near = i === 0 && livePoint && pts.length >= 3 &&
-              ptDistPx(livePoint[0], livePoint[1], perimDraft[0][0], perimDraft[0][1], W, H) < 15
-            ctx.beginPath(); ctx.arc(x, y, near ? 8 : 4, 0, Math.PI * 2)
-            ctx.fillStyle = near ? '#2ecc71' : '#ffffff'; ctx.fill()
-          })
-        }
-        if (flowStart && livePoint) {
-          ctx.setLineDash([6, 4])
-          drawArrow(flowStart[0] * W, flowStart[1] * H, livePoint[0] * W, livePoint[1] * H, 'rgba(56,189,248,0.8)')
-          ctx.setLineDash([])
-        }
-      }
-    }
   }, [rois, proposals, selectedId, selectedProposalId, inProgress, livePoint, liveRect, mode, editPolygon,
       orientEnabled, layer, orientation, perimDraft, flowStart, O.perimeter, O.anchor, oGates, oFlow])
 
@@ -979,285 +546,50 @@ export default function RoiEditor({
     dragRef.current = null
   }
 
-  const btnStyle = (active) => ({
-    padding: '5px 11px',
-    borderRadius: 4,
-    border: '1px solid rgba(255,255,255,0.2)',
-    background: active ? 'var(--color-primary, #3498db)' : 'rgba(255,255,255,0.05)',
-    color: active ? '#fff' : 'var(--text-muted, #aaa)',
-    cursor: 'pointer',
-    fontSize: '0.78rem',
-  })
-
-  const proposalBtnStyle = (disabled) => ({
-    padding: '5px 11px',
-    borderRadius: 4,
-    border: '1px solid rgba(100,200,255,0.5)',
-    background: 'rgba(100,200,255,0.08)',
-    color: disabled ? 'rgba(100,200,255,0.35)' : '#64c8ff',
-    cursor: disabled ? 'default' : 'pointer',
-    fontSize: '0.78rem',
-  })
-
   const hasProposals = proposals.length > 0
   const selProp = selectedProposalId ? proposals.find(p => p.id === selectedProposalId) : null
   const selectedRoi = selectedId ? rois.find(r => r.id === selectedId) : null
   const selectedSpotType = selectedRoi?.spotType || 'normal'
   const canDivide = selectedRoi?.polygon.length === 4
-  const typeBtnStyle = (active, accent) => ({
-    padding: '4px 10px',
-    borderRadius: 4,
-    border: `1px solid ${active ? accent : 'rgba(255,255,255,0.18)'}`,
-    background: active ? `${accent}22` : 'rgba(255,255,255,0.04)',
-    color: active ? accent : 'var(--text-muted,#aaa)',
-    cursor: 'pointer',
-    fontSize: '0.76rem',
-    fontWeight: active ? 700 : 400,
-  })
 
   return (
     <div style={overlay ? { position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' } : {}}>
       {/* ── Toolbar layer: in overlay it stacks above the canvas (flex column)
           so it never covers the image. ── */}
-      <div style={overlay ? { flexShrink: 0, zIndex: 2 } : {}}>
-      {/* ── Layer switch (Slots vs Orientation frame) ── */}
-      {orientEnabled && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', pointerEvents: 'auto' } : {}) }}>
-          <button style={btnStyle(layer === 'slots')} onClick={() => changeLayer('slots')}
-            title="Draw parking slots (these get processed)">Slots</button>
-          <button style={btnStyle(layer === 'orientation')} onClick={() => changeLayer('orientation')}
-            title="Draw the orientation frame — perimeter, gates, flow, anchor. Display only; never processed.">
-            🧭 Orientation frame
-          </button>
-        </div>
-      )}
-
-      {(!orientEnabled || layer === 'slots') && (<>
-      {/* ── ROI drawing toolbar ── */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', pointerEvents: 'auto' } : {}) }}>
-        <button style={btnStyle(mode === 'polygon')} onClick={() => changeMode('polygon')}>
-          Polygon
-        </button>
-        <button style={btnStyle(mode === 'rect')} onClick={() => changeMode('rect')}>
-          Rectangle
-        </button>
-        <button style={btnStyle(mode === 'edit')} onClick={() => changeMode('edit')}
-          title="Select and drag vertices, edges, or whole polygons">
-          Edit
-        </button>
-        <button
-          style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
-          disabled={!selectedId}
-          onClick={duplicateSelected}
-          title="Duplicate selected ROI with a small offset"
-        >
-          Duplicate
-        </button>
-        <button
-          style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
-          disabled={!selectedId}
-          onClick={() => scaleSelected(1.1)}
-          title="Scale selected ROI up 10%"
-        >
-          Scale +
-        </button>
-        <button
-          style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
-          disabled={!selectedId}
-          onClick={() => scaleSelected(0.9)}
-          title="Scale selected ROI down 10%"
-        >
-          Scale −
-        </button>
-        <input
-          type="number"
-          min={2}
-          value={divideN}
-          onChange={e => setDivideN(Math.max(2, parseInt(e.target.value, 10) || 2))}
-          style={{
-            width: 42, padding: '4px 6px', borderRadius: 4, fontSize: '0.78rem',
-            border: '1px solid rgba(255,255,255,0.2)',
-            background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted,#aaa)', outline: 'none',
-          }}
-          title="Number of stalls to split the selected box into"
-        />
-        <button
-          style={{ ...btnStyle(false), opacity: canDivide ? 1 : 0.4 }}
-          disabled={!canDivide}
-          onClick={() => divideSelected(divideN)}
-          title={canDivide
-            ? 'Split the selected 4-corner box into N even stalls (perspective-aware)'
-            : 'Select a 4-corner box (Rectangle, or a 4-point polygon) to divide'}
-        >
-          Divide
-        </button>
-        <button
-          style={{ ...btnStyle(false), opacity: selectedId ? 1 : 0.4 }}
-          disabled={!selectedId}
-          onClick={() => {
-            commitChange(rois.filter(r => r.id !== selectedId))
-            setSelectedId(null)
-          }}
-        >
-          Delete Selected
-        </button>
-        <button
-          style={{ ...btnStyle(false), opacity: rois.length >= 2 ? 1 : 0.4 }}
-          disabled={rois.length < 2}
-          onClick={smoothAll}
-          title="Magic smooth — snap nearby corners of adjacent boxes together so shared edges line up cleanly"
-        >
-          ✨ Smooth
-        </button>
-        <button
-          style={btnStyle(false)}
-          onClick={() => { commitChange([]); setSelectedId(null); setInProgress([]) }}
-        >
-          Clear All
-        </button>
-      </div>
-
-      {/* ── Spot type toolbar (visible when a ROI is selected) ── */}
-      {selectedRoi && (
-        <div style={{
-          display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
-          marginBottom: overlay ? 0 : 6,
-          padding: '5px 8px',
-          background: overlay ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.04)',
-          borderRadius: overlay ? 0 : 4,
-          border: overlay ? 'none' : '1px solid rgba(255,255,255,0.1)',
-          backdropFilter: overlay ? 'blur(4px)' : undefined,
-          pointerEvents: overlay ? 'auto' : undefined,
-        }}>
-          <input
-            value={selectedRoi.label}
-            onChange={e => commitChange(rois.map(r => r.id === selectedId ? { ...r, label: e.target.value } : r))}
-            style={{
-              padding: '3px 7px', borderRadius: 4, fontSize: '0.76rem',
-              border: '1px solid rgba(255,255,255,0.22)',
-              background: 'rgba(255,255,255,0.07)', color: '#fff',
-              width: 80, outline: 'none',
-            }}
-            title="Rename this spot (e.g. A1, B3)"
-          />
-          <span style={{ fontSize: '0.73rem', color: 'var(--text-muted,#aaa)', margin: '0 2px' }}>type:</span>
-          <button style={typeBtnStyle(selectedSpotType === 'normal', '#2ecc71')} onClick={() => setSpotType('normal')}>Normal</button>
-          <button style={typeBtnStyle(selectedSpotType === 'reserved', '#e6a817')} onClick={() => setSpotType('reserved')}>Reserved</button>
-          <button style={typeBtnStyle(selectedSpotType === 'handicap', '#1a7fc1')} onClick={() => setSpotType('handicap')}>♿ Handicap</button>
-          {selectedSpotType === 'reserved' && (
-            <button
-              style={{ ...typeBtnStyle(false, '#e6a817'), borderColor: 'rgba(230,168,23,0.4)', color: '#e6a817' }}
-              onClick={setOwner}
-              title="Set owner / reservation name shown on the spot"
-            >
-              {selectedRoi.owner ? `Owner: ${selectedRoi.owner}` : 'Set Owner…'}
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* ── Proposals toolbar ── */}
-      {hasProposals && (
-        <div style={{
-          display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', alignItems: 'center',
-          padding: '7px 10px', borderRadius: overlay ? 0 : 5,
-          border: overlay ? 'none' : '1px solid rgba(100,200,255,0.3)',
-          background: overlay ? 'rgba(0,0,0,0.6)' : 'rgba(100,200,255,0.06)',
-          backdropFilter: overlay ? 'blur(4px)' : undefined,
-          borderBottom: overlay ? '1px solid rgba(100,200,255,0.2)' : undefined,
-          pointerEvents: overlay ? 'auto' : undefined,
-        }}>
-          <span style={{ fontSize: '0.75rem', color: '#64c8ff', marginRight: 2 }}>
-            {proposals.length} proposal{proposals.length > 1 ? 's' : ''} — dashed blue
-          </span>
-          <button
-            style={proposalBtnStyle(proposals.length < 2)}
-            disabled={proposals.length < 2}
-            onClick={smoothProposals}
-            title="Tidy auto-detected spots — align each row to clean baselines with a uniform stall size"
-          >
-            ✨ Tidy rows
-          </button>
-          <button
-            style={proposalBtnStyle(!selProp)}
-            disabled={!selProp}
-            onClick={() => selProp && acceptProposal(selProp.id)}
-            title="Accept selected proposal and add it as a confirmed ROI"
-          >
-            Accept Selected
-          </button>
-          <button
-            style={proposalBtnStyle(false)}
-            onClick={acceptAllProposals}
-            title="Accept all proposals and add them as confirmed ROIs"
-          >
-            Accept All
-          </button>
-          <button
-            style={{ ...proposalBtnStyle(!selProp), borderColor: 'rgba(255,255,255,0.2)', color: selProp ? 'var(--text-muted,#aaa)' : 'rgba(150,150,150,0.4)' }}
-            disabled={!selProp}
-            onClick={() => selProp && discardProposal(selProp.id)}
-            title="Discard selected proposal"
-          >
-            Discard Selected
-          </button>
-          <button
-            style={{ ...proposalBtnStyle(false), borderColor: 'rgba(255,255,255,0.2)', color: 'var(--text-muted,#aaa)' }}
-            onClick={discardAllProposals}
-            title="Discard all proposals"
-          >
-            Discard All
-          </button>
-        </div>
-      )}
-
-      {/* ── Proposals caveat ── */}
-      {hasProposals && (
-        <div style={{
-          fontSize: '0.72rem', color: 'rgba(255,210,80,0.85)',
-          marginBottom: 8, paddingLeft: 2,
-        }}>
-          Proposals cover <strong>occupied spots</strong> (vehicles detected). Empty spots may be
-          missing. Click a dashed shape to select it, then accept or discard individually.
-        </div>
-      )}
-
-      {/* ── Edit mode hint ── */}
-      {mode === 'edit' && (
-        <div style={{ fontSize: '0.72rem', color: 'rgba(100,200,255,0.8)', marginBottom: 8, paddingLeft: 2 }}>
-          Edit mode — click to select, drag a vertex (circle) or edge midpoint (square) to reshape, drag inside to move. Delete key removes selected.
-        </div>
-      )}
-      </>)}
-
-      {/* ── Orientation toolbar ── */}
-      {orientEnabled && layer === 'orientation' && (<>
-        <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', alignItems: 'center', ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', pointerEvents: 'auto' } : {}) }}>
-          <button style={btnStyle(orientTool === 'perimeter')} onClick={() => { setOrientTool('perimeter'); setFlowStart(null) }}
-            title="Draw the lot perimeter / drive lane — click points, click the first point or double-click to close">Perimeter</button>
-          <button style={btnStyle(orientTool === 'entry')} onClick={() => { setOrientTool('entry'); setFlowStart(null) }}
-            title="Click to drop an entry gate">＋ Entry gate</button>
-          <button style={btnStyle(orientTool === 'exit')} onClick={() => { setOrientTool('exit'); setFlowStart(null) }}
-            title="Click to drop an exit gate">＋ Exit gate</button>
-          <button style={btnStyle(orientTool === 'flow')} onClick={() => { setOrientTool('flow'); setFlowStart(null) }}
-            title="Click a start then an end point to draw a flow arrow">→ Flow arrow</button>
-          <button style={btnStyle(orientTool === 'anchor')} onClick={() => { setOrientTool('anchor'); setFlowStart(null) }}
-            title="Click to place the 'you are here' anchor">✷ Anchor</button>
-          <button style={btnStyle(orientTool === 'erase')} onClick={() => { setOrientTool('erase'); setFlowStart(null) }}
-            title="Click a gate, flow arrow, or anchor to remove it">Erase</button>
-          <button style={btnStyle(false)} onClick={() => { commitOrient({ perimeter: null }); setPerimDraft([]) }}
-            title="Remove the perimeter">Clear perimeter</button>
-          <button style={btnStyle(false)}
-            onClick={() => { onOrientationChange?.({ perimeter: null, gates: [], flow: [], anchor: null }); setPerimDraft([]); setFlowStart(null) }}
-            title="Clear the entire orientation frame">Clear frame</button>
-        </div>
-        <div style={{ fontSize: '0.72rem', color: 'rgba(120,200,255,0.85)', marginBottom: 8, paddingLeft: 2 }}>
-          Orientation frame — a visual aid only. It is stored separately and <strong>never</strong> sent for detection.
-          {orientTool === 'flow' && flowStart && ' Click the arrow end point.'}
-        </div>
-      </>)}
-
-      </div>
+      <RoiToolbar
+        overlay={overlay}
+        mode={mode}
+        changeMode={changeMode}
+        selectedId={selectedId}
+        duplicateSelected={duplicateSelected}
+        scaleSelected={scaleSelected}
+        divideN={divideN}
+        setDivideN={setDivideN}
+        canDivide={canDivide}
+        divideSelected={divideSelected}
+        commitChange={commitChange}
+        rois={rois}
+        setSelectedId={setSelectedId}
+        setInProgress={setInProgress}
+        smoothAll={smoothAll}
+        selectedRoi={selectedRoi}
+        selectedSpotType={selectedSpotType}
+        setSpotType={setSpotType}
+        setOwner={setOwner}
+        hasProposals={hasProposals}
+        proposals={proposals}
+        smoothProposals={smoothProposals}
+        selProp={selProp}
+        acceptProposal={acceptProposal}
+        acceptAllProposals={acceptAllProposals}
+        discardProposal={discardProposal}
+        discardAllProposals={discardAllProposals}
+        orient={{
+          orientEnabled, layer, changeLayer,
+          orientTool, setOrientTool, flowStart, setFlowStart,
+          commitOrient, onOrientationChange, setPerimDraft,
+        }}
+      />
       {/* ── Canvas ── */}
       <div ref={containerRef} style={overlay
         ? { position: 'relative', flex: 1, minHeight: 0, zIndex: 1 }
