@@ -8,7 +8,6 @@ backend/**/*.pyc
 
 # ── Datasets & training artifacts (large, not deployable) ─
 backend/data/
-backend/classify_yolo_data/
 backend/outputs/
 backend/uploads/
 runs/

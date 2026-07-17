@@ -182,6 +182,11 @@ DEPLOYMENT_PROFILE = os.getenv("BERTH_DEPLOYMENT", "server")
 # Example: "http://192.168.1.10:8000"
 EDGE_HUB_URL = os.getenv("BERTH_EDGE_HUB_URL", "")
 
+# Snapshot mode: grab one frame every N seconds instead of decoding the
+# stream continuously. 0 = off (continuous decode, current behavior).
+# For weak edge boards (Pi Zero 2 W) where continuous decode saturates CPU.
+SNAPSHOT_INTERVAL = float(os.getenv("BERTH_SNAPSHOT_INTERVAL", "0"))
+
 # Data-gathering capture is toggled per-camera (registry flag), not globally.
 # CAPTURE_DIR is the base; each gathering camera writes to CAPTURE_DIR/<name>/<day>/.
 CAPTURE_DIR           = Path(os.getenv("BERTH_CAPTURE_DIR", str(Path.home() / "berth_captures")))

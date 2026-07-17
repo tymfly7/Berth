@@ -113,6 +113,9 @@ class VideoProcessor:
         self._cached_status_map: dict = {}
         self._cached_anomalies: list = []   # [{"bbox": (x1,y1,x2,y2), "label": str}]
         self._cached_status_lock = threading.Lock()
+        # Snapshot mode: set when an inference result lands so the display loop
+        # re-encodes (and re-sends) the still with the fresh overlay.
+        self._overlay_dirty = False
         self._vacant_since: dict = {}       # slot_id → time.time() when first seen vacant
         self._straddle_last_seen: dict = {} # slot_id → time.time() last seen straddled
 
@@ -234,6 +237,11 @@ class VideoProcessor:
     def _is_youtube(self):
         return self._source_type == "youtube"
 
+    def _snapshot_mode(self) -> bool:
+        # Snapshot mode applies to live sources only: re-opening a file per
+        # snapshot would replay frame 0 forever.
+        return config.SNAPSHOT_INTERVAL > 0 and not self._is_file()
+
     def _is_file(self):
         return self._source_type == "file" or (
             self._source_type == "auto" and isinstance(self._source, str)
@@ -280,7 +288,9 @@ class VideoProcessor:
         return cap
 
     def _loop(self):
-        if self._is_youtube():
+        if self._snapshot_mode():
+            self._snapshot_source_loop()
+        elif self._is_youtube():
             self._youtube_source_loop()
         else:
             self._regular_source_loop()
@@ -298,9 +308,59 @@ class VideoProcessor:
             )
         with self._latest_raw_lock:
             self._latest_raw = frame
-        with self._jitter_lock:
-            self._jitter_buffer.append(frame)
+        # Snapshot mode: skip the jitter buffer — one frame per interval has
+        # nothing to smooth, and the undrained buffer would just pin memory.
+        if not self._snapshot_mode():
+            with self._jitter_lock:
+                self._jitter_buffer.append(frame)
         self._infer_event.set()
+
+    # ── Snapshot source loop (edge low-power mode) ─────────────────────────
+
+    def _snapshot_source_loop(self):
+        """
+        Grab a single frame every SNAPSHOT_INTERVAL seconds instead of decoding
+        the stream continuously. The capture is opened and released per grab so
+        the worker is fully idle between snapshots — decode cost becomes
+        proportional to the snapshot cadence, not the source frame rate.
+        """
+        _WARMUP_READS = 3       # flush the stale first keyframe (RTSP/HLS)
+        _MAX_FAILED_INTERVALS = 10
+        failed_intervals = 0
+
+        while self.running:
+            t0 = time.time()
+            frame = None
+            # After a failed interval force a fresh YouTube resolve — the
+            # cached HLS URL may have expired between snapshots.
+            cap = self._open_capture(force_refresh=failed_intervals > 0)
+            if cap is not None:
+                try:
+                    for _ in range(_WARMUP_READS):
+                        ret, f = cap.read()
+                        if ret:
+                            frame = f
+                finally:
+                    cap.release()
+
+            if frame is not None:
+                failed_intervals = 0
+                self._ingest_raw_frame(frame)
+            else:
+                failed_intervals += 1
+                logger.warning(
+                    f"Snapshot grab failed for '{self._source}' "
+                    f"({failed_intervals}/{_MAX_FAILED_INTERVALS})"
+                )
+                if failed_intervals >= _MAX_FAILED_INTERVALS:
+                    logger.warning(f"Camera '{self._source}' unavailable, stopping.")
+                    self.running = False
+                    break
+
+            # Sleep out the interval in short slices so stop_processing never
+            # blocks for a full interval.
+            while self.running and time.time() - t0 < config.SNAPSHOT_INTERVAL:
+                time.sleep(0.5)
 
     # ── Regular (USB / RTSP / file) source loop ───────────────────────────
 
@@ -426,12 +486,24 @@ class VideoProcessor:
         absorbs burst segment delivery. For all other sources the latest raw
         frame is used directly so live feeds have no buffering lag.
         """
-        frame_interval = 1.0 / config.STREAM_FPS
+        # Snapshot mode: frames arrive every SNAPSHOT_INTERVAL seconds, so a
+        # 1 Hz tick is plenty and re-encoding the same still at STREAM_FPS
+        # would waste CPU.
+        snapshot_mode = self._snapshot_mode()
+        frame_interval = 1.0 if snapshot_mode else 1.0 / config.STREAM_FPS
 
         while self.running:
             t0 = time.time()
 
-            if self._is_youtube():
+            # Snapshot mode: pop the overlay-dirty flag so the still is
+            # re-encoded (and re-sent) once the inference result lands.
+            overlay_dirty = False
+            if snapshot_mode:
+                with self._cached_status_lock:
+                    overlay_dirty = self._overlay_dirty
+                    self._overlay_dirty = False
+
+            if self._is_youtube() and not snapshot_mode:
                 # YouTube HLS: drain jitter buffer to smooth inter-segment gaps.
                 with self._jitter_lock:
                     has_new = bool(self._jitter_buffer)
@@ -449,7 +521,7 @@ class VideoProcessor:
                     self._last_display_raw = latest
                 raw = self._last_display_raw
 
-            if raw is not None:
+            if raw is not None and (not snapshot_mode or has_new or overlay_dirty):
                 frame = cv2.resize(raw, (config.FRAME_WIDTH, config.FRAME_HEIGHT))
 
                 # Refresh ROI cache at most once per second.
@@ -505,8 +577,11 @@ class VideoProcessor:
                     self._frame = display
                     self._frame_jpeg = jpeg_bytes
                     # Only advance seq for genuinely new frames so the WS
-                    # knows not to resend a repeated still.
-                    if has_new:
+                    # knows not to resend a repeated still. A fresh overlay
+                    # counts as new: in snapshot mode the inference result
+                    # lands after the raw frame was already sent, so without
+                    # a seq bump the corrected overlay would never be pushed.
+                    if has_new or overlay_dirty:
                         self._frame_seq += 1
 
             sleep_time = frame_interval - (time.time() - t0)
@@ -650,6 +725,7 @@ class VideoProcessor:
                     confirmed[slot_id] = status
             self._cached_status_map = confirmed
             self._cached_anomalies = new_anomalies
+            self._overlay_dirty = True
 
         # Rebuild result aggregates from hysteresis-confirmed statuses so that
         # metrics, history, and heatmap all reflect the debounced state.

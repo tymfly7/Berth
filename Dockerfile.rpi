@@ -6,6 +6,8 @@
 # Or cross-compile on x86 and transfer:
 #   docker buildx build --platform linux/arm64 -t berth-rpi:latest -f Dockerfile.rpi . --load
 #   docker save berth-rpi:latest | gzip > berth-rpi.tar.gz
+#                   OR
+#   docker save berth-rpi:latest -o berth-rpi.tar    
 #   scp berth-rpi.tar.gz pi@raspberrypi.local:~/
 #   # on RPi: docker load < berth-rpi.tar.gz
 #
