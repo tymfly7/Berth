@@ -56,10 +56,11 @@ class EdgeClassifier:
             return
         try:
             net = ncnn.Net()
-            # One thread per inference: several pool workers run NCNN concurrently,
-            # so per-net multithreading would oversubscribe the few edge cores and
-            # starve the API loop. See main.py thread-budgeting note.
-            net.opt.num_threads = 1
+            # Threads per inference (config.NCNN_THREADS). Keep workers × threads
+            # within the core count: on a single-worker box the idle cores speed
+            # each inference up; with several pool workers keep it at 1 so NCNN
+            # doesn't oversubscribe the few edge cores and starve the API loop.
+            net.opt.num_threads = config.NCNN_THREADS
             net.load_param(str(param_path))
             net.load_model(str(bin_path))
             self._net = net
@@ -169,7 +170,7 @@ class EdgeYoloClassifier:
             return
         try:
             net = ncnn.Net()
-            net.opt.num_threads = 1
+            net.opt.num_threads = config.NCNN_THREADS
             net.load_param(str(param_path))
             net.load_model(str(bin_path))
             self._net = net

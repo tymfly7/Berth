@@ -185,7 +185,7 @@ EDGE_HUB_URL = os.getenv("BERTH_EDGE_HUB_URL", "")
 # Data-gathering capture is toggled per-camera (registry flag), not globally.
 # CAPTURE_DIR is the base; each gathering camera writes to CAPTURE_DIR/<name>/<day>/.
 CAPTURE_DIR           = Path(os.getenv("BERTH_CAPTURE_DIR", str(Path.home() / "berth_captures")))
-CAPTURE_INTERVAL_SECS = float(os.getenv("BERTH_CAPTURE_INTERVAL", "300"))  # 5 min
+CAPTURE_INTERVAL_SECS = float(os.getenv("BERTH_CAPTURE_INTERVAL", "600"))  # 10 min
 
 # ---------------------------------------------------------------------------
 # Inference / streaming
@@ -196,13 +196,19 @@ CAPTURE_INTERVAL_SECS = float(os.getenv("BERTH_CAPTURE_INTERVAL", "300"))  # 5 m
 # compose files supply the tuning).
 FRAME_WIDTH   = int(os.getenv("BERTH_FRAME_WIDTH",  "960" if DEPLOYMENT_PROFILE == "edge" else "1280"))
 FRAME_HEIGHT  = int(os.getenv("BERTH_FRAME_HEIGHT", "540" if DEPLOYMENT_PROFILE == "edge" else "720"))
-STREAM_FPS    = int(os.getenv("BERTH_STREAM_FPS",   "10"  if DEPLOYMENT_PROFILE == "edge" else "20"))
+STREAM_FPS    = int(os.getenv("BERTH_STREAM_FPS",   "15"  if DEPLOYMENT_PROFILE == "edge" else "20"))
 JPEG_QUALITY  = 90   if DEPLOYMENT_PROFILE == "edge" else 80  # edge raised for sharpness; server keeps bandwidth-optimised 80
 
 # Inference rate, decoupled from STREAM_FPS. Parking occupancy changes slowly, so
 # running the model on every decoded frame wastes CPU; the display loop reuses the
 # last result between inferences. Lower on edge to keep ARM cores free for the API.
-INFER_FPS = float(os.getenv("BERTH_INFER_FPS", "3" if DEPLOYMENT_PROFILE == "edge" else "8"))
+INFER_FPS = float(os.getenv("BERTH_INFER_FPS", "4" if DEPLOYMENT_PROFILE == "edge" else "8"))
+
+# Cores a single NCNN inference spreads across. workers × NCNN_THREADS should
+# stay within the core count: on a single-worker edge box the idle cores speed
+# each inference up; with multiple pool workers keep this at 1 to avoid
+# oversubscribing the few ARM cores and starving the API loop.
+NCNN_THREADS = int(os.getenv("BERTH_NCNN_THREADS", "3" if DEPLOYMENT_PROFILE == "edge" else "1"))
 
 # Cadence for the poorly-parked anomaly pass (YOLO26 detect), decoupled from
 # INFER_FPS. The detect pass is far heavier than the per-slot classify and
