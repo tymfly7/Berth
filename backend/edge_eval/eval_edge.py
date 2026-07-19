@@ -1,9 +1,11 @@
 """
-Edge Evaluation CLI — API-off, torch-free
-==========================================
+Edge Evaluation CLI — API-off, torch-free by default
+====================================================
 Standalone evaluation runner for edge devices (RPi 5 / 3B / Zero 2W). Never
-imports FastAPI or torch — only config, the NCNN classifiers, numpy and PIL —
-so the full CPU/RAM budget goes to inference while the berth service is stopped.
+imports FastAPI, and stays torch-free by default (--runtime ncnn) — only config,
+the NCNN classifiers, numpy and PIL — so the full CPU/RAM budget goes to
+inference while the berth service is stopped. torch is imported lazily only under
+--runtime torch, to benchmark the same model with PyTorch on a dev laptop / RPi 5.
 
 Walks a crops dataset (occupied/ + vacant/ folders, same layout as the T12Lot
 benchmark), classifies every crop with the exported NCNN model, and writes one
@@ -15,7 +17,8 @@ timestamped session directory of CSV files:
 
 Usage (from backend/, service stopped — see run_eval.sh):
     python eval_edge.py --dataset data/t12lot_subset [--model yolo26n_classify]
-                        [--threads 3] [--limit 250] [--out eval_results]
+                        [--runtime ncnn|torch] [--threads 3] [--limit 250]
+                        [--out eval_results]
                         [--parity eval_results/goldens_yolo26n_classify.json]
 """
 
@@ -65,7 +68,10 @@ def collect_files(dataset_dir: Path, limit: int = 0):
 # ── Classifier construction (lazy ncnn import — make_goldens.py reuses the
 #    helpers above on the torch-only hub where ncnn may be absent) ────────────
 
-def build_classifier(model_name: str):
+def build_classifier(model_name: str, runtime: str = "ncnn"):
+    if runtime == "torch":
+        from src.inference.torch_classifier import ParkingClassifier
+        return ParkingClassifier(model_name=model_name)
     if model_name.endswith("_classify"):
         from src.inference.ncnn_classifier import EdgeYoloClassifier
         return EdgeYoloClassifier(model_name=model_name)
@@ -96,6 +102,15 @@ class SystemSampler(threading.Thread):
         self.rows = []
         self._stop_evt = threading.Event()
         self._prev_cpu = self._cpu_times()
+        # Optional psutil fallback for boxes without /proc (e.g. dev laptop /
+        # Windows). Best-effort: absent psutil leaves those columns blank.
+        try:
+            import psutil
+            self._psutil = psutil
+            self._proc = psutil.Process()
+        except Exception:
+            self._psutil = None
+            self._proc = None
 
     @staticmethod
     def _cpu_times():
@@ -109,6 +124,11 @@ class SystemSampler(threading.Thread):
     def _cpu_percent(self):
         cur = self._cpu_times()
         if cur is None or self._prev_cpu is None:
+            if self._psutil is not None:
+                try:
+                    return self._psutil.cpu_percent(interval=None)  # since last call
+                except Exception:
+                    pass
             return ""
         d_total = cur[0] - self._prev_cpu[0]
         d_idle = cur[1] - self._prev_cpu[1]
@@ -126,6 +146,24 @@ class SystemSampler(threading.Thread):
         except Exception:
             pass
         return ""
+
+    def _rss_mb(self):
+        v = self._proc_kb("/proc/self/status", "VmRSS")
+        if v == "" and self._proc is not None:
+            try:
+                return round(self._proc.memory_info().rss / (1024 * 1024), 1)
+            except Exception:
+                pass
+        return v
+
+    def _mem_available_mb(self):
+        v = self._proc_kb("/proc/meminfo", "MemAvailable")
+        if v == "" and self._psutil is not None:
+            try:
+                return round(self._psutil.virtual_memory().available / (1024 * 1024), 1)
+            except Exception:
+                pass
+        return v
 
     @staticmethod
     def _cpu_temp():
@@ -154,8 +192,8 @@ class SystemSampler(threading.Thread):
         self.rows.append({
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "cpu_percent": self._cpu_percent(),
-            "rss_mb": self._proc_kb("/proc/self/status", "VmRSS"),
-            "mem_available_mb": self._proc_kb("/proc/meminfo", "MemAvailable"),
+            "rss_mb": self._rss_mb(),
+            "mem_available_mb": self._mem_available_mb(),
             "cpu_temp_c": self._cpu_temp(),
             "throttled_hex": self._throttled(),
             "load_avg_1m": self._load_avg(),
@@ -194,7 +232,9 @@ def main():
     ap = argparse.ArgumentParser(description="Torch-free NCNN evaluation on edge devices (writes CSVs).")
     ap.add_argument("--model", default=config.ACTIVE_MODEL, help="classifier name (default: BERTH_MODEL)")
     ap.add_argument("--dataset", required=True, help="dataset dir with occupied/ + vacant/ crops")
-    ap.add_argument("--threads", type=int, default=config.NCNN_THREADS, help="NCNN threads per inference")
+    ap.add_argument("--runtime", choices=["ncnn", "torch"], default="ncnn",
+                    help="inference runtime: ncnn (edge, default, torch-free) or torch (dev laptop / RPi 5)")
+    ap.add_argument("--threads", type=int, default=config.NCNN_THREADS, help="inference threads (NCNN or torch)")
     ap.add_argument("--limit", type=int, default=0, help="max crops per class (0 = all)")
     ap.add_argument("--out", default=str(config.BASE_DIR / "eval_results"), help="results base directory")
     ap.add_argument("--device", default=platform.node() or "edge", help="device tag in filenames/summary")
@@ -208,7 +248,10 @@ def main():
         sys.exit(f"No crops found under {dataset_dir} (expected occupied/ and vacant/ subdirs).")
 
     config.NCNN_THREADS = args.threads
-    clf = build_classifier(args.model)
+    if args.runtime == "torch":
+        import torch
+        torch.set_num_threads(args.threads)  # match the ncnn thread budget
+    clf = build_classifier(args.model, args.runtime)
     t0 = time.perf_counter()
     clf.load()
     load_time_ms = (time.perf_counter() - t0) * 1000
@@ -216,7 +259,7 @@ def main():
         sys.exit(f"Model '{args.model}' failed to load — check edge_models/ exports.")
 
     print(f"Model {args.model} loaded in {load_time_ms:.0f} ms — "
-          f"evaluating {len(files)} crops with {args.threads} NCNN thread(s)...")
+          f"evaluating {len(files)} crops with {args.threads} {args.runtime} thread(s)...")
 
     sampler = SystemSampler(args.sample_interval)
     sampler.start()
@@ -275,6 +318,7 @@ def main():
         "latency_max_ms": round(float(lat.max()), 2),
         "throughput_imgs_per_s": round(n / total_duration_s, 2),
         "ncnn_threads": args.threads,
+        "runtime": args.runtime,
         "load_time_ms": round(load_time_ms, 1),
         "total_duration_s": round(total_duration_s, 1),
         "git_commit": git_commit(),
@@ -300,7 +344,7 @@ def main():
             print("Warning: no golden entries matched the evaluated files — parity skipped.")
 
     # ── Write session CSVs ───────────────────────────────────────────────────
-    session = f"{args.device}_{args.model}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    session = f"{args.device}_{args.model}_{args.runtime}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     out_dir = Path(args.out) / session
     out_dir.mkdir(parents=True, exist_ok=True)
     write_csv(out_dir / "predictions.csv", list(predictions[0].keys()), predictions)

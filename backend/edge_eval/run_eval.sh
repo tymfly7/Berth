@@ -6,6 +6,16 @@
 #
 #   ./run_eval.sh --dataset data/t12lot_subset --model yolo26n_classify
 #
+# --runtime selects the inference backend (ncnn default, or torch); both honour
+# --threads. Laptop runs (no berth service) call the CLI directly; the Pi 5 uses
+# this wrapper so the service is stopped for the run:
+#   # laptop, torch:
+#   python edge_eval/eval_edge.py --dataset data/t12lot_subset --runtime torch
+#   # laptop, ncnn:
+#   python edge_eval/eval_edge.py --dataset data/t12lot_subset --runtime ncnn
+#   # Pi 5, torch:
+#   ./run_eval.sh --dataset data/t12lot_subset --runtime torch --limit 500
+#
 # Override the service name with BERTH_SERVICE (default: berth).
 set -euo pipefail
 cd "$(dirname "$0")/.."

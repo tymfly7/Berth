@@ -253,6 +253,8 @@ OPERATIONS.md
 log_rpi_zero.md
 log_new_edge.md
 log_edge_eval.md
+log_edge_config.md
+log_new_edge_test.md
 
 # Edge eval CSV/goldens output — generated per run, not deployable
 backend/eval_results/

@@ -53,8 +53,9 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 |---------|-------------|
 | 8 Classifier Architectures | CNN from scratch, ResNet-18/50, MobileNetV4 Small/Medium, and per-scale YOLO26 Classify (n/s/m) |
 | YOLO26 Detector | Bounding-box vehicle detector used for misparked-vehicle (anomaly) detection |
-| Real-Time Detection | Per-camera WebSocket video stream (~20 FPS server / ~10 FPS edge) with slot-wise occupancy overlay |
+| Real-Time Detection | Per-camera WebSocket video stream (~20 FPS server / ~15 FPS edge) with slot-wise occupancy overlay |
 | ROI Editor | Draw, edit, and manage custom parking slot polygons per camera |
+| Orientation Layer | Display-only lot frame (outer perimeter, gates, flow arrows, anchor) drawn in the ROI editor and shown on the lot map |
 | Polygon Editing | Vertex drag, edge-midpoint insertion, duplicate, scale, undo/redo |
 | Multi-Camera Registry | USB, RTSP, and YouTube sources; one WebSocket feed per camera; cameras can share an ROI config |
 | Anomaly Detection | YOLO26 Detect flags misparked vehicles (straddling or outside markings) |
@@ -67,6 +68,8 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 | Model Comparison | Train all models, evaluate side-by-side, export to Excel |
 | Run History | Timestamped snapshots of past evaluation and training runs, browsable by date/time |
 | Edge / Hub Mode | Inference-only edge nodes run NCNN models and sync occupancy/alerts to a central hub |
+| Snapshot Mode | Grab one frame every N seconds instead of continuous decode (`BERTH_SNAPSHOT_INTERVAL`) — for weak edge boards |
+| Edge Eval CLI | Torch-free on-device benchmark: accuracy, latency, system stats, and PyTorch→NCNN parity |
 | SQLite Persistence | Trends, alerts, and training runs stored across restarts |
 | Backend Auth | Admin password validated server-side → short-lived signed Bearer token; static `X-API-Key` for machine clients (edge→hub sync) |
 
@@ -367,6 +370,14 @@ both occupancy classification and anomaly detection.
 | Undo / Redo | Ctrl+Z / Ctrl+Y |
 | Delete | Delete key removes the selected ROI |
 
+### Orientation layer
+
+Besides slot ROIs, the editor can draw a display-only **orientation layer** — an
+outer perimeter, entry/exit gates, traffic-flow arrows, and an anchor marker. It
+is rendered on the lot map (admin and public views) to make the map easier to
+read at a glance. The layer is stored separately from the slot ROIs and is never
+fed to inference.
+
 ### Auto-propose ROIs
 
 The backend can auto-detect candidate slot regions from an uploaded image (or the
@@ -516,6 +527,10 @@ occupancy + alerts in a local SQLite DB. A background `SyncWorker` pushes
 unsynced rows to the hub every 60 s when `BERTH_EDGE_HUB_URL` is set; if the hub
 is unreachable, rows stay buffered and retry on the next tick (no data lost).
 
+On very weak boards (e.g. the Pi Zero 2 W) set `BERTH_SNAPSHOT_INTERVAL=<seconds>`
+to enable **snapshot mode**: the processor grabs a single frame every N seconds
+instead of decoding the stream continuously, freeing the CPU for inference.
+
 The **hub** receives those rows via the ingest endpoints (`POST
 /api/ingest/occupancy`, `POST /api/ingest/alerts`).
 
@@ -538,6 +553,38 @@ Exports land in `backend/edge_models/`. Copy the resulting `*_ncnn_model/`
 directories into the edge node's `edge_models/` before its first run — pick the
 YOLO26 classify scale that matches the board (nano for the Pi Zero 2 W, medium for
 the Pi 5). See [Docker Deployment](#docker-deployment) for the RPi image.
+
+### Evaluating models on the edge
+
+`backend/edge_eval/` benchmarks exported models directly on an edge device —
+no FastAPI, torch-free by default — against a crops dataset (`occupied/` +
+`vacant/` folders):
+
+| Script | Runs on | Purpose |
+|--------|---------|---------|
+| `eval_edge.py` | edge / laptop | Classify every crop; writes a timestamped session of `predictions.csv`, `summary.csv` (metrics + latency stats), and `system.csv` (CPU / RAM / temperature / throttling) |
+| `run_eval.sh` | edge | Wrapper that stops the `berth` systemd service so the eval gets the full CPU/RAM budget, then restarts it on exit |
+| `make_goldens.py` | hub / dev | Run a fixed crop set through the full torch classifier and save golden probabilities |
+| `edge_check.py` | edge | Post-deploy smoke check: NCNN model loads + one sane inference (exit 0 = pass) |
+
+```bash
+# On the edge device (service auto-stopped / restarted; args passed through)
+./edge_eval/run_eval.sh --dataset data/t12lot_subset --model yolo26n_classify
+
+# Direct, e.g. on a dev laptop — pick the runtime to benchmark
+python edge_eval/eval_edge.py --dataset data/t12lot_subset --runtime ncnn
+python edge_eval/eval_edge.py --dataset data/t12lot_subset --runtime torch
+
+# PyTorch → NCNN conversion drift: goldens on the hub, --parity on the edge
+python edge_eval/make_goldens.py --dataset data/t12lot_subset --model yolo26n_classify
+python edge_eval/eval_edge.py --dataset data/t12lot_subset \
+  --parity eval_results/goldens_yolo26n_classify.json
+```
+
+`--runtime` selects the inference backend — `ncnn` (default, torch-free) or
+`torch` (imported lazily; for benchmarking the same model with PyTorch on a dev
+laptop or Pi 5). Results land in
+`backend/eval_results/<device>_<model>_<runtime>_<timestamp>/` (gitignored).
 
 ---
 
@@ -628,6 +675,8 @@ the Pi 5). See [Docker Deployment](#docker-deployment) for the RPi image.
 |--------|----------|-------------|
 | GET | `/api/roi/{camera_id}` | Get saved ROIs for a camera |
 | POST | `/api/roi/{camera_id}` | Save ROIs for a camera |
+| GET | `/api/roi/{camera_id}/orientation` | Get the display-only orientation layer (perimeter / gates / flow / anchor) |
+| POST | `/api/roi/{camera_id}/orientation` | Save the orientation layer |
 | DELETE | `/api/roi/{camera_id}/{roi_id}` | Delete a single ROI |
 | DELETE | `/api/roi/{camera_id}` | Delete all ROIs + snapshot for a camera |
 | GET | `/api/roi/{camera_id}/snapshot` | Get reference snapshot |
@@ -674,6 +723,11 @@ School Project/
 │   ├── train_all.py                     # CLI: train all models in sequence
 │   ├── export_models.py                 # CLI: export trained models to NCNN for edge
 │   ├── verify.py                        # CLI: environment / structure sanity check
+│   ├── edge_eval/                       # On-device eval pipeline (see Edge / Hub Deployment)
+│   │   ├── eval_edge.py                 # Torch-free eval CLI (accuracy + latency + system CSVs)
+│   │   ├── make_goldens.py              # Hub-side torch goldens for NCNN parity checks
+│   │   ├── edge_check.py                # Post-deploy model load / inference smoke check
+│   │   └── run_eval.sh                  # Stops/restarts the berth service around a run
 │   ├── berth.db                         # SQLite — trends, alerts, training runs
 │   ├── models/                          # Trained weights (*.pth / *.pt)
 │   ├── edge_models/                     # NCNN exports (*_ncnn_model/ dirs) for edge deployment
@@ -707,7 +761,8 @@ School Project/
 │   │   │   ├── history_store.py         # Timestamped eval/train run snapshots
 │   │   │   └── visualizer.py            # Loss / accuracy plots
 │   │   ├── inference/
-│   │   │   ├── classifier.py            # ParkingClassifier (CNN + YOLO classify)
+│   │   │   ├── classifier.py            # Torch-free classifier dispatcher (profile → backend)
+│   │   │   ├── torch_classifier.py      # ParkingClassifier — full torch path (server)
 │   │   │   ├── ncnn_classifier.py       # NCNN edge classifier (ARM64)
 │   │   │   ├── inference_pool.py        # Shared detection worker pool
 │   │   │   ├── slot_detector.py         # ROI-crop occupancy detection
@@ -723,8 +778,7 @@ School Project/
 │   │   ├── export/model_exporter.py     # Export models to NCNN
 │   │   ├── sync/sync_worker.py          # Edge → hub occupancy/alert push
 │   │   ├── reports/model_report.py      # Comparison Excel + training detail loader
-│   │   ├── db/database.py               # SQLite helpers (trends, alerts, runs, ingest)
-│   │   └── utils/helpers.py
+│   │   └── db/database.py               # SQLite helpers (trends, alerts, runs, ingest)
 │   ├── data/                            # Training images (occupied / vacant) + YOLO datasets
 │   ├── outputs/                         # Training logs, plots, YOLO run artifacts
 │   ├── roi_configs/                     # Per-camera ROI JSON + snapshots
@@ -751,7 +805,9 @@ School Project/
 │   │   │   ├── HeatmapView.jsx          # Per-slot usage heatmap
 │   │   │   ├── ConfidenceGauge.jsx      # Average confidence arc gauge
 │   │   │   ├── RoiEditor.jsx            # Polygon ROI drawing + editing canvas
-│   │   │   ├── RoiManager.jsx           # ROI list, labels, save/discard
+│   │   │   ├── RoiToolbar.jsx           # ROI editor toolbar (tools, layers, save/discard)
+│   │   │   ├── roiDraw.js               # Pure canvas draw pass for the editor scene
+│   │   │   ├── roiGeometry.js           # Polygon geometry + color helpers (hit-testing, centroids)
 │   │   │   ├── CameraManager.jsx        # Add / activate / remove cameras
 │   │   │   ├── ControlPanel.jsx         # Video source switcher + model selector
 │   │   │   ├── TrainingPanel.jsx        # Dataset upload + training controls
@@ -760,7 +816,6 @@ School Project/
 │   │   │   ├── AnomalyPanel.jsx         # Anomaly detection toggle + sensitivity
 │   │   │   ├── OccupancyPanel.jsx       # Occupancy threshold control
 │   │   │   ├── SettingsPanel.jsx        # Collapsible wrapper for all settings
-│   │   │   ├── AlertBanner.jsx          # Occupancy threshold alert display
 │   │   │   └── ServerStatus.jsx         # Backend operation/connectivity indicator
 │   │   ├── utils/roiUtils.js            # ROI → slot helpers
 │   │   └── tests/                       # Vitest component tests
@@ -801,12 +856,14 @@ environment variables.
 | `BERTH_INFERENCE_WORKERS` | `min(cpu-1, 4)` | Shared inference pool worker count |
 | `BERTH_MAX_ACTIVE_CAMERAS` | `8` server / `2` edge | Max cameras allowed active at once |
 | `BERTH_OCCUPANCY_THRESHOLD` | `0.40` | YOLO-classify "occupied" decision threshold |
-| `BERTH_INFER_FPS` | `8` server / `3` edge | Inference rate, decoupled from stream FPS |
+| `BERTH_INFER_FPS` | `8` server / `4` edge | Inference rate, decoupled from stream FPS |
+| `BERTH_NCNN_THREADS` | `1` server / `3` edge | Cores one NCNN inference spreads across (keep workers × threads within the core count) |
+| `BERTH_SNAPSHOT_INTERVAL` | `0` | Snapshot mode: grab one frame every N seconds instead of continuous decode (`0` = off) — for weak edge boards |
 | `BERTH_ANOMALY_FPS` | `0.2` | Anomaly (YOLO detect) pass cadence — one pass every 5 s by default |
 | `BERTH_HISTORY_MAX` | `0` | Max run-history snapshots kept per dataset/model (`0` = keep all) |
 | `BERTH_API_THREADS` | `8` edge / `0` server | Cap on the anyio threadpool for sync endpoints (`0` = anyio default) |
 | `BERTH_CAPTURE_DIR` | `~/berth_captures` | Base directory for per-camera data-gathering captures |
-| `BERTH_CAPTURE_INTERVAL` | `300` | Seconds between capture frames when a camera has gathering enabled |
+| `BERTH_CAPTURE_INTERVAL` | `600` | Seconds between capture frames when a camera has gathering enabled |
 | `BERTH_YT_CACHE_TTL` | `240` | YouTube HLS URL cache lifetime (seconds) |
 | `BERTH_RELOAD` | `0` | Set `1` to enable uvicorn auto-reload (dev) |
 | `BERTH_CAM_SOURCE_<ID>` | _(empty)_ | Per-camera runtime source override (keeps credentials off disk) |
@@ -818,8 +875,8 @@ Training-specific variables are listed under [Training Models](#training-models)
 | Setting | Server | Edge |
 |---------|--------|------|
 | Frame size | 1280×720 | 960×540 |
-| Stream FPS | 20 | 10 |
-| Inference FPS | 8 | 3 |
+| Stream FPS | 20 | 15 |
+| Inference FPS | 8 | 4 |
 | JPEG quality | 80 | 90 |
 
 ### Alert thresholds
