@@ -87,6 +87,7 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
   const [proposals, setProposals]   = useState([])
   const [proposing, setProposing]   = useState(false)
   const [editBg, setEditBg]         = useState(null)
+  const [orient, setOrient]         = useState(null)
   const skipSnapshotUpload          = useRef(false)
 
   const activeCams = cameras.filter(c => c.active)
@@ -98,12 +99,16 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
   // ROI camera ID (may differ from the WS camera ID via roi_camera_id mapping).
   const cameraId = editCam ? (editCam.roi_camera_id || editCam.id) : null
 
-  // Reload ROIs whenever the target camera changes.
+  // Reload ROIs (and the orientation frame) whenever the target camera changes.
   useEffect(() => {
-    if (!cameraId || apiBase == null) { setRois([]); return }
+    if (!cameraId || apiBase == null) { setRois([]); setOrient(null); return }
     apiFetch(`${apiBase}/api/roi/${cameraId}`)
       .then(r => r.ok ? r.json() : [])
       .then(data => setRois(Array.isArray(data) ? data : []))
+      .catch(() => {})
+    apiFetch(`${apiBase}/api/roi/${cameraId}/orientation`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setOrient(data && Object.keys(data).length ? data : null))
       .catch(() => {})
   }, [cameraId, apiBase])
 
@@ -203,6 +208,12 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
       })
       if (res.ok) {
         const d = await res.json()
+        // Persist the orientation frame too (separate file; never processed).
+        await apiFetch(`${apiBase}/api/roi/${cameraId}/orientation`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orientation: orient || {} }),
+        }).catch(() => {})
         showMsg(`Saved ${d.saved} ROI${d.saved !== 1 ? 's' : ''}`)
         onRoisSaved?.()
       } else {
@@ -381,6 +392,8 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
               onRoisChange={setRois}
               proposals={proposals}
               onProposalsChange={setProposals}
+              orientation={orient}
+              onOrientationChange={setOrient}
               idPrefix="cam"
             />
           </div>

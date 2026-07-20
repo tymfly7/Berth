@@ -278,7 +278,7 @@ export default function RoiToolbar({
         <button style={btnStyle(false)} onClick={() => { commitOrient({ perimeter: null }); setPerimDraft([]) }}
           title="Remove the perimeter">Clear perimeter</button>
         <button style={btnStyle(false)}
-          onClick={() => { onOrientationChange?.({ perimeter: null, gates: [], flow: [], anchor: null }); setPerimDraft([]); setFlowStart(null) }}
+          onClick={() => { commitOrient({ perimeter: null, gates: [], flow: [], anchor: null }); setPerimDraft([]); setFlowStart(null) }}
           title="Clear the entire orientation frame">Clear frame</button>
       </div>
       <div style={{ fontSize: '0.72rem', color: 'rgba(120,200,255,0.85)', marginBottom: 8, paddingLeft: 2 }}>

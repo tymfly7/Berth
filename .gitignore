@@ -255,6 +255,7 @@ log_new_edge.md
 log_edge_eval.md
 log_edge_config.md
 log_new_edge_test.md
+deploy_reorg_plan.md
 
 # Edge eval CSV/goldens output — generated per run, not deployable
 backend/eval_results/

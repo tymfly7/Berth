@@ -155,6 +155,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
   const [roiMsg, setRoiMsg]           = useState(null)
   const [videoUploaded, setVideoUploaded] = useState(false)
   const [roiEditorBg, setRoiEditorBg] = useState(null)
+  const [imgAspect, setImgAspect]     = useState(null)
+  const [orient, setOrient]           = useState(null)
   const [proposals, setProposals]     = useState([])
   const [proposing, setProposing]     = useState(false)
   const [mainRect, setMainRect]       = useState(null)
@@ -206,6 +208,18 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       .then(data => setRois(Array.isArray(data) ? data : []))
       .catch(() => {})
   }, [apiBase, selectedLotId])
+
+  // Measure the ROI editor background so its canvas box matches the image's aspect
+  // ratio — otherwise a non-16:9 static upload gets stretched (distorted) to fill
+  // the fixed 16:9 box. Live camera frames are 16:9 so this is a no-op for them.
+  useEffect(() => {
+    if (!roiEditorBg) { setImgAspect(null); return }
+    const img = new Image()
+    img.onload = () => {
+      if (img.naturalWidth && img.naturalHeight) setImgAspect(img.naturalWidth / img.naturalHeight)
+    }
+    img.src = roiEditorBg
+  }, [roiEditorBg])
 
   // Measure the main column so the enlarged result viewer can sit over it while
   // leaving the Settings sidebar visible and clickable.
@@ -289,6 +303,12 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       const res = await apiFetch(`${apiBase}/api/roi/${lotId}`)
       const data = res.ok ? await res.json() : []
       setRois(Array.isArray(data) ? data : [])
+    } catch {}
+
+    try {
+      const res = await apiFetch(`${apiBase}/api/roi/${lotId}/orientation`)
+      const data = res.ok ? await res.json() : null
+      setOrient(data && Object.keys(data).length ? data : null)
     } catch {}
 
     if (uploadedImage) {
@@ -808,6 +828,12 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                   setSelectedLotId(targetId)
                   try {
                     await saveRoisToLot(targetId, rois)
+                    // Persist the orientation frame too (separate file; never processed).
+                    await apiFetch(`${apiBase}/api/roi/${targetId}/orientation`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ orientation: orient || {} }),
+                    }).catch(() => {})
                   } catch (e) {
                     showRoiMsg(`Error: ${e.message}`)
                   }
@@ -833,18 +859,24 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               >✕</button>
             </div>
 
-            {/* Canvas area: responsive 16:9, capped to viewport so the whole lot stays visible */}
-            <div style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', maxHeight: '78vh', background: '#000', flexShrink: 0 }}>
-              <div style={{ position: 'absolute', inset: 0 }}>
+            {/* Canvas area: matches the uploaded image's aspect ratio so static
+                uploads aren't stretched; capped to the viewport (both dimensions,
+                so portrait images stay un-stretched too) and centered. */}
+            <div style={{ display: 'flex', justifyContent: 'center', background: '#000', flexShrink: 0 }}>
+              <div style={{ position: 'relative', width: '100%', aspectRatio: imgAspect || 16 / 9, maxWidth: `calc(78vh * ${imgAspect || 16 / 9})`, maxHeight: '78vh' }}>
+                <div style={{ position: 'absolute', inset: 0 }}>
                 <RoiEditor
                   backgroundImage={roiEditorBg}
                   rois={rois}
                   onRoisChange={setRois}
                   proposals={proposals}
                   onProposalsChange={setProposals}
+                  orientation={orient}
+                  onOrientationChange={setOrient}
                   idPrefix="test"
                   overlay
                 />
+                </div>
               </div>
             </div>
 

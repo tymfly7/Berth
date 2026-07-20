@@ -44,6 +44,8 @@ export default function RoiEditor({
   const [orientTool, setOrientTool] = useState('perimeter')
   const [perimDraft, setPerimDraft] = useState([])       // perimeter points being drawn
   const [flowStart, setFlowStart] = useState(null)       // first click of a flow arrow
+  const [orientPast, setOrientPast] = useState([])       // undo/redo stacks for the frame
+  const [orientFuture, setOrientFuture] = useState([])
   const O = orientation || {}
   const oGates = O.gates || []
   const oFlow = O.flow || []
@@ -132,25 +134,37 @@ export default function RoiEditor({
 
   useEffect(() => {
     const handleKeyDown = (e) => {
+      const orienting = orientEnabled && layer === 'orientation'
+      const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)
       if (e.key === 'Escape') {
+        // Cancel any in-progress drawing (slot polygon or perimeter/flow draft).
         setInProgress([])
         setLivePoint(null)
+        setPerimDraft([])
+        setFlowStart(null)
         if (dragRef.current) { dragRef.current = null; setEditPolygon(null) }
       } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
         e.preventDefault()
-        undo()
+        orienting ? undoOrient() : undo()
       } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.shiftKey && e.key === 'z'))) {
         e.preventDefault()
-        redo()
-      } else if (e.key === 'Delete' && selectedId &&
-                 !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
-        commitChange(rois.filter(r => r.id !== selectedId))
-        setSelectedId(null)
+        orienting ? redoOrient() : redo()
+      } else if (e.key === 'Delete' && !typing) {
+        if (orienting) {
+          // While drawing, drop the last perimeter point; otherwise remove the
+          // committed perimeter (undoable).
+          if (perimDraft.length > 0) setPerimDraft(d => d.slice(0, -1))
+          else if (O.perimeter) commitOrient({ perimeter: null })
+        } else if (selectedId) {
+          commitChange(rois.filter(r => r.id !== selectedId))
+          setSelectedId(null)
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, selectedId, rois, commitChange])
+  }, [undo, redo, selectedId, rois, commitChange,
+      orientEnabled, layer, undoOrient, redoOrient, perimDraft, O.perimeter, commitOrient])
 
   useEffect(() => { redraw() }, [redraw])
 
@@ -283,11 +297,29 @@ export default function RoiEditor({
 
   // ── Orientation authoring ──
   const commitOrient = useCallback((patch) => {
+    setOrientPast(p => [...p, orientation])
+    setOrientFuture([])
     onOrientationChange?.({
       perimeter: O.perimeter || null, gates: oGates, flow: oFlow, anchor: O.anchor || null,
       ...patch,
     })
-  }, [onOrientationChange, O.perimeter, O.anchor, oGates, oFlow])
+  }, [onOrientationChange, orientation, O.perimeter, O.anchor, oGates, oFlow])
+
+  const undoOrient = useCallback(() => {
+    if (orientPast.length === 0) return
+    const prev = orientPast[orientPast.length - 1]
+    setOrientPast(p => p.slice(0, -1))
+    setOrientFuture(f => [orientation, ...f])
+    onOrientationChange?.(prev)
+  }, [orientPast, orientation, onOrientationChange])
+
+  const redoOrient = useCallback(() => {
+    if (orientFuture.length === 0) return
+    const next = orientFuture[0]
+    setOrientFuture(f => f.slice(1))
+    setOrientPast(p => [...p, orientation])
+    onOrientationChange?.(next)
+  }, [orientFuture, orientation, onOrientationChange])
 
   const handleOrientClick = useCallback((pt) => {
     const [x, y] = pt
