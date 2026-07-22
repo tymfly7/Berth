@@ -27,6 +27,9 @@ export default function AdminView() {
   const [liveSlotsMap, setLiveSlotsMap] = useState({})
   const [lotMapIdx, setLotMapIdx] = useState(0)
   const [menuOpen, setMenuOpen] = useState(false)
+  // Bumped when a Camera Registry row asks to edit ROIs; opens the live-feed
+  // editor (in the main column) for that camera, so both entry points share one UI.
+  const [roiEditReq, setRoiEditReq] = useState(null)
   const prevCamIdsRef = useRef('')
 
   // "Live" once any active camera's WS is delivering metrics.
@@ -202,6 +205,7 @@ export default function AdminView() {
             onCameraMetrics={handleCamMetrics}
             onCameraUnavailable={handleCamUnavailable}
             onRoisSaved={refreshRoiSlots}
+            editRequest={roiEditReq}
           />
           <div className="metrics-row fade-in">
             <MetricCards
@@ -269,7 +273,7 @@ export default function AdminView() {
         </div>
 
         <div className={`side-column ${menuOpen ? 'side-column--open' : ''}`}>
-          <SettingsPanel apiAction={apiAction} apiBase={API_BASE} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} setActiveModel={setActiveModelOptimistic} onCamerasChange={setCameras} onRoisSaved={refreshRoiSlots} />
+          <SettingsPanel apiAction={apiAction} apiBase={API_BASE} modelInfo={modelInfo} fetchModelInfo={fetchModelInfo} setActiveModel={setActiveModelOptimistic} onCamerasChange={setCameras} onEditRois={(cam) => setRoiEditReq({ camId: cam.id, seq: Date.now() })} />
         </div>
       </div>
 

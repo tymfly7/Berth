@@ -1,14 +1,16 @@
 # Standalone Raspberry Pi image — full-stack (frontend + backend, ARM64)
 #
+# All commands below run from the repo root (the build context).
+#
 # Build natively on RPi:
-#   docker build -t berth-rpi:latest -f Dockerfile.rpi .
+#   docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .
 #
 # Or cross-compile on x86 and transfer:
-#   docker buildx build --platform linux/arm64 -t berth-rpi:latest -f Dockerfile.rpi . --load
+#   docker buildx build --platform linux/arm64 -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi . --load
 #   docker save berth-rpi:latest | gzip > berth-rpi.tar.gz
 #                   OR
 #   docker save berth-rpi:latest -o berth-rpi.tar    
-#   scp berth-rpi.tar.gz pi@raspberrypi.local:~/
+#   scp berth-rpi.tar.gz USER@HOST:~/
 #   # on RPi: docker load < berth-rpi.tar.gz
 #
 # Admin password is validated server-side at runtime — set BERTH_ADMIN_PASSWORD
@@ -22,7 +24,7 @@ RUN npm ci
 COPY frontend/ ./
 # No VITE_API_KEY: the browser authenticates with the admin session token from
 # PIN login, never a baked-in static key. Backend BERTH_API_KEY is a runtime
-# (compose) env, server-side only — see docker-compose.rpi.yml.
+# (compose) env, server-side only — see deploy/edge/docker/docker-compose.rpi.yml.
 RUN npm run build
 
 # ── Stage 2: ARM64 backend + static frontend ─────────────

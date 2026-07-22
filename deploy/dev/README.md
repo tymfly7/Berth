@@ -1,4 +1,4 @@
-# Dev — run from source
+# Dev: run from source
 
 Fast local iteration on any laptop. No container, no edge tuning.
 

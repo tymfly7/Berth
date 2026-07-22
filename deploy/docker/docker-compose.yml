@@ -2,7 +2,9 @@ name: berth
 
 services:
   berth:
-    build: .
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
     image: berth:1.0
     container_name: berth
     ports:
@@ -16,9 +18,9 @@ services:
       - BERTH_BATCH_SIZE=64
       - BERTH_CAPTURE_DIR=/app/captures
     volumes:
-      - ./backend/data:/app/data
-      - ./backend/models:/app/models
-      - ./backend/outputs:/app/outputs
-      - ./backend/uploads:/app/uploads
-      - ./captures:/app/captures
+      - ../../backend/data:/app/data
+      - ../../backend/models:/app/models
+      - ../../backend/outputs:/app/outputs
+      - ../../backend/uploads:/app/uploads
+      - ../../captures:/app/captures
     restart: unless-stopped

@@ -28,6 +28,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 - [Common Errors](#common-errors)
 - [Docker Deployment](#docker-deployment)
 - [Contributing](#contributing)
+- [License](#license)
 - [Acknowledgements](#acknowledgements)
 
 > Operator tips, camera/ROI field notes, and hardening recommendations live in
@@ -68,7 +69,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 | Model Comparison | Train all models, evaluate side-by-side, export to Excel |
 | Run History | Timestamped snapshots of past evaluation and training runs, browsable by date/time |
 | Edge / Hub Mode | Inference-only edge nodes run NCNN models and sync occupancy/alerts to a central hub |
-| Snapshot Mode | Grab one frame every N seconds instead of continuous decode (`BERTH_SNAPSHOT_INTERVAL`) — for weak edge boards |
+| Snapshot Mode | Grab one frame every N seconds instead of continuous decode (`BERTH_SNAPSHOT_INTERVAL`), for weak edge boards |
 | Edge Eval CLI | Torch-free on-device benchmark: accuracy, latency, system stats, and PyTorch→NCNN parity |
 | SQLite Persistence | Trends, alerts, and training runs stored across restarts |
 | Backend Auth | Admin password validated server-side → short-lived signed Bearer token; static `X-API-Key` for machine clients (edge→hub sync) |
@@ -257,13 +258,13 @@ is referred to as `yolo26` at **inference** time and `yolo26_detect` at
 | `mobilenetv4s` | MobileNetV4-Small (timm) | Lightweight; default model on edge nodes |
 | `mobilenetv4m` | MobileNetV4-Medium (timm) | Higher-capacity MobileNet variant |
 | `yolo26n_classify` | YOLO26 Classify (nano) | NMS-free; smallest — targets the Pi Zero 2 W |
-| `yolo26s_classify` | YOLO26 Classify (small) | NMS-free, edge-optimized; **default active model** |
+| `yolo26s_classify` | YOLO26 Classify (small) | NMS-free, edge-optimized; default active model |
 | `yolo26m_classify` | YOLO26 Classify (medium) | NMS-free; heaviest classify scale — targets the Pi 5 |
 | `yolo26_detect` | YOLO26 Detect (`yolo26s.pt`) | Object detector for anomaly / misparked detection |
 
 The three YOLO26 classify scales share one training path and fine-tune the
 ImageNet-pretrained `yolo26{n,s,m}-cls.pt` checkpoint (downloaded on first use).
-Pick the scale to match the target edge board — nano for the Pi Zero 2 W, medium
+Pick the scale to match the target edge board: nano for the Pi Zero 2 W, medium
 for the Pi 5.
 
 ### Train via API
@@ -299,7 +300,7 @@ curl -X POST http://localhost:8001/api/evaluate/all
 curl -o comparison.xlsx http://localhost:8001/api/evaluate/excel
 ```
 
-> Training and evaluation are **server-only** — they return `403` on edge nodes.
+> Training and evaluation are **server-only**: they return `403` on edge nodes.
 
 ### Training outputs (saved to `backend/outputs/`)
 
@@ -324,7 +325,7 @@ its `history_<model>.json`, so only the latest result was ever kept. Every run i
 now additionally archived as a timestamped JSON snapshot under
 `outputs/eval_history/` and `outputs/train_history/`, so past runs stay browsable
 by date/time (via the Admin UI or the history endpoints below). Snapshots are
-small, so retention defaults to "keep everything"; cap it with `BERTH_HISTORY_MAX`.
+small, so retention defaults to keeping all of them. Set a limit with `BERTH_HISTORY_MAX`.
 
 ### Training environment variables
 
@@ -525,7 +526,7 @@ Berth can run in two profiles, selected with `BERTH_DEPLOYMENT`:
 **Edge nodes** run lighter NCNN models at reduced resolution/FPS and buffer
 occupancy + alerts in a local SQLite DB. A background `SyncWorker` pushes
 unsynced rows to the hub every 60 s when `BERTH_EDGE_HUB_URL` is set; if the hub
-is unreachable, rows stay buffered and retry on the next tick (no data lost).
+is unreachable, rows stay buffered and retry on the next tick, so no data is lost.
 
 On very weak boards (e.g. the Pi Zero 2 W) set `BERTH_SNAPSHOT_INTERVAL=<seconds>`
 to enable **snapshot mode**: the processor grabs a single frame every N seconds
@@ -550,14 +551,14 @@ curl http://localhost:8001/api/export/status
 ```
 
 Exports land in `backend/edge_models/`. Copy the resulting `*_ncnn_model/`
-directories into the edge node's `edge_models/` before its first run — pick the
+directories into the edge node's `edge_models/` before its first run, picking the
 YOLO26 classify scale that matches the board (nano for the Pi Zero 2 W, medium for
 the Pi 5). See [Docker Deployment](#docker-deployment) for the RPi image.
 
 ### Evaluating models on the edge
 
-`backend/edge_eval/` benchmarks exported models directly on an edge device —
-no FastAPI, torch-free by default — against a crops dataset (`occupied/` +
+`backend/edge_eval/` benchmarks exported models directly on an edge device,
+without FastAPI and torch-free by default, against a crops dataset (`occupied/` +
 `vacant/` folders):
 
 | Script | Runs on | Purpose |
@@ -719,7 +720,7 @@ School Project/
 │   ├── config.py                        # Centralized config (paths, env vars, profiles)
 │   ├── .env                             # Local secrets (gitignored) — loaded by config.py
 │   ├── requirements.txt                 # Full server deps
-│   ├── requirements.edge.txt            # Slim edge deps (used by Dockerfile.rpi)
+│   ├── requirements.edge.txt            # Slim edge deps (used by deploy/edge/docker/Dockerfile.rpi)
 │   ├── train_all.py                     # CLI: train all models in sequence
 │   ├── export_models.py                 # CLI: export trained models to NCNN for edge
 │   ├── verify.py                        # CLI: environment / structure sanity check
@@ -823,10 +824,10 @@ School Project/
 │   └── vite.config.js
 ├── configs/
 │   └── model_configs.yaml
-├── Dockerfile                           # Server image (frontend build + Python backend)
-├── Dockerfile.rpi                       # ARM64 / Raspberry Pi edge image
-├── docker-compose.yml                   # Server stack (127.0.0.1:9000 → 8000)
-├── docker-compose.rpi.yml               # Raspberry Pi edge node (8001 → 8000)
+├── deploy/                              # Deployment tiers — see deploy/README.md
+│   ├── docker/                          # Server image + compose (x86, 127.0.0.1:9000 → 8000)
+│   └── edge/                            # Raspberry Pi: docker/ (Pi 5, Zero 2 W) + native/ (systemd)
+├── .dockerignore                        # Build-context excludes (build context = repo root)
 ├── .env_edge                            # Secrets template for compose (gitignored)
 ├── OPERATIONS.md                        # Operator tips, field notes, hardening
 └── README.md
@@ -845,7 +846,7 @@ environment variables.
 | `BERTH_PORT` | `8001` | Backend port |
 | `BERTH_ADMIN_PASSWORD` | _(empty — login returns 503)_ | Admin password, validated server-side by `/api/auth/login` |
 | `BERTH_AUTH_SECRET` | _(random per start)_ | Signing key for session tokens; set it to keep logins valid across restarts |
-| `BERTH_AUTH_TTL` | `315360000` | Admin session token lifetime in seconds (~10 years by default, so local logins don't expire; lower it for network-facing deployments) |
+| `BERTH_AUTH_TTL` | `315360000` | Admin session token lifetime in seconds (~10 years by default, so local logins do not expire; lower it for network-facing deployments) |
 | `BERTH_API_KEY` | _(empty — static-key path open)_ | Static service key (`X-API-Key`) for machine clients (edge→hub sync) + WS token |
 | `BERTH_ALLOWED_ORIGIN` | _(empty)_ | Extra explicit CORS origin (LAN ranges allowed by default) |
 | `BERTH_UPLOAD_RATE_LIMIT` | `10/minute` | Rate limit on upload endpoints |
@@ -858,7 +859,7 @@ environment variables.
 | `BERTH_OCCUPANCY_THRESHOLD` | `0.40` | YOLO-classify "occupied" decision threshold |
 | `BERTH_INFER_FPS` | `8` server / `4` edge | Inference rate, decoupled from stream FPS |
 | `BERTH_NCNN_THREADS` | `1` server / `3` edge | Cores one NCNN inference spreads across (keep workers × threads within the core count) |
-| `BERTH_SNAPSHOT_INTERVAL` | `0` | Snapshot mode: grab one frame every N seconds instead of continuous decode (`0` = off) — for weak edge boards |
+| `BERTH_SNAPSHOT_INTERVAL` | `0` | Snapshot mode: grab one frame every N seconds instead of continuous decode (`0` = off), for weak edge boards |
 | `BERTH_ANOMALY_FPS` | `0.2` | Anomaly (YOLO detect) pass cadence — one pass every 5 s by default |
 | `BERTH_HISTORY_MAX` | `0` | Max run-history snapshots kept per dataset/model (`0` = keep all) |
 | `BERTH_API_THREADS` | `8` edge / `0` server | Cap on the anyio threadpool for sync endpoints (`0` = anyio default) |
@@ -899,8 +900,8 @@ All authentication is handled by the backend; the frontend holds no secrets.
   WebSocket. If `BERTH_ADMIN_PASSWORD` is unset, login returns `503` and the
   dashboard is unreachable.
 - **Service key.** Protected endpoints also accept a static `X-API-Key` equal to
-  `BERTH_API_KEY`. This is for machine-to-machine clients — chiefly the edge→hub
-  sync worker — not the browser. When `BERTH_API_KEY` is empty, the static-key
+  `BERTH_API_KEY`. This is for machine-to-machine clients, chiefly the edge→hub
+  sync worker, and not the browser. When `BERTH_API_KEY` is empty, the static-key
   path is open (any request without a valid Bearer token still passes); set it for
   network-facing deployments.
 - **Public endpoints** (`/api/public/*`) require no auth, so the public board
@@ -916,16 +917,16 @@ For hardening recommendations (TLS, strong secrets) see
 
 ## Environment & Secrets (.env)
 
-There are **two separate `.env` mechanisms** — don't confuse them:
+There are **two separate `.env` mechanisms**, which should not be confused:
 
-| File | Used by | When it's read |
+| File | Used by | When it is read |
 |------|---------|----------------|
 | `backend/.env` | bare-metal `python main.py` | Loaded by `python-dotenv` in `config.py` at startup |
-| `.env` in the compose dir (project root) | `docker compose` | Interpolated into `${BERTH_*}` placeholders in the compose files, then passed to the container |
+| `.env` in the dir you run compose from (repo root) | `docker compose` | Interpolated into `${BERTH_*}` placeholders in the compose files, then passed to the container |
 
-All `.env*` files are **gitignored** (`.env`, `frontend/.env`, `.env_edge`) — they
-hold secrets and must never be committed. `.env_edge` (project root) is a tracked-
-*intent*, untracked-*content* template you copy to `.env` and fill in.
+All `.env*` files are **gitignored** (`.env`, `frontend/.env`, `.env_edge`). They
+hold secrets and must never be committed. `.env_edge` (project root) is a template
+whose intent is tracked but whose content is not, copied to `.env` and filled in.
 
 ### Bare-metal: `backend/.env`
 
@@ -939,18 +940,18 @@ BERTH_API_KEY=                               # only needed for machine clients (
 ### Docker: compose-dir `.env`
 
 Compose reads variables for `${BERTH_API_KEY:-}`, `${BERTH_ADMIN_PASSWORD:-}`, and
-`${BERTH_AUTH_SECRET:-}` from a `.env` next to the compose file (the project root)
-or from your shell. Copy the template and fill it in:
+`${BERTH_AUTH_SECRET:-}` from a `.env` in the directory compose is run from (the repo
+root, where compose should always be invoked) or from the shell. Copy the template and fill it in:
 
 ```bash
 cp .env_edge .env        # then edit .env with real values
-docker compose -f docker-compose.rpi.yml up -d
+docker compose -f deploy/edge/docker/docker-compose.rpi.yml up -d
 ```
 
 To keep the template under a different name, point compose at it explicitly:
 
 ```bash
-docker compose --env-file .env_edge -f docker-compose.rpi.yml up -d
+docker compose --env-file .env_edge -f deploy/edge/docker/docker-compose.rpi.yml up -d
 ```
 
 `frontend/.env` no longer holds any secret — the browser authenticates with the
@@ -986,7 +987,7 @@ classifiers side-by-side. Download results as a formatted Excel file from
 | `ncnn` import error (edge) | Install the `ncnn` package on the ARM64 node |
 | CUDA out of memory | Reduce `BERTH_BATCH_SIZE` or use CPU-only PyTorch |
 | No images found | Run dataset preparation first |
-| WebSocket won't connect | Start the backend before the frontend; check the `:8001` port |
+| WebSocket will not connect | Start the backend before the frontend; check the `:8001` port |
 | YOLO26 weights not found | Train `yolo26_detect` / `yolo26{n,s,m}_classify` via the Training panel first |
 | Anomaly detection 400 error | YOLO26 Detect weights are missing — train it first |
 | Training/evaluation 403 | The node is in `edge` profile — use the hub server |
@@ -1002,15 +1003,17 @@ reachable on a single origin/port. **Inside every container the backend listens 
 `8000`** (the `8001` default applies only to bare-metal `python main.py`).
 
 Secrets are passed as container env, never baked into the image. With compose,
-`${BERTH_*}` placeholders are interpolated from a `.env` file **in the compose
-directory** (the project root) or from your shell — this is a *different* file from
+`${BERTH_*}` placeholders are interpolated from a `.env` file **in the directory you run
+compose from** (the repo root) or from your shell — this is a *different* file from
 `backend/.env`. See [Environment & Secrets](#environment--secrets-env).
 
 ### 1. Server, on a normal machine (x86-64)
 
+All Docker commands below run **from the repo root** (the build context).
+
 ```bash
 # Build the image
-docker build -t berth:1.0 .
+docker build -t berth:1.0 -f deploy/docker/Dockerfile .
 
 # Run it directly (host 8000 → container 8000)
 docker run -p 8000:8000 \
@@ -1019,23 +1022,23 @@ docker run -p 8000:8000 \
   berth:1.0
 
 # Or with compose (reads ./.env; publishes 127.0.0.1:9000 → 8000)
-docker compose up -d --build
+docker compose -f deploy/docker/docker-compose.yml up -d --build
 ```
 
-`docker-compose.yml` binds to `127.0.0.1:9000`, so the app is reachable at
+`deploy/docker/docker-compose.yml` binds to `127.0.0.1:9000`, so the app is reachable at
 `http://localhost:9000` and not exposed on the network — put a reverse proxy in
 front for remote access. It bind-mounts `backend/{data,models,outputs,uploads}` so
 datasets, weights, and runs persist on the host.
 
 ### 2. Edge node, on a Raspberry Pi (ARM64)
 
-The edge image (`Dockerfile.rpi`) installs CPU-only torch, runs the `edge` profile
-(inference-only), and reads camera `/dev/video0` plus persistent volumes for the
+The edge image (`deploy/edge/docker/Dockerfile.rpi`) runs the `edge` profile
+(inference-only, NCNN), and reads camera `/dev/video0` plus persistent volumes for the
 SQLite DB and ROI/camera config.
 
 ```bash
-# On the Pi — build locally and start (host 8001 → container 8000)
-docker compose -f docker-compose.rpi.yml up -d --build
+# On the Pi, from the repo root — build locally and start (host 8001 → container 8000)
+docker compose -f deploy/edge/docker/docker-compose.rpi.yml up -d --build
 ```
 
 The app is then reachable at `http://<pi-ip>:8001`. Required env (set via the
@@ -1045,17 +1048,24 @@ the hub. Pre-populate `backend/edge_models/` with the exported `*_ncnn_model/`
 directories (see [Edge / Hub Deployment](#edge--hub-deployment)) before the first
 run.
 
+> On the low-RAM boards (Pi Zero 2 W, Pi 3B), where the Docker daemon's memory
+> overhead is prohibitive, the backend instead runs Docker-free under systemd. That
+> path is documented in [deploy/edge/native/README.md](deploy/edge/native/README.md).
+
 ### 3. Baking the edge image on x86 and shipping it to the Pi
 
 Building on the Pi is slow. Cross-compile on a faster x86 machine, save the image
 to a tarball, copy it over, and load it on the Pi:
 
+Run these from the repo root so the tarball lands at the root (where it is gitignored,
+alongside the other local artifacts):
+
 ```bash
 # On the x86 build machine — cross-compile for ARM64
 docker buildx build --platform linux/arm64 \
-  -t berth-rpi:latest -f Dockerfile.rpi . --load
+  -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi . --load
 
-# Save the image to a compressed tarball
+# Save the image to a compressed tarball (→ repo root, gitignored)
 docker save berth-rpi:latest | gzip > berth-rpi.tar.gz
 
 # Copy it to the Pi
@@ -1063,15 +1073,15 @@ scp berth-rpi.tar.gz pi@raspberrypi.local:~/
 
 # On the Pi — load the image, then start with the prebuilt image
 docker load < berth-rpi.tar.gz
-docker compose -f docker-compose.rpi.yml up -d   # no --build: uses the loaded image
+docker compose -f deploy/edge/docker/docker-compose.rpi.yml up -d   # no --build: uses the loaded image
 ```
 
-`docker-compose.rpi.yml` references `image: berth-rpi:latest`, so once the image is
-loaded the compose run picks it up without rebuilding. (Native build on the Pi —
-`docker build -t berth-rpi:latest -f Dockerfile.rpi .` — also works, just slower.)
+`deploy/edge/docker/docker-compose.rpi.yml` references `image: berth-rpi:latest`, so once the
+image is loaded the compose run picks it up without rebuilding. (Native build on the Pi —
+`docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .` — also works, just slower.)
 
-> The `.tar`/`.tar.gz` artifacts are gitignored; don't commit them. Rebuild after
-> any frontend/backend change so the image isn't stale.
+> The `.tar`/`.tar.gz` artifacts are gitignored and should not be committed. Rebuild
+> after any frontend or backend change so the image is not stale.
 
 ---
 
@@ -1101,10 +1111,18 @@ Contribution etiquette (scope, docs, when to open an issue first) is in
 
 ---
 
+## License
+
+Released under the MIT License; see [LICENSE](LICENSE) for the full text. The
+third-party datasets and reference implementations this project builds on retain
+their own licenses (see [Acknowledgements](#acknowledgements)).
+
+---
+
 ## Acknowledgements
 - [AI-Parking-Lot-Detection](https://github.com/Nandini60/AI-Parking-Lot-Detection/tree/main/parking_ai) — Reference implementation and architectural inspiration
 
 - [parking-lot-t10](https://github.com/tomas-fryza/parking-lot-t10) — Tomas Fryza — time-lapse parking lot (lot T10) dataset used to build the occupied/vacant classifier crops and the YOLO detect set
 
-- Ultralytics YOLO26 — State-of-the-art object detection and classification models
+- Ultralytics YOLO26 — object detection and classification models
 

@@ -132,6 +132,34 @@ export default function RoiEditor({
     onRoisChange(next)
   }, [future, rois, onRoisChange])
 
+  // ── Orientation-frame undo/redo (defined before the keydown effect that lists
+  // them in its deps — otherwise the deps array hits the const's temporal dead
+  // zone on every render and RoiEditor throws). ──
+  const commitOrient = useCallback((patch) => {
+    setOrientPast(p => [...p, orientation])
+    setOrientFuture([])
+    onOrientationChange?.({
+      perimeter: O.perimeter || null, gates: oGates, flow: oFlow, anchor: O.anchor || null,
+      ...patch,
+    })
+  }, [onOrientationChange, orientation, O.perimeter, O.anchor, oGates, oFlow])
+
+  const undoOrient = useCallback(() => {
+    if (orientPast.length === 0) return
+    const prev = orientPast[orientPast.length - 1]
+    setOrientPast(p => p.slice(0, -1))
+    setOrientFuture(f => [orientation, ...f])
+    onOrientationChange?.(prev)
+  }, [orientPast, orientation, onOrientationChange])
+
+  const redoOrient = useCallback(() => {
+    if (orientFuture.length === 0) return
+    const next = orientFuture[0]
+    setOrientFuture(f => f.slice(1))
+    setOrientPast(p => [...p, orientation])
+    onOrientationChange?.(next)
+  }, [orientFuture, orientation, onOrientationChange])
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       const orienting = orientEnabled && layer === 'orientation'
@@ -296,31 +324,6 @@ export default function RoiEditor({
   }, [selectedId, rois, commitChange])
 
   // ── Orientation authoring ──
-  const commitOrient = useCallback((patch) => {
-    setOrientPast(p => [...p, orientation])
-    setOrientFuture([])
-    onOrientationChange?.({
-      perimeter: O.perimeter || null, gates: oGates, flow: oFlow, anchor: O.anchor || null,
-      ...patch,
-    })
-  }, [onOrientationChange, orientation, O.perimeter, O.anchor, oGates, oFlow])
-
-  const undoOrient = useCallback(() => {
-    if (orientPast.length === 0) return
-    const prev = orientPast[orientPast.length - 1]
-    setOrientPast(p => p.slice(0, -1))
-    setOrientFuture(f => [orientation, ...f])
-    onOrientationChange?.(prev)
-  }, [orientPast, orientation, onOrientationChange])
-
-  const redoOrient = useCallback(() => {
-    if (orientFuture.length === 0) return
-    const next = orientFuture[0]
-    setOrientFuture(f => f.slice(1))
-    setOrientPast(p => [...p, orientation])
-    onOrientationChange?.(next)
-  }, [orientFuture, orientation, onOrientationChange])
-
   const handleOrientClick = useCallback((pt) => {
     const [x, y] = pt
     const canvas = canvasRef.current
@@ -619,7 +622,7 @@ export default function RoiEditor({
         orient={{
           orientEnabled, layer, changeLayer,
           orientTool, setOrientTool, flowStart, setFlowStart,
-          commitOrient, onOrientationChange, setPerimDraft,
+          commitOrient, setPerimDraft,
         }}
       />
       {/* ── Canvas ── */}

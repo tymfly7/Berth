@@ -2,8 +2,8 @@ services:
   berth-rpi:
     image: berth-rpi:latest
     build:
-      context: .
-      dockerfile: Dockerfile.rpi
+      context: ../../..
+      dockerfile: deploy/edge/docker/Dockerfile.rpi
       platforms:
         - linux/arm64
     environment:

@@ -46,7 +46,7 @@ export default function RoiToolbar({
   const {
     orientEnabled, layer, changeLayer,
     orientTool, setOrientTool, flowStart, setFlowStart,
-    commitOrient, onOrientationChange, setPerimDraft,
+    commitOrient, setPerimDraft,
   } = orient
   return (
     <div style={overlay ? { flexShrink: 0, zIndex: 2 } : {}}>

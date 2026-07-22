@@ -769,7 +769,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
-            width: 'min(92vw, 1200px)',
+            width: `min(92vw, calc(78vh * ${imgAspect || 16 / 9}))`,
             maxHeight: '92vh',
             display: 'flex', flexDirection: 'column',
             background: 'var(--bg-card)',

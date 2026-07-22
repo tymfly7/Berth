@@ -42,10 +42,10 @@ frontend/.env.*
 *.tar
 *.tar.gz
 
-# ── Compose files — not needed inside the image ──────────
-docker-compose.yml
-docker-compose.rpi.yml
-docker-compose.zero.yml
+# ── Deployment tree (compose, Dockerfiles, docs) — not needed inside the image ──
+# (Dockerfiles are read by the builder via -f, not copied from context, so
+#  excluding them here is safe — nothing COPYs them.)
+deploy/
 
 # ── Docs, notes, logs — not needed in image ──────────────
 LResearch.md

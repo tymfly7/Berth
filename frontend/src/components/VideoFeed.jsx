@@ -77,7 +77,7 @@ function PickerCell({ cameraId, name, apiBase, onClick }) {
   )
 }
 
-export default function VideoFeed({ connected, activeCamera, apiBase, cameras = [], onCameraMetrics, onCameraUnavailable, onRoisSaved }) {
+export default function VideoFeed({ connected, activeCamera, apiBase, cameras = [], onCameraMetrics, onCameraUnavailable, onRoisSaved, editRequest = null }) {
   const [roiOpen, setRoiOpen]       = useState(false)
   const [picking, setPicking]       = useState(false)
   const [selectedCamId, setSelectedCamId] = useState(null)
@@ -89,6 +89,7 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
   const [editBg, setEditBg]         = useState(null)
   const [orient, setOrient]         = useState(null)
   const skipSnapshotUpload          = useRef(false)
+  const rootRef                     = useRef(null)
 
   const activeCams = cameras.filter(c => c.active)
 
@@ -175,6 +176,18 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
     // Capture a fresh frame to replace/set the snapshot.
     captureEditFrame(camId)
   }, [cameras, apiBase, captureEditFrame])
+
+  // Open the editor for a camera when the Camera Registry requests it. Keyed on
+  // the request's seq (via a ref) so it fires once per click, not when
+  // selectCameraForEdit's identity changes on camera-list updates.
+  const lastEditReqSeq = useRef(null)
+  useEffect(() => {
+    if (editRequest?.camId && editRequest.seq !== lastEditReqSeq.current) {
+      lastEditReqSeq.current = editRequest.seq
+      selectCameraForEdit(editRequest.camId)
+      rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [editRequest, selectCameraForEdit])
 
   const openRoiEditor = () => {
     if (!activeCams.length) return
@@ -270,7 +283,7 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
   )
 
   return (
-    <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+    <div ref={rootRef} className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
       {/* ── Toolbar ───────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderBottom: '1px solid var(--border-color)', flexWrap: 'wrap' }}>
 
