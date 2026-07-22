@@ -28,7 +28,7 @@ const scaleOrient = (o) => {
   if (!o) return null
   const pt = ([x, y]) => [x * CANVAS_W, y * CANVAS_H]
   return {
-    perimeter: Array.isArray(o.perimeter) ? o.perimeter.map(pt) : null,
+    perimeters: Array.isArray(o.perimeters) ? o.perimeters.map(poly => poly.map(pt)) : [],
     gates: Array.isArray(o.gates) ? o.gates.map(g => ({ ...g, x: g.x * CANVAS_W, y: g.y * CANVAS_H })) : [],
     flow: Array.isArray(o.flow) ? o.flow.map(f => ({ ...f, from: pt(f.from), to: pt(f.to) })) : [],
     anchor: o.anchor ? { ...o.anchor, x: o.anchor.x * CANVAS_W, y: o.anchor.y * CANVAS_H } : null,
@@ -57,7 +57,7 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
     }
   }
   // Fold the orientation frame into the bounds so the perimeter isn't clipped.
-  if (orient?.perimeter) for (const [px, py] of orient.perimeter) fold(px, py)
+  if (orient) for (const poly of orient.perimeters) for (const [px, py] of poly) fold(px, py)
   if (orient) {
     for (const g of orient.gates) fold(g.x, g.y)
     for (const f of orient.flow) { fold(...f.from); fold(...f.to) }
@@ -109,17 +109,18 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
         {/* ── Orientation layer (display only — never processed) ── */}
         {orient && (
           <g style={{ pointerEvents: 'none' }}>
-            {/* Perimeter / drive lane */}
-            {orient.perimeter && orient.perimeter.length >= 2 && (
+            {/* Containment areas */}
+            {orient.perimeters.map((poly, i) => poly.length >= 2 && (
               <polygon
-                points={orient.perimeter.map(([x, y]) => `${x},${y}`).join(' ')}
+                key={`perim-${i}`}
+                points={poly.map(([x, y]) => `${x},${y}`).join(' ')}
                 fill="none"
                 stroke="rgba(148,163,184,0.55)"
                 strokeWidth={2.5}
                 strokeDasharray="10,7"
                 strokeLinejoin="round"
               />
-            )}
+            ))}
 
             {/* Flow arrows */}
             {orient.flow.map((f, i) => {

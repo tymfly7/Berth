@@ -31,6 +31,7 @@ command -v sudo >/dev/null || { echo "ERROR: sudo is required."; exit 1; }
 echo "-- [1/5] OS packages + RAM trims"
 sudo apt update
 sudo apt full-upgrade -y
+sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target #prevent device from going into sleep mode
 sudo apt install -y python3-venv python3-pip libgl1 libglib2.0-0
 
 CONFIG_TXT=/boot/firmware/config.txt

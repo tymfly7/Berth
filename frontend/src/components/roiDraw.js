@@ -172,17 +172,18 @@ export function drawScene(ctx, W, H, s) {
       ctx.closePath(); ctx.fill()
     }
 
-    // committed perimeter
-    if (Array.isArray(O.perimeter) && O.perimeter.length >= 2) {
+    // committed perimeters (containment areas)
+    ;(Array.isArray(O.perimeters) ? O.perimeters : []).forEach(poly => {
+      if (!Array.isArray(poly) || poly.length < 2) return
       ctx.beginPath()
-      O.perimeter.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x * W, y * H) : ctx.lineTo(x * W, y * H)))
+      poly.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x * W, y * H) : ctx.lineTo(x * W, y * H)))
       ctx.closePath()
       ctx.setLineDash([10, 7])
       ctx.strokeStyle = `rgba(148,163,184,${alpha})`
       ctx.lineWidth = 2.5
       ctx.stroke()
       ctx.setLineDash([])
-    }
+    })
     // flow arrows
     oFlow.forEach(f => drawArrow(f.from[0] * W, f.from[1] * H, f.to[0] * W, f.to[1] * H, `rgba(56,189,248,${alpha})`))
     // gates

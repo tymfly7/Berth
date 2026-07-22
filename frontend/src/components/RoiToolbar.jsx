@@ -264,7 +264,7 @@ export default function RoiToolbar({
     {orientEnabled && layer === 'orientation' && (<>
       <div style={{ display: 'flex', gap: 6, marginBottom: overlay ? 0 : 8, flexWrap: 'wrap', alignItems: 'center', ...(overlay ? { padding: '6px 8px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', pointerEvents: 'auto' } : {}) }}>
         <button style={btnStyle(orientTool === 'perimeter')} onClick={() => { setOrientTool('perimeter'); setFlowStart(null) }}
-          title="Draw the lot perimeter / drive lane — click points, click the first point or double-click to close">Perimeter</button>
+          title="Draw a containment area — click points, click the first point or double-click to close. Draw as many as you need.">Perimeter</button>
         <button style={btnStyle(orientTool === 'entry')} onClick={() => { setOrientTool('entry'); setFlowStart(null) }}
           title="Click to drop an entry gate">＋ Entry gate</button>
         <button style={btnStyle(orientTool === 'exit')} onClick={() => { setOrientTool('exit'); setFlowStart(null) }}
@@ -274,11 +274,11 @@ export default function RoiToolbar({
         <button style={btnStyle(orientTool === 'anchor')} onClick={() => { setOrientTool('anchor'); setFlowStart(null) }}
           title="Click to place the 'you are here' anchor">✷ Anchor</button>
         <button style={btnStyle(orientTool === 'erase')} onClick={() => { setOrientTool('erase'); setFlowStart(null) }}
-          title="Click a gate, flow arrow, or anchor to remove it">Erase</button>
-        <button style={btnStyle(false)} onClick={() => { commitOrient({ perimeter: null }); setPerimDraft([]) }}
-          title="Remove the perimeter">Clear perimeter</button>
+          title="Click a perimeter, gate, flow arrow, or anchor to remove it">Erase</button>
+        <button style={btnStyle(false)} onClick={() => { commitOrient({ perimeters: [] }); setPerimDraft([]) }}
+          title="Remove all perimeters">Clear perimeters</button>
         <button style={btnStyle(false)}
-          onClick={() => { commitOrient({ perimeter: null, gates: [], flow: [], anchor: null }); setPerimDraft([]); setFlowStart(null) }}
+          onClick={() => { commitOrient({ perimeters: [], gates: [], flow: [], anchor: null }); setPerimDraft([]); setFlowStart(null) }}
           title="Clear the entire orientation frame">Clear frame</button>
       </div>
       <div style={{ fontSize: '0.72rem', color: 'rgba(120,200,255,0.85)', marginBottom: 8, paddingLeft: 2 }}>

@@ -47,6 +47,7 @@ export default function RoiEditor({
   const [orientPast, setOrientPast] = useState([])       // undo/redo stacks for the frame
   const [orientFuture, setOrientFuture] = useState([])
   const O = orientation || {}
+  const oPerims = O.perimeters || []
   const oGates = O.gates || []
   const oFlow = O.flow || []
 
@@ -73,7 +74,7 @@ export default function RoiEditor({
       perimDraft, flowStart,
     })
   }, [rois, proposals, selectedId, selectedProposalId, inProgress, livePoint, liveRect, mode, editPolygon,
-      orientEnabled, layer, orientation, perimDraft, flowStart, O.perimeter, O.anchor, oGates, oFlow])
+      orientEnabled, layer, orientation, perimDraft, flowStart, oPerims, O.anchor, oGates, oFlow])
 
   const syncSize = useCallback(() => {
     const container = containerRef.current
@@ -139,10 +140,10 @@ export default function RoiEditor({
     setOrientPast(p => [...p, orientation])
     setOrientFuture([])
     onOrientationChange?.({
-      perimeter: O.perimeter || null, gates: oGates, flow: oFlow, anchor: O.anchor || null,
+      perimeters: oPerims, gates: oGates, flow: oFlow, anchor: O.anchor || null,
       ...patch,
     })
-  }, [onOrientationChange, orientation, O.perimeter, O.anchor, oGates, oFlow])
+  }, [onOrientationChange, orientation, oPerims, O.anchor, oGates, oFlow])
 
   const undoOrient = useCallback(() => {
     if (orientPast.length === 0) return
@@ -180,9 +181,9 @@ export default function RoiEditor({
       } else if (e.key === 'Delete' && !typing) {
         if (orienting) {
           // While drawing, drop the last perimeter point; otherwise remove the
-          // committed perimeter (undoable).
+          // most recently committed perimeter (undoable).
           if (perimDraft.length > 0) setPerimDraft(d => d.slice(0, -1))
-          else if (O.perimeter) commitOrient({ perimeter: null })
+          else if (oPerims.length) commitOrient({ perimeters: oPerims.slice(0, -1) })
         } else if (selectedId) {
           commitChange(rois.filter(r => r.id !== selectedId))
           setSelectedId(null)
@@ -192,7 +193,7 @@ export default function RoiEditor({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [undo, redo, selectedId, rois, commitChange,
-      orientEnabled, layer, undoOrient, redoOrient, perimDraft, O.perimeter, commitOrient])
+      orientEnabled, layer, undoOrient, redoOrient, perimDraft, oPerims, commitOrient])
 
   useEffect(() => { redraw() }, [redraw])
 
@@ -334,7 +335,7 @@ export default function RoiEditor({
 
     if (orientTool === 'perimeter') {
       if (perimDraft.length >= 3 && ptDistPx(x, y, perimDraft[0][0], perimDraft[0][1], W, H) < 15) {
-        commitOrient({ perimeter: perimDraft })
+        commitOrient({ perimeters: [...oPerims, perimDraft] })
         setPerimDraft([]); setLivePoint(null)
         return
       }
@@ -353,9 +354,12 @@ export default function RoiEditor({
       const fi = oFlow.findIndex(f =>
         near(f.from[0], f.from[1]) || near(f.to[0], f.to[1]) ||
         near((f.from[0] + f.to[0]) / 2, (f.from[1] + f.to[1]) / 2))
-      if (fi >= 0) commitOrient({ flow: oFlow.filter((_, i) => i !== fi) })
+      if (fi >= 0) { commitOrient({ flow: oFlow.filter((_, i) => i !== fi) }); return }
+      // Perimeter last (large area) so a gate/flow inside it wins the click.
+      const pi = oPerims.findIndex(poly => Array.isArray(poly) && poly.length >= 3 && pointInPolygon(x, y, poly))
+      if (pi >= 0) commitOrient({ perimeters: oPerims.filter((_, i) => i !== pi) })
     }
-  }, [orientTool, perimDraft, flowStart, oGates, oFlow, O.anchor, commitOrient])
+  }, [orientTool, perimDraft, flowStart, oPerims, oGates, oFlow, O.anchor, commitOrient])
 
   const changeLayer = useCallback((l) => {
     setLayer(l)
@@ -426,7 +430,7 @@ export default function RoiEditor({
     if (layer === 'orientation') {
       e.preventDefault()
       if (orientTool === 'perimeter' && perimDraft.length >= 3) {
-        commitOrient({ perimeter: perimDraft })
+        commitOrient({ perimeters: [...oPerims, perimDraft] })
         setPerimDraft([]); setLivePoint(null)
       }
       return
@@ -436,7 +440,7 @@ export default function RoiEditor({
     const pts = inProgress.length > 0 ? inProgress.slice(0, -1) : inProgress
     if (pts.length >= 3) makeRoi(pts)
     setInProgress([])
-  }, [mode, inProgress, makeRoi, layer, orientTool, perimDraft, commitOrient])
+  }, [mode, inProgress, makeRoi, layer, orientTool, perimDraft, oPerims, commitOrient])
 
   const handleMouseMove = useCallback((e) => {
     const pt = getPoint(e)
