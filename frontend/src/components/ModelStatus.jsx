@@ -191,7 +191,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
     setHistoryView(null)
     setBenchResult(null)   // the benchmark box belongs to a specific dataset
     refreshHistory(selectedDataset)
-  }, [selectedDataset, apiBase])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedDataset, apiBase])
 
   // Load a chosen past run ('' = Latest → clear the historical view).
   useEffect(() => {
@@ -206,7 +206,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [selectedRun])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedRun])
 
   // Load archived training runs for whichever model accordion is expanded, and
   // reset any previously-selected run. Only torch classifiers archive these, so
@@ -232,7 +232,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
       .then(d => { if (alive) setTrainRunView({ timestamp: d.timestamp, details: summarizeHistory(d.history) }) })
       .catch(() => {})
     return () => { alive = false }
-  }, [selectedTrainRun])   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedTrainRun])
 
   if (!modelInfo) {
     return (

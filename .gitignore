@@ -298,6 +298,7 @@ runs/
 # Trained model weights — large binaries, distributed outside git
 backend/models/*.pth
 backend/models/*.pt
+backend/models/*.bak
 backend/yolo26m-cls.pt
 backend/yolo26n-cls.pt
 backend/yolo26s.pt 

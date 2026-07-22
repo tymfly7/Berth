@@ -146,7 +146,9 @@ def evaluate_yolo_classify(weights_path, split="val", imgsz=None):
             cm = getattr(raw_cm, "data", None)
         if cm is None:
             raise AttributeError(f"Cannot read confusion matrix from {type(raw_cm)}")
-        tp = float(cm[0][0]); fp = float(cm[1][0]); fn = float(cm[0][1])
+        tp = float(cm[0][0])
+        fp = float(cm[1][0])
+        fn = float(cm[0][1])
         prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0
