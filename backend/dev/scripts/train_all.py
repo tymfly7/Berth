@@ -14,7 +14,7 @@ if __name__ == "__main__":
 
     os.environ["PYTHONIOENCODING"] = "utf-8"
     sys.stdout.reconfigure(encoding="utf-8")
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
     # Force unbuffered prints
     _print = print
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     print("\n[STEP 1/5] Organizing dataset...")
     step_start = time.time()
 
-    from src.data_prep.downloader import organize_dataset
+    from dev.data_prep.downloader import organize_dataset
     counts = organize_dataset(
         source_root=config.DATASET_ROOT,
         target_root=str(config.DATA_DIR),
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     print("\n[STEP 2/5] Preparing DataLoaders (num_workers=0)...")
     step_start = time.time()
 
-    from src.data_prep.preprocessor import prepare_dataset
+    from dev.data_prep.preprocessor import prepare_dataset
     data = prepare_dataset(num_workers=0)
 
     print(f"  Train: {data['train_size']}, Val: {data['val_size']}, Test: {data['test_size']}")
@@ -72,9 +72,9 @@ if __name__ == "__main__":
 
     import torch
     from src.models.model_factory import create_model
-    from src.train.trainer import Trainer
-    from src.eval.evaluator import evaluate_model
-    from src.eval.visualizer import (
+    from dev.train.trainer import Trainer
+    from dev.eval.evaluator import evaluate_model
+    from dev.eval.visualizer import (
         plot_confusion_matrix,
         visualize_predictions,
         plot_model_comparison,

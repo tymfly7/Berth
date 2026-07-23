@@ -27,7 +27,7 @@ import config
 from src.api.deps import verify_api_key
 from src.api.operations import finish_op, register_op, update_op_progress
 from src.api.processor_service import processor_service
-from src.data_prep.yolo_converter import build_yolo_detect_dataset
+from dev.data_prep.yolo_converter import build_yolo_detect_dataset
 from src.roi.roi_crop import crop_roi
 from src.roi.roi_store import RoiStore
 

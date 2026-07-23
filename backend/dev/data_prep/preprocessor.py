@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 # Add parent to path for config import
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import config
-from src.data_prep.dataset import ParkingDataset
+from dev.data_prep.dataset import ParkingDataset
 
 logger = logging.getLogger("berth.preprocessor")
 

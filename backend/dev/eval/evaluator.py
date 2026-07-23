@@ -125,7 +125,7 @@ def evaluate_yolo_classify(weights_path, split="val", imgsz=None):
     """
     import config
     from ultralytics import YOLO
-    from src.data_prep.preprocessor import build_classify_split
+    from dev.data_prep.preprocessor import build_classify_split
 
     imgsz = imgsz or config.YOLO_CLASSIFY_IMG_SIZE
     build_classify_split()  # idempotent; ensures the split folders exist

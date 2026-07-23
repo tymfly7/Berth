@@ -108,7 +108,7 @@ def build_external_test_loader(classifier_dir: Path, image_size=None, batch_size
     import os
     import torch
     from torch.utils.data import DataLoader
-    from src.data_prep.dataset import ParkingDataset
+    from dev.data_prep.dataset import ParkingDataset
 
     image_size  = image_size or config.CNN_INPUT_SIZE
     batch_size  = batch_size or config.BATCH_SIZE

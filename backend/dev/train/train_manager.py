@@ -18,9 +18,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import config
 from src.models.model_factory import create_model, list_available_models
-from src.train.trainer import Trainer, TrainingCancelled
-from src.data_prep.preprocessor import prepare_dataset
-from src.eval.evaluator import evaluate_model
+from dev.train.trainer import Trainer, TrainingCancelled
+from dev.data_prep.preprocessor import prepare_dataset
+from dev.eval.evaluator import evaluate_model
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 logger = logging.getLogger("berth.train_manager")
@@ -189,7 +189,7 @@ class TrainManager:
 
             # Export to ONNX for edge inference — non-fatal
             try:
-                from src.export.model_exporter import export_pytorch_model
+                from dev.export.model_exporter import export_pytorch_model
                 weights_map = {
                     "cnn_scratch":  config.CNN_SCRATCH_PATH,
                     "resnet18":     config.RESNET18_PATH,
@@ -237,7 +237,7 @@ class TrainManager:
         run_id = None
         try:
             from ultralytics import YOLO
-            from src.data_prep.preprocessor import build_classify_split, build_classify_subset
+            from dev.data_prep.preprocessor import build_classify_split, build_classify_subset
 
             _classify_start = time.time()
             _batch_count = [0]
@@ -344,7 +344,7 @@ class TrainManager:
 
             # Export to NCNN for edge inference — non-fatal
             try:
-                from src.export.model_exporter import export_yolo_model
+                from dev.export.model_exporter import export_yolo_model
                 export_yolo_model(model_name, config.YOLO26_CLASSIFY_PATHS[scale])
             except Exception as _exp_err:
                 logger.warning(f"Edge export skipped: {_exp_err}")
@@ -483,7 +483,7 @@ class TrainManager:
 
             # Export to ONNX for edge inference — non-fatal
             try:
-                from src.export.model_exporter import export_yolo_model
+                from dev.export.model_exporter import export_yolo_model
                 export_yolo_model("yolo26_detect", config.YOLO26_DETECT_PATH)
             except Exception as _exp_err:
                 logger.warning(f"Edge export skipped: {_exp_err}")
@@ -622,7 +622,7 @@ class TrainManager:
         Args:
             dataset (str): "standard" for the internal 70/15/15 split, or an
                            external benchmark dataset id (see
-                           src.eval.external_datasets).
+                           dev.eval.external_datasets).
         """
         with _lock:
             if _state.get("status") == "training":
@@ -647,7 +647,7 @@ class TrainManager:
         are skipped.
         """
         import csv as csv_mod
-        from src.eval import external_datasets
+        from dev.eval import external_datasets
         try:
             ext = external_datasets.resolve(dataset)      # None → standard split
             ds_label = ext["label"] if ext else "Standard split"
@@ -693,10 +693,10 @@ class TrainManager:
                     _state["message"] = "Loading dataset for evaluation…"
                 import torch
                 from src.models.model_factory import load_model
-                from src.eval.evaluator import evaluate_model
+                from dev.eval.evaluator import evaluate_model
                 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 if ext is None:
-                    from src.data_prep.preprocessor import prepare_dataset
+                    from dev.data_prep.preprocessor import prepare_dataset
                     test_loader = prepare_dataset()["test_loader"]
                 else:
                     test_loader = external_datasets.build_external_test_loader(ext["classifier_dir"])
@@ -765,7 +765,7 @@ class TrainManager:
 
                 if ext is None:
                     from ultralytics import YOLO
-                    from src.data_prep.preprocessor import build_classify_split
+                    from dev.data_prep.preprocessor import build_classify_split
 
                     # Actual evaluation — run inference on the val split
                     build_classify_split()                  # idempotent; ensures the folders exist
@@ -874,7 +874,7 @@ class TrainManager:
 
             # Archive a timestamped snapshot so this run stays browsable after
             # the next Evaluate-All overwrites the canonical comparison file.
-            from src.eval.history_store import save_eval_snapshot
+            from dev.eval.history_store import save_eval_snapshot
             save_eval_snapshot(dataset, results)
 
             with _lock:

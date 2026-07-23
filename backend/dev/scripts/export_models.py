@@ -13,10 +13,10 @@ Usage:
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import config
-from src.export.model_exporter import export_pytorch_model, export_yolo_model
+from dev.export.model_exporter import export_pytorch_model, export_yolo_model
 
 MODELS = [
     ("cnn_scratch",      config.CNN_SCRATCH_PATH,       export_pytorch_model),

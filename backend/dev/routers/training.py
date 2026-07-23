@@ -16,7 +16,7 @@ from src.api.deps import limiter, verify_api_key
 from src.api.operations import finish_op, register_op, update_op_progress
 from src.api.processor_service import processor_service
 from src.cameras.camera_registry import camera_registry
-from src.reports.model_report import build_comparison_excel, load_model_training_details
+from dev.reports.model_report import build_comparison_excel, load_model_training_details
 
 logger = logging.getLogger("berth.training")
 router = APIRouter()
@@ -60,14 +60,14 @@ def test_model(model_name: str):
                 raise FileNotFoundError(
                     f"No trained weights for '{model_name}' at {ckpt}. Train it first."
                 )
-            from src.eval.evaluator import evaluate_yolo_classify
+            from dev.eval.evaluator import evaluate_yolo_classify
             metrics = evaluate_yolo_classify(ckpt)
             return {"model": model_name, **metrics}
 
         import torch
         from src.models.model_factory import load_model
-        from src.data_prep.preprocessor import prepare_dataset
-        from src.eval.evaluator import evaluate_model
+        from dev.data_prep.preprocessor import prepare_dataset
+        from dev.eval.evaluator import evaluate_model
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model = load_model(model_name, device=device)
         data = prepare_dataset()
@@ -84,7 +84,7 @@ def test_model(model_name: str):
 def eval_datasets():
     """List datasets the operator can evaluate against: the internal split plus
     any external benchmark datasets dropped under backend/data/."""
-    from src.eval.external_datasets import list_external_datasets, STANDARD_ID
+    from dev.eval.external_datasets import list_external_datasets, STANDARD_ID
     return {
         "datasets": [
             {"id": STANDARD_ID, "label": "Standard split", "has_classifier": True, "has_detector": True},
@@ -100,16 +100,16 @@ def evaluate_all(dataset: str = "standard"):
     # Validate an external dataset choice up front so the operator gets a clear
     # 400 instead of a silent standard-split run.
     if dataset != "standard":
-        from src.eval.external_datasets import resolve
+        from dev.eval.external_datasets import resolve
         if resolve(dataset) is None:
             raise HTTPException(400, f"Unknown or invalid benchmark dataset '{dataset}'.")
-    from src.train.train_manager import TrainManager
+    from dev.train.train_manager import TrainManager
     result = TrainManager().start_evaluation(dataset=dataset)
     if result.get("status") == "error":
         raise HTTPException(400, result["message"])
 
     def _monitor():
-        from src.train.train_manager import TrainManager as TM
+        from dev.train.train_manager import TrainManager as TM
         deadline = time.time() + 6 * 3600  # safety cap so a stuck status can't leak the thread
         while time.time() < deadline:
             time.sleep(2)
@@ -127,11 +127,11 @@ def evaluate_all(dataset: str = "standard"):
 
 @router.get("/api/evaluate/excel", dependencies=[Depends(verify_api_key)])
 def download_evaluation_excel(dataset: str = "standard", file: str | None = None):
-    from src.eval import external_datasets
+    from dev.eval import external_datasets
     if file:
         # Export a specific archived run chosen from the "Past runs" picker.
         # load_eval_snapshot validates the filename + blocks path traversal.
-        from src.eval.history_store import load_eval_snapshot
+        from dev.eval.history_store import load_eval_snapshot
         snap = load_eval_snapshot(file)
         if snap is None:
             raise HTTPException(404, f"No evaluation snapshot '{file}'.")
@@ -165,14 +165,14 @@ def download_evaluation_excel(dataset: str = "standard", file: str | None = None
 @router.get("/api/eval/history", dependencies=[Depends(verify_api_key)])
 def eval_history(dataset: str = "standard"):
     """List archived Evaluate-All runs for a dataset, newest first."""
-    from src.eval.history_store import list_eval_snapshots
+    from dev.eval.history_store import list_eval_snapshots
     return {"snapshots": list_eval_snapshots(dataset)}
 
 
 @router.get("/api/eval/history/item", dependencies=[Depends(verify_api_key)])
 def eval_history_item(file: str):
     """Return one archived evaluation snapshot by filename."""
-    from src.eval.history_store import load_eval_snapshot
+    from dev.eval.history_store import load_eval_snapshot
     snap = load_eval_snapshot(file)
     if snap is None:
         raise HTTPException(404, f"No evaluation snapshot '{file}'.")
@@ -182,14 +182,14 @@ def eval_history_item(file: str):
 @router.get("/api/train/history", dependencies=[Depends(verify_api_key)])
 def train_history(model: str):
     """List archived training runs for a model, newest first."""
-    from src.eval.history_store import list_train_snapshots
+    from dev.eval.history_store import list_train_snapshots
     return {"snapshots": list_train_snapshots(model)}
 
 
 @router.get("/api/train/history/item", dependencies=[Depends(verify_api_key)])
 def train_history_item(file: str):
     """Return one archived training snapshot by filename."""
-    from src.eval.history_store import load_train_snapshot
+    from dev.eval.history_store import load_train_snapshot
     snap = load_train_snapshot(file)
     if snap is None:
         raise HTTPException(404, f"No training snapshot '{file}'.")
@@ -204,7 +204,7 @@ def export_ncnn():
     if _export_state["status"] == "running":
         raise HTTPException(409, "Export already in progress")
 
-    from src.export.model_exporter import export_pytorch_model, export_yolo_model
+    from dev.export.model_exporter import export_pytorch_model, export_yolo_model
     models = [
         ("cnn_scratch",      config.CNN_SCRATCH_PATH,       export_pytorch_model),
         ("resnet18",         config.RESNET18_PATH,          export_pytorch_model),
@@ -342,7 +342,7 @@ def start_training(request: Request, model_name: str = "cnn_scratch",
         raise HTTPException(403, "Training is not available on edge nodes. Use the hub server.")
     if model_name not in config.TRAINABLE_MODELS:
         raise HTTPException(400, f"Unknown model '{model_name}'. Choose from: {list(config.TRAINABLE_MODELS)}")
-    from src.train.train_manager import TrainManager
+    from dev.train.train_manager import TrainManager
     mgr = TrainManager()
     if mgr.is_training():
         raise HTTPException(409, "Training already in progress")
@@ -360,7 +360,7 @@ def start_training(request: Request, model_name: str = "cnn_scratch",
     op_id = register_op("training", f"Training {model_name}…")
 
     def _monitor():
-        from src.train.train_manager import TrainManager as TM
+        from dev.train.train_manager import TrainManager as TM
         deadline = time.time() + 6 * 3600  # safety cap so a stuck status can't leak the thread/op
         while time.time() < deadline:
             time.sleep(2)
@@ -382,7 +382,7 @@ def start_training(request: Request, model_name: str = "cnn_scratch",
 
 @router.post("/api/train/cancel", dependencies=[Depends(verify_api_key)])
 def cancel_training():
-    from src.train.train_manager import TrainManager
+    from dev.train.train_manager import TrainManager
     result = TrainManager().request_cancel()
     if result.get("status") == "error":
         raise HTTPException(409, result["message"])
@@ -391,7 +391,7 @@ def cancel_training():
 
 @router.get("/api/train/status", dependencies=[Depends(verify_api_key)])
 def train_status():
-    from src.train.train_manager import TrainManager
+    from dev.train.train_manager import TrainManager
     return TrainManager().get_status()
 
 
@@ -426,7 +426,7 @@ def browse_dataset():
 @router.post("/api/dataset/prepare", dependencies=[Depends(verify_api_key)])
 def prepare_dataset(source: str = None, max_per_class: int = 0,
                     generate_sample: bool = False, sample_count: int = 200):
-    from src.data_prep.downloader import organize_dataset, generate_sample_dataset
+    from dev.data_prep.downloader import organize_dataset, generate_sample_dataset
     if generate_sample:
         generate_sample_dataset(num_per_class=sample_count)
         return {"message": f"Generated {sample_count} synthetic images per class"}
