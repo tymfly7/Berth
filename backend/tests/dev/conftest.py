@@ -9,8 +9,11 @@ def test_client():
     from fastapi.testclient import TestClient
 
     from dev.routers import labeling, training
+    from src.api.routers import models
 
     app = FastAPI()
     app.include_router(training.router)
     app.include_router(labeling.router)
+    # /api/model/info + /api/use-model now live in the base runtime router.
+    app.include_router(models.router)
     return TestClient(app)

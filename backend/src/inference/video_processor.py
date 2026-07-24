@@ -529,7 +529,6 @@ class VideoProcessor:
                     self._roi_cache = RoiStore.get_rois(self.camera_id)
                     self._roi_cache_ts = t0
 
-                # Draw slot overlays using the last inference result.
                 display = frame.copy()
                 if self._roi_cache:
                     h, w = display.shape[:2]
@@ -545,7 +544,6 @@ class VideoProcessor:
                             color = self._STATUS_COLOR.get(status, self._STATUS_COLOR["unknown"])
                             cv2.polylines(display, [pts], True, color, 2)
 
-                # Draw cached anomaly overlays.
                 with self._cached_status_lock:
                     anomalies = list(self._cached_anomalies)
                 for a in anomalies:

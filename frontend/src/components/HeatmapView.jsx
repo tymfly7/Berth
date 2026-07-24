@@ -2,18 +2,6 @@ import { useState, useEffect, useRef } from 'react'
 import { apiFetch } from '../api'
 import { API_BASE } from '../config'
 
-// eslint-disable-next-line no-unused-vars -- retained heatmap colour helpers (currently unused)
-function getColor(rate) {
-  if (rate >= 80) return 'var(--color-occupied)'
-  if (rate >= 50) return 'var(--color-warning)'
-  return 'var(--color-vacant)'
-}
-
-// eslint-disable-next-line no-unused-vars -- retained heatmap colour helpers (currently unused)
-function getOpacity(rate) {
-  return 0.3 + (rate / 100) * 0.7
-}
-
 function formatTime(secs) {
   if (secs < 60) return `${Math.round(secs)}s`
   const m = Math.floor(secs / 60)

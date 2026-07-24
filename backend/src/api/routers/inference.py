@@ -433,7 +433,7 @@ async def augment_preview(request: Request):
     classes = ["occupied", "vacant"] if label == "both" else [label]
     candidates = []
     for cls in classes:
-        cls_dir = config.DATA_DIR / cls
+        cls_dir = config.CLASSIFY_SPLIT_DIR / "train" / cls
         if cls_dir.exists():
             for p in cls_dir.iterdir():
                 if p.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp"):

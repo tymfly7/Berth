@@ -167,7 +167,6 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
 
   // Named ROI lots — separate from live camera ROIs
   const [lots, setLots]               = useState(loadLots)
-  const [newLotName, setNewLotName]   = useState('')
   const [selectedLotId, setSelectedLotId] = useState(() => loadLots()[0]?.id || DEFAULT_LOTS[0]?.id || null)
 
   // Keep live model in sync with server's active model
@@ -261,22 +260,6 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     } catch (e) {
       showRoiMsg(`Error: ${e.message}`)
     }
-  }
-
-  // eslint-disable-next-line no-unused-vars -- half-wired "create lot" handler, kept for now
-  const handleCreateLot = () => {
-    const name = newLotName.trim()
-    if (!name) return
-    const id = slugify(name)
-    if (lots.find(l => l.id === id)) {
-      showRoiMsg('A lot with that name already exists')
-      return
-    }
-    const updated = [...lots, { name, id }]
-    setLots(updated)
-    localStorage.setItem(LOTS_KEY, JSON.stringify(updated))
-    setSelectedLotId(id)
-    setNewLotName('')
   }
 
   const handleDeleteLot = async (lotId) => {
@@ -498,7 +481,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
 
   const [roiBtnHovered, setRoiBtnHovered] = useState(false)
 
-  const roiIsError = roiMsg && (roiMsg.startsWith('Error') || roiMsg.startsWith('A lot'))
+  const roiIsError = roiMsg && roiMsg.startsWith('Error')
 
   return (
     <div>
@@ -700,7 +683,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       {resultImage && mainRect && createPortal(
         <div style={{
           position: 'fixed',
-          top: 12, bottom: 12,
+          top: 12, maxHeight: 'calc(100vh - 24px)',
           left: mainRect.left, width: mainRect.width,
           zIndex: 1000,
           display: 'flex', flexDirection: 'column',
@@ -750,11 +733,11 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               }}
             >✕</button>
           </div>
-          <div style={{ flex: 1, minHeight: 0, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <img
               src={`data:image/jpeg;base64,${resultImage}`}
               alt="Analyzed"
-              style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', display: 'block' }}
+              style={{ width: '100%', maxHeight: 'calc(100vh - 80px)', objectFit: 'contain', display: 'block' }}
             />
           </div>
         </div>,
