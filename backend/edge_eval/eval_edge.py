@@ -256,7 +256,9 @@ def main():
     clf.load()
     load_time_ms = (time.perf_counter() - t0) * 1000
     if not clf.is_loaded():
-        sys.exit(f"Model '{args.model}' failed to load — check edge_models/ exports.")
+        weights = "models/ (torch .pt/.pth)" if args.runtime == "torch" else "edge_models/ (*_ncnn_model/)"
+        sys.exit(f"Model '{args.model}' failed to load with --runtime {args.runtime} — "
+                 f"check {weights}. The loader logged the reason above.")
 
     print(f"Model {args.model} loaded in {load_time_ms:.0f} ms — "
           f"evaluating {len(files)} crops with {args.threads} {args.runtime} thread(s)...")

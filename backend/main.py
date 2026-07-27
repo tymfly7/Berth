@@ -55,6 +55,7 @@ from slowapi.errors import RateLimitExceeded
 import config
 from src.api.deps import limiter, verify_token
 from src.api.processor_service import processor_service
+from dev.routers import labeling, training
 from src.api.routers import analytics, auth, cameras, inference, models, roi
 from src.cameras.camera_registry import camera_registry
 from src.db import database as db
@@ -159,6 +160,10 @@ app.include_router(models.router)
 app.include_router(cameras.router)
 app.include_router(roi.router)
 app.include_router(auth.router)
+# Dev-tree routers: training/evaluation/export and batch auto-labeling. Mounted in
+# both profiles; the edge-sensitive endpoints raise 403 on the edge profile.
+app.include_router(training.router)
+app.include_router(labeling.router)
 
 
 # ═══════════════════════════════════════════════════════════════

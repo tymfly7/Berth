@@ -1,8 +1,8 @@
 # Berth on Raspberry Pi: native (Docker-free) deployment
 
 Native deployment of the Berth edge backend on the low-RAM boards: **Pi Zero 2 W**
-(512 MB, 4× Cortex-A53) and **Pi 3B** (1 GB, 4× Cortex-A53). Docker (`Dockerfile.rpi`) stays
-the path for the Pi 5; on the small boards the Docker daemon alone costs 100–150 MB, so the
+(512 MB, 4× Cortex-A53) and **Pi 3B** (1 GB, 4× Cortex-A53). [Docker](../docker/) stays the
+path for the Pi 5; on the small boards the Docker daemon alone costs 100–150 MB, so the
 backend runs directly under **systemd** instead.
 
 On this hardware the failure mode is usually a freeze rather than a crash. When RAM runs out
@@ -104,7 +104,14 @@ asks you to reboot, then finishes on the second run.
 
 `rsync` isn't in Git Bash on Windows; use tar-over-ssh from the project root. Exclude
 everything heavy or machine-specific. Throughout this guide, replace `USER@HOST` with your
-Pi's `user@ip` (e.g. `pi@raspberrypi.local`) and `HOST` with its IP or hostname:
+Pi's `user@ip` (e.g. `pi@raspberrypi.local`) and `HOST` with its IP or hostname.
+
+**Every block in this guide is bash** — run them in Git Bash, WSL, macOS, or Linux. They fail in
+Windows PowerShell for two independent reasons: the trailing `\` is a bash line continuation
+PowerShell does not support (it parses each line as its own command, reporting `USER@HOST : The
+term 'USER@HOST' is not recognized as the name of a cmdlet`), and `tar -czf - | ssh` pipes
+*binary* gzip, which PowerShell re-encodes as text between processes and corrupts. See
+[From PowerShell](#from-powershell) for the equivalent.
 
 ```bash
 tar -czf - \
@@ -126,6 +133,82 @@ tar -czf - deploy/edge/native | ssh USER@HOST 'mkdir -p ~/berth && tar -xzf - -C
 
 The ncnn models must be present as `backend/edge_models/*_ncnn_model/` directories (each with
 `model.ncnn.param` + `model.ncnn.bin`).
+
+#### From PowerShell
+
+Stage the archive to a file instead of piping it, and keep every exclude on the one line. Windows
+ships `tar.exe` (bsdtar) since Windows 10, so nothing needs installing. **Run these one at a
+time** — pasted as a block they can merge into a single line, and `backend` fuses onto the next
+command as `backendscp`, which surfaces as a row of `tar.exe: : Couldn't visit directory` errors:
+
+```powershell
+# 1. Build the archive (project root)
+tar -czf berth-code.tar.gz --exclude=backend/data --exclude=backend/venv --exclude=backend/models --exclude=backend/outputs --exclude=backend/uploads --exclude=__pycache__ --exclude=backend/berth.db* --exclude=backend/*.pt --exclude=backend/.env --exclude=backend/eval_results --exclude=backend/.pytest_cache --exclude=backend/.ruff_cache --exclude=backend/.vscode backend
+
+# 2. Check it before shipping — a failed run still leaves a partial file behind
+(Get-Item berth-code.tar.gz).Length / 1MB
+tar -tzf berth-code.tar.gz | Select-Object -First 5      # entries should start with backend/
+
+# 3. Ship and extract
+scp berth-code.tar.gz USER@HOST:~/
+ssh USER@HOST 'mkdir -p ~/berth && tar -xzf ~/berth-code.tar.gz -C ~/berth && rm ~/berth-code.tar.gz'
+
+# 4. Clean up locally
+Remove-Item berth-code.tar.gz
+```
+
+Same pattern for the native folder:
+
+```powershell
+tar -czf native.tar.gz deploy/edge/native
+scp native.tar.gz USER@HOST:~/
+ssh USER@HOST 'mkdir -p ~/berth && tar -xzf ~/native.tar.gz -C ~/berth && rm ~/native.tar.gz'
+Remove-Item native.tar.gz
+```
+
+Plain `scp` and `ssh` invocations work unchanged in PowerShell; only the `tar … | ssh` pipes need
+this treatment. The excludes are unquoted on purpose — PowerShell does not glob-expand arguments,
+so `--exclude=backend/*.pt` reaches `tar` intact.
+
+### Secrets: the `.env` file
+
+**Required on every native device, Zero 2 W and 3B alike.** The transfer above excludes
+`backend/.env` deliberately and [`berth.service`](berth.service) carries only tuning knobs, so a
+freshly deployed Pi has no credentials at all. `config.py` calls `load_dotenv()`, which searches
+upward from `backend/`, so the file belongs at `~/berth/backend/.env` and is created **on the
+device**:
+
+```bash
+ssh USER@HOST
+cd ~/berth/backend
+cat > .env <<EOF
+BERTH_ADMIN_PASSWORD=choose-a-real-password
+BERTH_API_KEY=$(openssl rand -hex 32)
+BERTH_AUTH_SECRET=$(openssl rand -hex 32)
+EOF
+chmod 600 .env
+```
+
+| Var | If unset |
+|-----|----------|
+| `BERTH_ADMIN_PASSWORD` | `/api/auth/login` returns **503** and the admin UI cannot be used at all. |
+| `BERTH_API_KEY` | Every protected endpoint is publicly accessible. `main.py` warns at startup. |
+| `BERTH_AUTH_SECRET` | A random signing key is generated per process, so every restart invalidates issued tokens. |
+
+Write values bare — `BERTH_ADMIN_PASSWORD=secret`, **not** `="secret"`; the quotes become part of
+the value and show up later as a 401 on a password that looks correct.
+
+`load_dotenv()` never overrides a variable already in the environment, so anything on the unit's
+`Environment=` line wins over `.env`. Keep the two sets disjoint: tuning in the unit, secrets in
+`.env`. After editing `.env`, `sudo systemctl restart berth` is enough — unlike Docker, where env
+is frozen at container creation. Verify:
+
+```bash
+curl -i -X POST http://HOST:8001/api/auth/login \
+  -H 'Content-Type: application/json' -d '{"password":"choose-a-real-password"}'
+```
+
+`503` = the file was not read; `401` = read but mismatched; `200` with a JSON `token` = working.
 
 ### Python environment + smoke test
 
@@ -181,7 +264,8 @@ MemoryMax=620M
 MemorySwapMax=200M
 ```
 
-And its `.env` (regenerate secrets rather than hunt for the live values):
+And its `.env` — same file and location as [Secrets](#secrets-the-env-file), with two extra
+model-specific lines (regenerate secrets rather than hunt for the live values):
 
 ```
 BERTH_DEPLOYMENT=edge
@@ -234,6 +318,10 @@ ssh USER@HOST 'sudo systemctl restart berth && journalctl -u berth -n 50 -f'
 This *includes* `backend/edge_models/` deliberately: re-shipping the ncnn exports keeps the
 device in sync. No pip reinstall unless `requirements.edge.txt` changed.
 
+From PowerShell, use the staged-file form from [From PowerShell](#from-powershell) with the two
+extra excludes above (`--exclude=backend/configs --exclude=backend/cameras.json`), and extract
+with `tar -xzf ~/berth-code.tar.gz -C ~/berth` — no `mkdir`, the tree already exists.
+
 ## 7. Reading memory reports
 
 ```bash
@@ -273,11 +361,18 @@ cd frontend && npm run build
 tar -czf - -C dist . | ssh USER@HOST 'mkdir -p ~/berth/backend/static && tar -xzf - -C ~/berth/backend/static'
 ```
 
+From PowerShell:
+
+```powershell
+cd frontend
+npm run build
+tar -czf dist.tar.gz -C dist .
+scp dist.tar.gz USER@HOST:~/
+ssh USER@HOST 'mkdir -p ~/berth/backend/static && tar -xzf ~/dist.tar.gz -C ~/berth/backend/static && rm ~/dist.tar.gz'
+Remove-Item dist.tar.gz
+```
+
 Restart the service; the UI is then at `http://HOST:8001/`. Serving pre-built static
 files costs almost nothing at runtime. (Same-origin from the device: no `VITE_API_BASE`, no CORS.)
 
----
 
-*Source: consolidated from `log_pi_zero_setup.md` (native deployment sections). The edge
-**evaluation** pipeline (`backend/edge_eval/`, parity checks, per-device result logs) is a
-separate concern documented in that log, not here.*

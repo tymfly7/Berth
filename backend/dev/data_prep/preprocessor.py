@@ -227,8 +227,10 @@ def prepare_dataset(
     Prepare train/val/test DataLoaders from the parking dataset.
 
     Args:
-        data_root (str): Path to directory with occupied/ and vacant/ folders.
-                         Defaults to config.DATA_DIR.
+        data_root (str): Path to directory with occupied/ and vacant/ folders,
+                         or a pre-split train/val/test root. Defaults to
+                         config.CLASSIFY_SPLIT_DIR, which is built from
+                         data/labeled/ by build_classify_split() if absent.
         train_ratio (float): Fraction for training. Default from config.
         val_ratio (float): Fraction for validation. Default from config.
         batch_size (int): Batch size. Default from config.

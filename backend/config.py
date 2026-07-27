@@ -36,7 +36,7 @@ for d in (DATA_DIR, UPLOAD_DIR, MODEL_DIR, EDGE_MODEL_DIR, CONFIG_DIR, ROI_CONFI
     d.mkdir(parents=True, exist_ok=True)
 
 # Run-history retention: max timestamped eval/train snapshots kept per
-# dataset/model (see src/eval/history_store.py). 0 = keep everything.
+# dataset/model (see dev/eval/history_store.py). 0 = keep everything.
 HISTORY_MAX_SNAPSHOTS = int(os.getenv("BERTH_HISTORY_MAX", "0"))
 
 # ---------------------------------------------------------------------------

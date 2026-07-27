@@ -222,7 +222,7 @@ automatically (split by source frame), so no manual organizing step is needed.
 ### Option B: Generate sample data (quick testing)
 
 ```bash
-python -m src.data_prep.downloader --generate-sample --sample-count 500
+python -m dev.data_prep.downloader --generate-sample --sample-count 500
 ```
 
 ### Option C: Prepare via API
@@ -288,7 +288,8 @@ curl http://localhost:8001/api/train/status
 curl -X POST http://localhost:8001/api/train/cancel
 ```
 
-Train every model in sequence from the CLI with `python train_all.py`.
+Train every model in sequence from the CLI with `python dev/scripts/train_all.py`
+(run it from `backend/`).
 
 ### Evaluate all models and export comparison
 
@@ -357,7 +358,7 @@ both occupancy classification and anomaly detection.
 2. Open the **ROI Editor**.
 3. Upload a reference snapshot from the live feed.
 4. Draw slot polygons using **Polygon** or **Rectangle** draw mode.
-5. Save — ROIs are stored in `backend/roi_configs/<camera_id>.json`.
+5. Save — ROIs are stored in `backend/configs/roi/<camera_id>.json`.
 
 ### Editing tools
 
@@ -543,7 +544,7 @@ successful training run, or run it manually — via the CLI or the export endpoi
 
 ```bash
 cd backend
-python export_models.py        # writes *_ncnn_model/ dirs into edge_models/
+python dev/scripts/export_models.py   # writes *_ncnn_model/ dirs into edge_models/
 
 # Or trigger an export over REST and poll its progress
 curl -X POST http://localhost:8001/api/export/ncnn
@@ -586,6 +587,11 @@ python edge_eval/eval_edge.py --dataset data/t12lot_subset \
 `torch` (imported lazily; for benchmarking the same model with PyTorch on a dev
 laptop or Pi 5). Results land in
 `backend/eval_results/<device>_<model>_<runtime>_<timestamp>/` (gitignored).
+
+> The full per-device runbook — shipping the scripts and datasets, the Docker and
+> native run procedures, parity checks, and the native PyTorch comparison on the
+> Pi 5 — is in
+> [Edge Device Evaluation](backend/edge_eval/README.md).
 
 ---
 
@@ -721,10 +727,8 @@ School Project/
 │   ├── .env                             # Local secrets (gitignored) — loaded by config.py
 │   ├── requirements.txt                 # Full server deps
 │   ├── requirements.edge.txt            # Slim edge deps (used by deploy/edge/docker/Dockerfile.rpi)
-│   ├── train_all.py                     # CLI: train all models in sequence
-│   ├── export_models.py                 # CLI: export trained models to NCNN for edge
-│   ├── verify.py                        # CLI: environment / structure sanity check
 │   ├── edge_eval/                       # On-device eval pipeline (see Edge / Hub Deployment)
+│   │   ├── README.md                    # Edge Device Evaluation — per-device runbook
 │   │   ├── eval_edge.py                 # Torch-free eval CLI (accuracy + latency + system CSVs)
 │   │   ├── make_goldens.py              # Hub-side torch goldens for NCNN parity checks
 │   │   ├── edge_check.py                # Post-deploy model load / inference smoke check
@@ -732,35 +736,24 @@ School Project/
 │   ├── berth.db                         # SQLite — trends, alerts, training runs
 │   ├── models/                          # Trained weights (*.pth / *.pt)
 │   ├── edge_models/                     # NCNN exports (*_ncnn_model/ dirs) for edge deployment
-│   ├── src/
+│   ├── src/                             # Runtime tree — API, inference, cameras, ROI, sync
 │   │   ├── api/
 │   │   │   ├── routers/
 │   │   │   │   ├── inference.py          # predict / analyze-lot|roi|misparked / augment
 │   │   │   │   ├── analytics.py          # metrics, heatmap, history, trends, alerts, ingest
-│   │   │   │   ├── training.py           # model info, train, evaluate, dataset
+│   │   │   │   ├── models.py             # active-model switch + /api/model/info
 │   │   │   │   ├── cameras.py            # camera CRUD, video source, anomaly/occupancy settings
-│   │   │   │   └── roi.py                # ROI CRUD, snapshots, proposals
+│   │   │   │   ├── roi.py                # ROI CRUD, snapshots, proposals
+│   │   │   │   └── auth.py               # Admin login → signed Bearer session token
 │   │   │   ├── processor_service.py     # Default processor + active model/anomaly state
 │   │   │   ├── operations.py            # Background operation registry (/api/status)
 │   │   │   └── deps.py                  # Auth, rate limiter, image/source helpers
-│   │   ├── data_prep/
-│   │   │   ├── dataset.py               # PyTorch Dataset + augmentation
-│   │   │   ├── preprocessor.py          # Train/val/test split + DataLoaders
-│   │   │   ├── downloader.py            # dataset organizer + sample generator
-│   │   │   └── yolo_converter.py        # Build YOLO detect dataset from annotations
 │   │   ├── models/
 │   │   │   ├── cnn_scratch.py           # Custom CNN architecture
 │   │   │   ├── cnn_transfer.py          # ResNet-50 + MobileNetV4-Small via transfer learning
 │   │   │   ├── model_factory.py         # Model creation factory
 │   │   │   ├── yolo_detector.py         # YOLO26 detect wrapper (ParkingYOLO26)
 │   │   │   └── yolo_detector_ncnn.py    # Torch-free NCNN detect wrapper (ARM64 edge)
-│   │   ├── train/
-│   │   │   ├── trainer.py               # Training loop + early stopping
-│   │   │   └── train_manager.py         # Background training + evaluation
-│   │   ├── eval/
-│   │   │   ├── evaluator.py             # Metrics computation
-│   │   │   ├── history_store.py         # Timestamped eval/train run snapshots
-│   │   │   └── visualizer.py            # Loss / accuracy plots
 │   │   ├── inference/
 │   │   │   ├── classifier.py            # Torch-free classifier dispatcher (profile → backend)
 │   │   │   ├── torch_classifier.py      # ParkingClassifier — full torch path (server)
@@ -776,13 +769,35 @@ School Project/
 │   │   ├── cameras/
 │   │   │   ├── camera_registry.py       # Multi-camera lifecycle management
 │   │   │   └── youtube_resolver.py      # YouTube watch URL → cached HLS stream
-│   │   ├── export/model_exporter.py     # Export models to NCNN
 │   │   ├── sync/sync_worker.py          # Edge → hub occupancy/alert push
-│   │   ├── reports/model_report.py      # Comparison Excel + training detail loader
 │   │   └── db/database.py               # SQLite helpers (trends, alerts, runs, ingest)
+│   ├── dev/                             # Server-only tree: training, evaluation, export, labeling
+│   │   ├── routers/
+│   │   │   ├── training.py              # train / evaluate / export / dataset / run history
+│   │   │   └── labeling.py              # ROI batch auto-labeling (/api/label-batch/*)
+│   │   ├── data_prep/
+│   │   │   ├── dataset.py               # PyTorch Dataset + augmentation
+│   │   │   ├── preprocessor.py          # Train/val/test split + DataLoaders
+│   │   │   ├── downloader.py            # dataset organizer + sample generator
+│   │   │   └── yolo_converter.py        # Build YOLO detect dataset from annotations
+│   │   ├── train/
+│   │   │   ├── trainer.py               # Training loop + early stopping
+│   │   │   └── train_manager.py         # Background training + evaluation
+│   │   ├── eval/
+│   │   │   ├── evaluator.py             # Metrics computation
+│   │   │   ├── external_datasets.py     # External benchmark dataset resolution
+│   │   │   ├── history_store.py         # Timestamped eval/train run snapshots
+│   │   │   └── visualizer.py            # Loss / accuracy plots
+│   │   ├── export/model_exporter.py     # Export models to NCNN
+│   │   ├── reports/model_report.py      # Comparison Excel + training detail loader
+│   │   └── scripts/
+│   │       ├── train_all.py             # CLI: train all models in sequence
+│   │       ├── export_models.py         # CLI: export trained models to NCNN for edge
+│   │       └── verify.py                # CLI: environment / structure check (run from backend/)
+│   ├── tests/                           # pytest suite; tests/dev/ covers the dev routers
 │   ├── data/                            # Training images (occupied / vacant) + YOLO datasets
 │   ├── outputs/                         # Training logs, plots, YOLO run artifacts
-│   ├── roi_configs/                     # Per-camera ROI JSON + snapshots
+│   ├── configs/                         # Runtime config: roi/<camera_id>.json + cameras.json
 │   └── uploads/                         # User-uploaded video files
 ├── frontend/
 │   ├── src/
@@ -1057,19 +1072,19 @@ run.
 Building on the Pi is slow. Cross-compile on a faster x86 machine, save the image
 to a tarball, copy it over, and load it on the Pi:
 
-Run these from the repo root so the tarball lands at the root (where it is gitignored,
-alongside the other local artifacts):
+Run these from the repo root (the build context), which writes the tarball into
+`deploy/edge/docker/`, next to the compose file that consumes it:
 
 ```bash
 # On the x86 build machine — cross-compile for ARM64
 docker buildx build --platform linux/arm64 \
   -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi . --load
 
-# Save the image to a compressed tarball (→ repo root, gitignored)
-docker save berth-rpi:latest | gzip > berth-rpi.tar.gz
+# Save the image to a compressed tarball (gitignored)
+docker save berth-rpi:latest | gzip > deploy/edge/docker/berth-rpi.tar.gz
 
 # Copy it to the Pi
-scp berth-rpi.tar.gz pi@raspberrypi.local:~/
+scp deploy/edge/docker/berth-rpi.tar.gz pi@raspberrypi.local:~/
 
 # On the Pi — load the image, then start with the prebuilt image
 docker load < berth-rpi.tar.gz

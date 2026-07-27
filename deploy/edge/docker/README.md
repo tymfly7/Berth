@@ -1,23 +1,126 @@
 # Edge: Docker (Pi 5)
 
-Arm64 image (`berth-rpi:latest`, torch-free / NCNN) for the Raspberry Pi 5:
+Arm64 image (`berth-rpi:latest`, torch-free / NCNN) for the **Raspberry Pi 5** (≥ 4 GB). On
+this board the Docker daemon overhead (~100–150 MB) is affordable. On the 512 MB / 1 GB boards
+(Zero 2 W, 3B) it is not, so those run directly under systemd: see [`../native/`](../native/).
 
-| File | Board |
-|------|-------|
+| File | What it is |
+|------|------------|
 | `Dockerfile.rpi` | the image |
 | `docker-compose.rpi.yml` | Pi 5, up to 4 cameras |
+| `README.md` | This guide. |
 
 **Run all commands from the repo root**: the build context is the root (the Dockerfile does
-`COPY backend/` and `COPY frontend/`), so each compose file sets `build.context: ../../..`.
+`COPY backend/` and `COPY frontend/`), so the compose file sets `build.context: ../../..`.
 
 ```bash
 # Pi 5
 docker compose -f deploy/edge/docker/docker-compose.rpi.yml up -d
 ```
 
-Secrets: edge compose reads `.env_edge` (local, gitignored, at the repo root) via
-`--env-file .env_edge`, or a `.env` in the root. Full workflow, including cross-building the
-image tarball and shipping it to the Pi, is in [`../README.md`](../README.md) and the main
-project README.
+Publishes host port **8001** → container 8000.
 
-For the lowest-footprint boards (Zero 2 W / 3B), which run without Docker, see [`../native/`](../native/).
+### Cameras
+
+The container does **not** claim a specific webcam at start. It bind-mounts the host `/dev` and
+grants V4L2 (character major 81) through `device_cgroup_rules`, so a USB camera plugged in
+*after* the service is running is opened the moment a camera is activated in the UI — no
+container recreate, and the service still starts on a Pi with no camera attached at all.
+(A fixed `devices: - /dev/video0:/dev/video0` entry fails the container outright when the node
+is absent, which is why it is not used.)
+
+Ribbon/CSI cameras on Bookworm go through libcamera rather than a plain `/dev/video0`, and this
+image does not carry the libcamera stack. Use a USB webcam or a network stream.
+
+## Secrets: the `.env` file
+
+Nothing secret is baked into the image. `config.py` reads three env vars at every start, and
+the compose file interpolates them as `${VAR:-}` — which **defaults to empty rather than
+failing**, so a missing file produces a silently broken login, not an error:
+
+| Var | If unset |
+|-----|----------|
+| `BERTH_ADMIN_PASSWORD` | `/api/auth/login` returns **503** and the admin UI cannot be used at all. |
+| `BERTH_API_KEY` | Every protected endpoint is publicly accessible. `main.py` warns at startup. |
+| `BERTH_AUTH_SECRET` | A random signing key is generated per process, so every container restart invalidates issued tokens. |
+
+The file is **created on the device**, never shipped from the repo (`.env` and `.env_edge` are
+gitignored). On the Pi, put it next to the compose file:
+
+```bash
+cd ~/berth                      # wherever docker-compose.rpi.yml lives
+cat > .env <<EOF
+BERTH_ADMIN_PASSWORD=choose-a-real-password
+BERTH_API_KEY=$(openssl rand -hex 32)
+BERTH_AUTH_SECRET=$(openssl rand -hex 32)
+EOF
+chmod 600 .env
+```
+
+Write values bare: `BERTH_ADMIN_PASSWORD=secret`, **not** `="secret"` — Compose keeps the quotes
+as part of the value, which shows up later as a 401 on a password that looks correct.
+
+Compose auto-loads a file named `.env` from the compose file's directory. Running from anywhere
+else, name it explicitly — this is also how the repo-root `.env_edge` is used when building
+from a checkout:
+
+```bash
+docker compose --env-file .env_edge -f deploy/edge/docker/docker-compose.rpi.yml up -d
+```
+
+**Env is frozen into the container at creation time.** Editing `.env` does nothing to a running
+container: `docker compose restart` keeps the old values, only `up -d` recreates it. Verify what
+the container actually received, and what login does with it:
+
+```bash
+docker exec berth-berth-rpi-1 printenv | grep BERTH_
+curl -i -X POST http://localhost:8001/api/auth/login \
+  -H 'Content-Type: application/json' -d '{"password":"choose-a-real-password"}'
+```
+
+`503` = the password never arrived; `401` = it arrived but does not match (check for stray
+quotes or whitespace); `200` with a JSON `token` = working.
+
+## Cross-building the image tarball
+
+Build on x86 and ship to the Pi. Both commands run from the **repo root** (the build context is
+the root), but the tarball is written here, next to the compose file that consumes it:
+
+```bash
+docker buildx build --platform linux/arm64 -t berth-rpi:latest \
+  -f deploy/edge/docker/Dockerfile.rpi . --load
+docker save berth-rpi:latest | gzip > deploy/edge/docker/berth-rpi.tar.gz
+```
+
+`*.tar.gz` is gitignored at any depth, so the tarball is ignored here just as it was at the
+root, and `.dockerignore` excludes both `deploy/` and `*.tar.gz`, so a tarball sitting in this
+folder never ends up inside the next image.
+
+Then ship it and load it on the Pi:
+
+The Pi needs no repo checkout — only the image, the compose file, and a `.env`:
+
+```bash
+# From the dev machine: ship the image and the compose file
+ssh USER@HOST 'mkdir -p ~/berth'
+scp deploy/edge/docker/berth-rpi.tar.gz \
+    deploy/edge/docker/docker-compose.rpi.yml USER@HOST:~/berth/
+
+# On the Pi — load the image (docker load reads the gzip directly)
+cd ~/berth
+docker load < berth-rpi.tar.gz
+
+# Create .env here first — see "Secrets" above — then:
+docker compose -f docker-compose.rpi.yml up -d   # no --build: uses the loaded image
+```
+
+`docker-compose.rpi.yml` references `image: berth-rpi:latest`, so once the image is loaded the
+compose run picks it up without rebuilding. Its `build.context: ../../..` points at a repo tree
+that does not exist on the Pi, which is harmless while the image is present — but if the load
+failed or the tag differs, Compose falls back to building and fails with a confusing missing-path
+error rather than "no such image". `docker images | grep berth-rpi` is the quick check.
+
+A native build on the Pi
+(`docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .`) also works, just
+slower. The `.tar.gz` is gitignored; rebuild it after any backend or frontend change so the
+image does not go stale.
