@@ -138,7 +138,9 @@ def evaluate_yolo_classify(weights_path, split="val", imgsz=None):
     )
 
     metrics = {"accuracy": round(float(res.top1) * 100, 2)}
-    # Derive P/R/F1 from the confusion matrix: cm[actual][predicted], class 0 = occupied.
+    # Derive P/R/F1 from the confusion matrix. Ultralytics stores it as
+    # cm[predicted][actual], not cm[actual][predicted]; reading it the other way round
+    # swaps fp with fn and therefore precision with recall. Class 0 = occupied.
     try:
         raw_cm = res.confusion_matrix
         cm = getattr(raw_cm, "matrix", None)
@@ -147,8 +149,8 @@ def evaluate_yolo_classify(weights_path, split="val", imgsz=None):
         if cm is None:
             raise AttributeError(f"Cannot read confusion matrix from {type(raw_cm)}")
         tp = float(cm[0][0])
-        fp = float(cm[1][0])
-        fn = float(cm[0][1])
+        fp = float(cm[0][1])
+        fn = float(cm[1][0])
         prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1   = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0.0

@@ -1045,23 +1045,21 @@ docker compose -f deploy/docker/docker-compose.yml up -d --build
 front for remote access. It bind-mounts `backend/{data,models,outputs,uploads}` so
 datasets, weights, and runs persist on the host.
 
-### 2. Edge node, on a Raspberry Pi (ARM64)
+### 2. Edge node, on a Raspberry Pi 5 (ARM64)
 
 The edge image (`deploy/edge/docker/Dockerfile.rpi`) runs the `edge` profile
-(inference-only, NCNN), and reads camera `/dev/video0` plus persistent volumes for the
-SQLite DB and ROI/camera config.
+(inference-only, NCNN). You do **not** build it on the Pi — cross-build it on an x86 machine and
+ship the prebuilt image (see [§3](#3-baking-the-edge-image-on-x86-and-shipping-it-to-the-pi)
+below); the Pi needs only the image, the compose file, and a `.env`. The container reaches
+webcams through a `/dev` passthrough (a USB camera plugged in after start is opened when a
+camera is activated) and keeps the SQLite DB + ROI/camera config in named volumes.
 
-```bash
-# On the Pi, from the repo root — build locally and start (host 8001 → container 8000)
-docker compose -f deploy/edge/docker/docker-compose.rpi.yml up -d --build
-```
-
-The app is then reachable at `http://<pi-ip>:8001`. Required env (set via the
-compose `.env`): `BERTH_ADMIN_PASSWORD` (else login → `503`); recommended:
-`BERTH_AUTH_SECRET`, `BERTH_API_KEY`, and `BERTH_EDGE_HUB_URL` to point the node at
-the hub. Pre-populate `backend/edge_models/` with the exported `*_ncnn_model/`
-directories (see [Edge / Hub Deployment](#edge--hub-deployment)) before the first
-run.
+Once it is up, the app is reachable at `http://<pi-ip>:8001`. Required env (in the `.env` next
+to the compose file on the Pi): `BERTH_ADMIN_PASSWORD` (else login → `503`); recommended:
+`BERTH_AUTH_SECRET`, `BERTH_API_KEY`, and `BERTH_EDGE_HUB_URL` to point the node at the hub. The
+NCNN models (`backend/edge_models/*_ncnn_model/`) are baked into the image at build time, so
+populate them on the **build machine** (see [Edge / Hub Deployment](#edge--hub-deployment))
+before cross-building.
 
 > On the low-RAM boards (Pi Zero 2 W, Pi 3B), where the Docker daemon's memory
 > overhead is prohibitive, the backend instead runs Docker-free under systemd. That
@@ -1083,17 +1081,21 @@ docker buildx build --platform linux/arm64 \
 # Save the image to a compressed tarball (gitignored)
 docker save berth-rpi:latest | gzip > deploy/edge/docker/berth-rpi.tar.gz
 
-# Copy it to the Pi
-scp deploy/edge/docker/berth-rpi.tar.gz pi@raspberrypi.local:~/
+# Copy the image AND the compose file to the Pi (no repo checkout needed there)
+scp deploy/edge/docker/berth-rpi.tar.gz \
+    deploy/edge/docker/docker-compose.rpi.yml pi@raspberrypi.local:~/berth/
 
-# On the Pi — load the image, then start with the prebuilt image
+# On the Pi (~/berth) — create .env first (see deploy/edge/docker/README.md), then load + start
+cd ~/berth
 docker load < berth-rpi.tar.gz
-docker compose -f deploy/edge/docker/docker-compose.rpi.yml up -d   # no --build: uses the loaded image
+docker compose -f docker-compose.rpi.yml up -d   # no --build: uses the loaded image
 ```
 
-`deploy/edge/docker/docker-compose.rpi.yml` references `image: berth-rpi:latest`, so once the
-image is loaded the compose run picks it up without rebuilding. (Native build on the Pi —
-`docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .` — also works, just slower.)
+The compose file references `image: berth-rpi:latest`, so once the image is loaded the compose
+run picks it up without rebuilding — its `build.context` points at a repo tree that is not on
+the Pi, which is harmless while the image is present. (Building on the Pi instead —
+`docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .` from a checkout — also
+works, just slower.)
 
 > The `.tar`/`.tar.gz` artifacts are gitignored and should not be committed. Rebuild
 > after any frontend or backend change so the image is not stale.

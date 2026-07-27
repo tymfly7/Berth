@@ -261,6 +261,9 @@ mediamtx-setup.md
 # Edge eval CSV/goldens output — generated per run, not deployable
 backend/eval_results/
 
+# Pre-retrain snapshots of model weights, exports and eval runs
+backend/backups/
+
 
 #thesis folder
 thesis/
@@ -302,7 +305,8 @@ backend/models/*.pt
 backend/models/*.bak
 backend/yolo26m-cls.pt
 backend/yolo26n-cls.pt
-backend/yolo26s.pt 
+backend/yolo26s-cls.pt
+backend/yolo26s.pt
 
 # frontend modules
 frontend/node_modules
