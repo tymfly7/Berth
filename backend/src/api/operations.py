@@ -15,7 +15,7 @@ _ops_lock = threading.Lock()
 _STALE_SECONDS = 3600
 
 
-def register_op(op_type: str, label: str) -> str:
+def register_op(op_type: str, label: str, lot_id: str | None = None) -> str:
     op_id = uuid.uuid4().hex[:8]
     now = datetime.now(timezone.utc)
     with _ops_lock:
@@ -25,7 +25,7 @@ def register_op(op_type: str, label: str) -> str:
         for k in stale:
             del _active_operations[k]
         _active_operations[op_id] = {
-            "id": op_id, "type": op_type, "label": label,
+            "id": op_id, "type": op_type, "label": label, "lot_id": lot_id,
             "progress": 0.0,
             "started_at": now.isoformat(),
         }

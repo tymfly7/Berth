@@ -55,112 +55,6 @@ async def predict(request: Request, file: UploadFile = File(...)):
     return result
 
 
-# ── Analyze full parking lot image ───────────────────────
-@router.post("/api/analyze-lot", dependencies=[Depends(verify_api_key)])
-@limiter.limit(config.UPLOAD_RATE_LIMIT)
-async def analyze_lot(request: Request, file: UploadFile = File(...),
-                      rows: int = 3, cols: int = 6):
-    """
-    Upload ANY parking lot image (aerial, Google, etc.) and analyze it.
-
-    Splits the image into a grid of (rows x cols) cells, classifies each
-    cell as occupied/vacant, and returns:
-    - Slot-wise results with confidence
-    - Summary stats (total, available, occupied)
-    - Base64-encoded annotated image with green/red overlays
-
-    Query params:
-    - rows: number of grid rows (default: 3)
-    - cols: number of grid columns (default: 6)
-    """
-    op_id = register_op("analysis", "Analyzing parking lot…")
-    try:
-        if not 1 <= rows <= 50 or not 1 <= cols <= 50:
-            raise HTTPException(400, "rows and cols must each be between 1 and 50")
-
-        frame = await read_image(file)
-
-        model_name = processor_service.resolve_model_name()
-        if model_name is None:
-            raise HTTPException(400, "No trained model available. Train a model first.")
-        try:
-            clf = processor_service.get_classifier(model_name)
-        except Exception as e:
-            raise HTTPException(400, str(e))
-
-        h, w = frame.shape[:2]
-        cell_h = h // rows
-        cell_w = w // cols
-
-        cells = []
-        slot_id = 1
-        for r in range(rows):
-            for c in range(cols):
-                y1 = r * cell_h
-                y2 = (r + 1) * cell_h if r < rows - 1 else h
-                x1 = c * cell_w
-                x2 = (c + 1) * cell_w if c < cols - 1 else w
-                cells.append((slot_id, frame[y1:y2, x1:x2], x1, y1, x2, y2))
-                slot_id += 1
-
-        predictions = clf.predict_batch([c[1] for c in cells])
-
-        annotated = frame.copy()
-        slots = []
-        available = 0
-        occupied = 0
-        total_conf = 0.0
-
-        for (sid, _, x1, y1, x2, y2), pred in zip(cells, predictions):
-            status = pred["status"]
-            conf = pred["confidence"]
-            total_conf += conf
-
-            if status == "vacant":
-                available += 1
-                color = (0, 200, 0)
-                overlay_color = (0, 255, 0)
-            else:
-                occupied += 1
-                color = (0, 0, 220)
-                overlay_color = (0, 0, 255)
-
-            overlay = annotated.copy()
-            cv2.rectangle(overlay, (x1, y1), (x2, y2), overlay_color, -1)
-            cv2.addWeighted(overlay, 0.25, annotated, 0.75, 0, annotated)
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-            label = f"#{sid} {status[:3].upper()} {conf:.0%}"
-            font_scale = max(0.35, min(cell_w, cell_h) / 200)
-            cv2.putText(annotated, label, (x1 + 4, y1 + 18),
-                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 1)
-
-            slots.append({
-                "id": sid,
-                "status": status,
-                "confidence": round(conf, 4),
-                "bbox": f"{x1} {y1} {x2-x1} {y2-y1}",
-            })
-
-        total = len(slots)
-        avg_conf = total_conf / total if total > 0 else 0
-        occ_pct = round(100.0 * occupied / total, 1) if total > 0 else 0
-
-        return {
-            "type": "lot_analysis",
-            "model": processor_service.active_mode,
-            "grid": f"{rows}x{cols}",
-            "total": total,
-            "available": available,
-            "occupied": occupied,
-            "occupancy_percent": occ_pct,
-            "avg_confidence": round(avg_conf, 4),
-            "slots": slots,
-            "annotated_image": frame_to_b64(annotated),
-        }
-    finally:
-        finish_op(op_id)
-
-
 @router.post("/api/analyze-roi", dependencies=[Depends(verify_api_key)])
 @limiter.limit(config.UPLOAD_RATE_LIMIT)
 async def analyze_roi(
@@ -323,30 +217,26 @@ async def analyze_misparked(
                 f"No ROIs saved for camera '{camera_id}'. Draw and save ROIs first.",
             )
 
-        # Load YOLO26 detector — surface a clear error if weights are missing.
-        # On edge use the torch-free NCNN export (the .pt is not shipped there).
+        # Load the COCO-pretrained vehicle detector — surface a clear error if
+        # weights are missing.
         try:
-            if config.DEPLOYMENT_PROFILE == "edge" and config.YOLO26_DETECT_NCNN_PATH.exists():
-                from src.models.yolo_detector_ncnn import EdgeYoloDetector
-                detector = EdgeYoloDetector(str(config.YOLO26_DETECT_NCNN_PATH))
-            else:
-                from src.models.yolo_detector import ParkingYOLO26
-                detector = ParkingYOLO26(str(config.YOLO26_DETECT_PATH))
+            from src.models.yolo_detector import load_vehicle_detector
+            detector = load_vehicle_detector()
         except FileNotFoundError:
             raise HTTPException(
                 400,
-                "YOLO26 detector weights not found. "
-                "Train a YOLO26 detector first via the Training panel.",
+                f"Vehicle detector weights not found at "
+                f"'{config.VEHICLE_DETECT_PATH}'.",
             )
         except RuntimeError as exc:
-            logger.error(f"YOLO26 detector failed to load: {exc}")
-            raise HTTPException(400, f"YOLO26 detector failed to load: {exc}")
+            logger.error(f"Vehicle detector failed to load: {exc}")
+            raise HTTPException(400, f"Vehicle detector failed to load: {exc}")
 
         h, w = frame.shape[:2]
+        from src.inference.parking_geometry import aggregate_lot, classify_vehicle_parking
         detections = detector.predict_frame(frame)
         cars = [{"bbox": d["bbox"], "confidence": d["confidence"]} for d in detections]
 
-        from src.inference.parking_geometry import aggregate_lot, classify_vehicle_parking
         lot = aggregate_lot(cars, rois, w, h)
 
         # ── Annotate image ────────────────────────────────────────────────────

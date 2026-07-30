@@ -210,17 +210,12 @@ class VideoProcessor:
         self._anomaly_park_thresh = max(0.0, min(1.0, float(park_thresh)))
 
     def _load_yolo_detector(self) -> None:
-        # On edge use the NCNN-exported detect model (torch-free, ARM-fast); fall
-        # back to the torch .pt elsewhere. The .pt is not shipped in the edge
-        # image, so anomaly detection must run on the NCNN export there.
-        if config.DEPLOYMENT_PROFILE == "edge" and config.YOLO26_DETECT_NCNN_PATH.exists():
-            from src.models.yolo_detector_ncnn import EdgeYoloDetector
-            self._yolo_detector = EdgeYoloDetector(str(config.YOLO26_DETECT_NCNN_PATH))
-            logger.info(f"Anomaly detection: NCNN detector loaded ({config.YOLO26_DETECT_NCNN_PATH.name})")
-        else:
-            from src.models.yolo_detector import ParkingYOLO26
-            self._yolo_detector = ParkingYOLO26(str(config.YOLO26_DETECT_PATH))
-            logger.info(f"Anomaly detection: YOLO26 detector loaded ({config.YOLO26_DETECT_PATH.name})")
+        from src.models.yolo_detector import load_vehicle_detector
+        self._yolo_detector = load_vehicle_detector()
+        logger.info(
+            f"Anomaly detection: vehicle detector loaded "
+            f"({type(self._yolo_detector).__name__})"
+        )
 
     def set_video_source(self, source, source_type="auto"):
         was_running = self.running
@@ -677,6 +672,7 @@ class VideoProcessor:
                             car["bbox"], self._roi_cache, w, h,
                             park_thresh=self._anomaly_park_thresh,
                         )
+                        logger.info(f"anomaly overlap car={car['bbox']} overlaps={clf['overlaps']}")
                         if clf["status"] == "misparked":
                             if clf["reason"] == "straddling":
                                 straddled_ids.update(clf["intruded_rois"])
@@ -694,9 +690,15 @@ class VideoProcessor:
                                 x1, y1, x2, y2 = (int(v) for v in car["bbox"])
                                 new_anomalies.append({"label": "OUTSIDE", "bbox": (x1, y1, x2, y2)})
                 except Exception as e:
+                    # A failed pass is not evidence that the misparked vehicles
+                    # went away, so keep the last good result rather than publish
+                    # the empty list this pass never got to fill.
                     logger.warning(f"Anomaly detection error: {e}")
-                self._last_anomalies = new_anomalies
-                self._last_straddled_ids = straddled_ids
+                    new_anomalies = self._last_anomalies
+                    straddled_ids = self._last_straddled_ids
+                else:
+                    self._last_anomalies = new_anomalies
+                    self._last_straddled_ids = straddled_ids
             else:
                 # Between detect passes: reuse the last detection result so the
                 # overlays and blocked-bay hysteresis stay stable.

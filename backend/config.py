@@ -93,19 +93,26 @@ YOLO26N_CLASSIFY_NCNN_PATH = EDGE_MODEL_DIR / "best_yolo26n_classify_ncnn_model"
 YOLO26S_CLASSIFY_NCNN_PATH = EDGE_MODEL_DIR / "best_yolo26s_classify_ncnn_model"
 YOLO26M_CLASSIFY_NCNN_PATH = EDGE_MODEL_DIR / "best_yolo26m_classify_ncnn_model"
 YOLO26_DETECT_NCNN_PATH   = EDGE_MODEL_DIR / "best_yolo26_detect_ncnn_model"
+# Single-class ("vehicle") detector fine-tuned on hand-corrected labels, used
+# ONLY by the misparked-vehicle pass. Trained at 640px via the yolo26_detect
+# pipeline (see YOLO_DATASET_DIR); shares the checkpoint with YOLO26_DETECT_PATH.
+VEHICLE_DETECT_PATH       = Path(os.getenv("BERTH_VEHICLE_DETECT_PATH", str(MODEL_DIR / "best_yolo26_detect.pt")))
+VEHICLE_DETECT_NCNN_PATH  = EDGE_MODEL_DIR / "yolo26s_vehicle_ncnn_model"
+# Set below the neutral 0.40 default: anomaly flags are reviewed by an
+# operator, which makes a spurious box cheaper than a missed one. Carried over
+# from the COCO-detector era; not yet re-validated against the retrained
+# single-class model.
+VEHICLE_DETECT_CONF       = float(os.getenv("BERTH_VEHICLE_DETECT_CONF", "0.25"))
 # Scale → checkpoint lookups so callers can resolve a yolo26{n,s,m}_classify
 # name to its .pt / NCNN export without re-listing the literals.
 YOLO26_CLASSIFY_PATHS = {"n": YOLO26N_CLASSIFY_PATH, "s": YOLO26S_CLASSIFY_PATH, "m": YOLO26M_CLASSIFY_PATH}
 YOLO26_CLASSIFY_NCNN_PATHS = {"n": YOLO26N_CLASSIFY_NCNN_PATH, "s": YOLO26S_CLASSIFY_NCNN_PATH, "m": YOLO26M_CLASSIFY_NCNN_PATH}
-YOLO_DATASET_DIR         = DATA_DIR  / "yolo_detect_dataset"
+YOLO_DATASET_DIR         = DATA_DIR  / "vehicle_dataset"
 CLASSIFY_SPLIT_DIR       = DATA_DIR  / "classify_split"
 CLASSIFY_SUBSET_DIR      = DATA_DIR  / "classify_subset"   # capped, class-balanced copy for YOLO classify
 YOLO26_DETECT_RUN_DIR    = OUTPUT_DIR / "yolo26_detect"   / "run"
 
-# One-time migration to the per-scale roster: the pre-split single classify
-# checkpoint (best_yolo26_classify.pt) was the s-scale model, and the mobilenet
-# checkpoint was the conv_small (s) model. Rename them (and the yolo NCNN export)
-# to the scale-specific names so existing trained weights aren't orphaned.
+# One-time migration to the per-scale roster
 def _migrate_checkpoint(old, new):
     try:
         if old.exists() and not new.exists():
@@ -162,14 +169,16 @@ CACHE_DATASET = os.getenv("BERTH_CACHE_DATASET", "1") == "1"
 # Subset size for CNN models (0 = full dataset)
 SUBSET_SIZE = int(os.getenv("BERTH_SUBSET", "25000"))
 
-# Smaller input size for YOLO classify — spots are pre-cropped so 64 px is
-# enough and is ~10x faster than 224 px.
-YOLO_CLASSIFY_IMG_SIZE = int(os.getenv("BERTH_YOLO_CLASSIFY_IMGSZ", "64"))
+# Match CNN_INPUT_SIZE so every classifier sees identical input and the roster
+# stays comparable. t10lot crops arrive at ~273 px equivalent side, so 224 is
+# near-native; the previous 64 px discarded ~94% of the available pixels.
+YOLO_CLASSIFY_IMG_SIZE = int(os.getenv("BERTH_YOLO_CLASSIFY_IMGSZ", "224"))
 
 # YOLO detect — full-frame scenes pack ~30+ small parking spots, so 640 px
 # starves them; 960 px recovers small-object recall. yolo26s gives more
 # capacity than nano for the small (~230-image) annotated dataset.
-YOLO_DETECT_IMG_SIZE = int(os.getenv("BERTH_YOLO_DETECT_IMGSZ", "960"))
+# Trying 640px for now
+YOLO_DETECT_IMG_SIZE = int(os.getenv("BERTH_YOLO_DETECT_IMGSZ", "640"))
 YOLO_DETECT_MODEL    = os.getenv("BERTH_YOLO_DETECT_MODEL", "yolo26s.pt")
 
 # ---------------------------------------------------------------------------
@@ -199,8 +208,8 @@ CAPTURE_INTERVAL_SECS = float(os.getenv("BERTH_CAPTURE_INTERVAL", "600"))  # 10 
 # per-profile values are defaults only — override per board via env so a single
 # arm64 image can run on both a Pi 5 and a much weaker Pi Zero 2 W (separate
 # compose files supply the tuning).
-FRAME_WIDTH   = int(os.getenv("BERTH_FRAME_WIDTH",  "960" if DEPLOYMENT_PROFILE == "edge" else "1280"))
-FRAME_HEIGHT  = int(os.getenv("BERTH_FRAME_HEIGHT", "540" if DEPLOYMENT_PROFILE == "edge" else "720"))
+FRAME_WIDTH   = int(os.getenv("BERTH_FRAME_WIDTH",  "960" if DEPLOYMENT_PROFILE == "edge" else "1920"))
+FRAME_HEIGHT  = int(os.getenv("BERTH_FRAME_HEIGHT", "540" if DEPLOYMENT_PROFILE == "edge" else "1080"))
 STREAM_FPS    = int(os.getenv("BERTH_STREAM_FPS",   "15"  if DEPLOYMENT_PROFILE == "edge" else "20"))
 JPEG_QUALITY  = 90   if DEPLOYMENT_PROFILE == "edge" else 80  # edge raised for sharpness; server keeps bandwidth-optimised 80
 
@@ -217,9 +226,9 @@ NCNN_THREADS = int(os.getenv("BERTH_NCNN_THREADS", "3" if DEPLOYMENT_PROFILE == 
 
 # Cadence for the poorly-parked anomaly pass (YOLO26 detect), decoupled from
 # INFER_FPS. The detect pass is far heavier than the per-slot classify and
-# mis-parking changes slowly, so run it sparingly to keep ARM cores free for the
-# API and the occupancy loop. 0.2 = one detect pass every 5 s.
-ANOMALY_FPS = float(os.getenv("BERTH_ANOMALY_FPS", "0.2"))
+# mis-parking changes slowly, so run it sparingly to keep ARM cores and RAM free
+# for the API and the occupancy loop. ~0.0667 = one detect pass every 15 s.
+ANOMALY_FPS = float(os.getenv("BERTH_ANOMALY_FPS", "0.0667"))
 
 # Cap on concurrent active cameras. Each active camera runs its own decode +
 # inference loop; too many saturate a few-core edge box and starve the API.
@@ -236,7 +245,7 @@ YOUTUBE_STREAM_CACHE_TTL = int(os.getenv("BERTH_YT_CACHE_TTL", "240"))  # second
 
 # Cap YouTube stream height: full-quality (1080p) decode overwhelms low-RAM
 # edge boxes. Pick the best rendition at or below this height.
-YOUTUBE_MAX_HEIGHT = int(os.getenv("BERTH_MAX_STREAM_HEIGHT", "480"))
+YOUTUBE_MAX_HEIGHT = int(os.getenv("BERTH_MAX_STREAM_HEIGHT", "1080"))
 
 # Cap ingested frame height for every source (file / USB / RTSP / YouTube):
 # raw frames fill the jitter buffer and the inference slot, so a native-

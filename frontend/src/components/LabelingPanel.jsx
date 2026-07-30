@@ -2,6 +2,14 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { apiFetch } from '../api'
 
+// Two pre-labelers. Classification crops each saved ROI and calls it occupied or
+// vacant. Detection annotates whole frames with stock COCO weights, which is the
+// only mode that can represent a vehicle parked outside the marked bays.
+const MODES = [
+  { id: 'classify', label: 'Classification (CNN)' },
+  { id: 'detect',   label: 'Detection (YOLO)'     },
+]
+
 // Auto-labeling uses the classifier as a pre-labeler — detector head excluded.
 const MODELS = [
   { id: 'cnn_scratch',      label: 'CNN Scratch'      },
@@ -50,12 +58,18 @@ const fieldStyle = { width: '100%', padding: '6px 8px', fontSize: '0.8rem', marg
   border: '1px solid var(--border-color)', borderRadius: 4 }
 
 export default function LabelingPanel({ apiBase }) {
+  const [mode, setMode] = useState('classify')
   const [lotId, setLotId] = useState('lot-t10lot')
   const [imageDir, setImageDir] = useState('')
   const [model, setModel] = useState('mobilenetv4s')
   const [conf, setConf] = useState(0.7)
   const [brightness, setBrightness] = useState(50)
   const [dateGlob, setDateGlob] = useState('2026-*')
+  // Typed fields, so these hold strings while being edited and are coerced on submit.
+  const [nFrames, setNFrames] = useState('200')
+  const [detConf, setDetConf] = useState('0.25')
+  const [weights, setWeights] = useState('')
+  const [vreport, setVreport] = useState(null)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState(null)
@@ -79,7 +93,15 @@ export default function LabelingPanel({ apiBase }) {
     } catch { /* none yet */ }
   }, [apiBase, lotId])
 
+  const fetchVreport = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/vehicle-report`)
+      setVreport(res.ok ? await res.json() : null)
+    } catch { setVreport(null) }
+  }, [apiBase, lotId])
+
   useEffect(() => { fetchManifest() }, [fetchManifest])
+  useEffect(() => { fetchVreport() }, [fetchVreport])
   useEffect(() => () => clearInterval(pollRef.current), [])
 
   const poll = useCallback(() => {
@@ -89,7 +111,7 @@ export default function LabelingPanel({ apiBase }) {
         const res = await apiFetch(`${apiBase}/api/status`)
         if (!res.ok) return
         const { operations } = await res.json()
-        const op = operations.find(o => o.type === 'label_batch')
+        const op = operations.find(o => o.type === 'label_batch' && o.lot_id === lotId)
         if (op) {
           setProgress(op.progress || 0)
         } else {
@@ -104,11 +126,12 @@ export default function LabelingPanel({ apiBase }) {
             if (ok === false) { setStatus(`✗ Labeling failed: ${error || 'unknown error'}`); return }
           } catch { /* fall through to success */ }
           fetchManifest()
+          fetchVreport()
           setStatus('Labeling complete.')
         }
       } catch { /* keep polling */ }
     }, 1500)
-  }, [apiBase, lotId, fetchManifest])
+  }, [apiBase, lotId, fetchManifest, fetchVreport])
 
   // Re-attach to a labeling run already in flight server-side (e.g. after a page
   // reload). The backend thread keeps running regardless of the browser and the
@@ -119,7 +142,7 @@ export default function LabelingPanel({ apiBase }) {
     apiFetch(`${apiBase}/api/status`)
       .then(r => (r.ok ? r.json() : null))
       .then(data => {
-        const op = data?.operations?.find(o => o.type === 'label_batch')
+        const op = data?.operations?.find(o => o.type === 'label_batch' && o.lot_id === lotId)
         if (op && !cancelled) {
           setRunning(true)
           setProgress(op.progress || 0)
@@ -152,6 +175,22 @@ export default function LabelingPanel({ apiBase }) {
       if (!res.ok) { setStatus(`✗ ${data.detail || 'Failed to start'}`); return }
       setRunning(true)
       setStatus(`Running on ${data.image_count} images × ${data.roi_count} ROIs…`)
+      poll()
+    } catch (e) { setStatus(`✗ ${e.message}`) }
+  }
+
+  const runBootstrap = async () => {
+    setStatus(null); setProgress(0)
+    const n = Math.max(1, parseInt(nFrames, 10) || 200)
+    const c = parseFloat(detConf) || 0.25
+    const qs = `n_frames=${n}&conf=${c}&date_glob=${encodeURIComponent(dateGlob)}`
+      + `&image_dir=${encodeURIComponent(imageDir)}&weights=${encodeURIComponent(weights)}`
+    try {
+      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/bootstrap-vehicles?${qs}`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) { setStatus(`✗ ${data.detail || 'Failed to start'}`); return }
+      setRunning(true)
+      setStatus(`Sampling ${data.sample_target} of ${data.image_count} frames…`)
       poll()
     } catch (e) { setStatus(`✗ ${e.message}`) }
   }
@@ -191,6 +230,11 @@ export default function LabelingPanel({ apiBase }) {
 
   return (
     <div>
+      <label style={labelStyle}>Pre-labeler</label>
+      <select style={fieldStyle} value={mode} onChange={e => setMode(e.target.value)}>
+        {MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+      </select>
+
       <label style={labelStyle}>Lot ID (ROI set + output name)</label>
       <input style={fieldStyle} list="labeling-lots" value={lotId}
         onChange={e => setLotId(e.target.value)} placeholder="lot-t10lot" />
@@ -202,30 +246,54 @@ export default function LabelingPanel({ apiBase }) {
       <input style={fieldStyle} value={imageDir} onChange={e => setImageDir(e.target.value)}
         placeholder="D:\Documents\School Project\backend\data\t10lot" />
 
-      <label style={labelStyle}>Classifier (pre-labeler)</label>
-      <select style={fieldStyle} value={model} onChange={e => setModel(e.target.value)}>
-        {MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
-      </select>
+      {mode === 'classify' ? (
+        <>
+          <label style={labelStyle}>Classifier</label>
+          <select style={fieldStyle} value={model} onChange={e => setModel(e.target.value)}>
+            {MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
 
-      <label style={labelStyle}>Confidence threshold: {conf.toFixed(2)} (below → review)</label>
-      <input type="range" min="0.5" max="0.99" step="0.01" value={conf}
-        onChange={e => setConf(parseFloat(e.target.value))} style={{ width: '100%', marginBottom: 12 }} />
+          <label style={labelStyle}>Confidence threshold: {conf.toFixed(2)} (below → review)</label>
+          <input type="range" min="0.5" max="0.99" step="0.01" value={conf}
+            onChange={e => setConf(parseFloat(e.target.value))} style={{ width: '100%', marginBottom: 12 }} />
 
-      <label style={labelStyle}>Brightness threshold: {brightness} (below → too_dark)</label>
-      <input type="range" min="10" max="120" step="1" value={brightness}
-        onChange={e => setBrightness(parseInt(e.target.value))} style={{ width: '100%', marginBottom: 12 }} />
+          <label style={labelStyle}>Brightness threshold: {brightness} (below → too_dark)</label>
+          <input type="range" min="10" max="120" step="1" value={brightness}
+            onChange={e => setBrightness(parseInt(e.target.value))} style={{ width: '100%', marginBottom: 12 }} />
+        </>
+      ) : (
+        <>
+          <label style={labelStyle}>Detector weights (blank = stock COCO yolo26s)</label>
+          <input style={fieldStyle} value={weights} onChange={e => setWeights(e.target.value)}
+            placeholder="models/yolo26s_vehicle.pt" />
 
-      <label style={labelStyle}>Date filter (glob)</label>
+          <label style={labelStyle}>Frames to sample (capped at what the folder holds)</label>
+          <input style={fieldStyle} type="number" min="1" step="10" value={nFrames}
+            onChange={e => setNFrames(e.target.value)} placeholder="200" />
+
+          <label style={labelStyle}>Confidence threshold (low = recall biased)</label>
+          <input style={fieldStyle} type="number" min="0.01" max="0.95" step="0.05" value={detConf}
+            onChange={e => setDetConf(e.target.value)} placeholder="0.25" />
+        </>
+      )}
+
+      <label style={labelStyle}>Date filter (glob, matches subfolders only — loose files in the folder are always included)</label>
       <input style={fieldStyle} value={dateGlob} onChange={e => setDateGlob(e.target.value)} placeholder="2026-*" />
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-        <button className="btn btn-ghost btn-sm" onClick={runCalibrate}
-          disabled={calibLoading || running} style={{ flex: 1 }}>
-          {calibLoading ? 'Calibrating…' : 'Calibrate'}
-        </button>
-        <button className="btn btn-primary btn-sm" onClick={runBatch}
-          disabled={running} style={{ flex: 1 }}>
-          {running ? `Running ${Math.round(progress * 100)}%` : 'Run labeling'}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10,
+        justifyContent: mode === 'classify' ? 'stretch' : 'center' }}>
+        {mode === 'classify' && (
+          <button className="btn btn-ghost btn-sm" onClick={runCalibrate}
+            disabled={calibLoading || running} style={{ flex: 1 }}>
+            {calibLoading ? 'Calibrating…' : 'Calibrate'}
+          </button>
+        )}
+        <button className="btn btn-primary btn-sm"
+          onClick={mode === 'classify' ? runBatch : runBootstrap}
+          disabled={running}
+          style={mode === 'classify' ? { flex: 1 } : { padding: '6px 20px' }}>
+          {running ? `Running ${Math.round(progress * 100)}%`
+            : mode === 'classify' ? 'Run labeling' : 'Run bootstrap'}
         </button>
       </div>
 
@@ -263,7 +331,30 @@ export default function LabelingPanel({ apiBase }) {
         </div>
       )}
 
-      {manifest && totalCrops > 0 && (
+      {mode === 'detect' && vreport && (
+        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 10,
+          padding: 8, border: '1px solid var(--border-color)', borderRadius: 4 }}>
+          <div>{vreport.n_selected} frames of {vreport.n_available} ·&nbsp;
+            {Object.keys(vreport.day_hist).length} of {vreport.n_days} capture days ·&nbsp;
+            train {vreport.split_counts.train || 0}/val {vreport.split_counts.val || 0}</div>
+          <div style={{ marginTop: 4 }}>{vreport.total_boxes} boxes · mean {vreport.mean_boxes} per frame</div>
+          <div style={{ marginTop: 4 }}>Frames per hour:&nbsp;
+            {Object.entries(vreport.hour_hist)
+              .sort((a, b) => a[0] - b[0])
+              .map(([h, n]) => `${h.padStart(2, '0')}:${n}`).join('  ')}</div>
+          {vreport.zero_detection.length > 0 && (
+            <div style={{ marginTop: 4, color: '#d6a73a' }}>
+              {vreport.zero_detection.length} frames with zero detections — empty lot or a
+              detector failure, check each one.
+            </div>
+          )}
+          <div style={{ marginTop: 4, wordBreak: 'break-all' }}>
+            Frames and labels: <code>{vreport.out_root}</code>
+          </div>
+        </div>
+      )}
+
+      {mode === 'classify' && manifest && totalCrops > 0 && (
         <>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: '0.72rem', marginBottom: 8 }}>
             {BUCKETS.map(b => (

@@ -300,7 +300,7 @@ class TrainManager:
                 task="classify",
                 epochs=config.YOLO_CLASSIFY_EPOCHS,
                 batch=config.BATCH_SIZE,
-                imgsz=config.YOLO_CLASSIFY_IMG_SIZE,   # 64 px — spots are pre-cropped
+                imgsz=config.YOLO_CLASSIFY_IMG_SIZE,   # 224 px — near-native for t10lot crops
                 cache="ram",
                 workers=min(8, config.NUM_WORKERS * 4),
                 amp=True,

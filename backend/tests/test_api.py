@@ -1,5 +1,5 @@
 import io
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -72,28 +72,6 @@ def test_predict_no_model(test_client):
             files={"file": ("spot.jpg", data, "image/jpeg")},
         )
     assert r.status_code == 400
-
-
-# ── Analyze lot ───────────────────────────────────────────────────────────────
-
-def test_analyze_lot(test_client):
-    mock_clf = MagicMock()
-    mock_clf.is_loaded.return_value = True
-    mock_clf.predict_batch.return_value = [
-        {"status": "vacant", "confidence": 0.9} for _ in range(4)
-    ]
-
-    data = _jpeg_bytes(64, 64)
-    from src.api.processor_service import processor_service
-    with patch.object(processor_service, "resolve_model_name", return_value="cnn_scratch"), \
-         patch("src.inference.torch_classifier.ParkingClassifier", return_value=mock_clf):
-        r = test_client.post(
-            "/api/analyze-lot?rows=2&cols=2",
-            files={"file": ("lot.jpg", data, "image/jpeg")},
-        )
-
-    assert r.status_code == 200
-    assert r.json()["total"] == 4
 
 
 # ── ROI CRUD ──────────────────────────────────────────────────────────────────

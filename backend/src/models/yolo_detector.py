@@ -32,7 +32,8 @@ class ParkingYOLO26:
     #       separate training workflow and a dataset converted to YOLO format.
     """
 
-    def __init__(self, model_path: str, conf: float = 0.40, iou: float = 0.7):
+    def __init__(self, model_path: str, conf: float = 0.40, iou: float = 0.7,
+                 imgsz: int | None = None):
         try:
             from ultralytics import YOLO
         except ImportError:
@@ -47,6 +48,7 @@ class ParkingYOLO26:
         self.model = YOLO(model_path)
         self._conf = conf
         self._iou = iou
+        self._imgsz = imgsz
 
     def predict_frame(self, frame_bgr: np.ndarray) -> list:
         """
@@ -61,7 +63,13 @@ class ParkingYOLO26:
                 'confidence': float detection score
                 'class_id':   int class index
         """
-        results = self.model(frame_bgr, verbose=False, conf=self._conf, iou=self._iou)
+        # imgsz must be passed explicitly: ultralytics defaults to 640, which
+        # silently disagrees with the 960 the NCNN edge path letterboxes to.
+        kwargs = {}
+        if self._imgsz:
+            kwargs["imgsz"] = self._imgsz
+        results = self.model(frame_bgr, verbose=False, conf=self._conf,
+                             iou=self._iou, **kwargs)
         detections = []
         for r in results:
             for box in r.boxes:
@@ -80,3 +88,28 @@ class ParkingYOLO26:
                     "class_id":   int(box.cls[0]),
                 })
         return detections
+
+
+def load_vehicle_detector():
+    """Build the detector used by the misparked-vehicle pass.
+
+    Single-class ("vehicle") model fine-tuned on hand-corrected labels — the
+    same checkpoint as the project's yolo26_detect model. On edge the torch
+    .pt is absent, so the NCNN export is used when present.
+
+    Both anomaly call sites go through here so the model and input size
+    cannot drift apart between them.
+    """
+    import config
+
+    if config.DEPLOYMENT_PROFILE == "edge" and config.VEHICLE_DETECT_NCNN_PATH.exists():
+        from src.models.yolo_detector_ncnn import EdgeYoloDetector
+        return EdgeYoloDetector(
+            str(config.VEHICLE_DETECT_NCNN_PATH),
+            conf=config.VEHICLE_DETECT_CONF,
+        )
+    return ParkingYOLO26(
+        str(config.VEHICLE_DETECT_PATH),
+        imgsz=config.YOLO_DETECT_IMG_SIZE,
+        conf=config.VEHICLE_DETECT_CONF,
+    )

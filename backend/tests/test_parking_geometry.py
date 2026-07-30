@@ -86,10 +86,20 @@ def test_classify_straddling():
 
 def test_classify_off_lot_car_is_outside():
     """A car with no overlap with any marked spot is poorly parked ('outside') —
-    it is not in any marked bay. (ROIs are expected to cover the parking area.)"""
+    it is not in any marked bay. Deliberately inclusive: every vehicle not
+    squarely inside a bay is flagged, and the admin adjudicates."""
     result = classify_vehicle_parking([80, 80, 95, 95], ROIS, W, H)
     assert result["status"] == "misparked", result
     assert result["reason"] == "outside", result
+
+
+def test_classify_zero_and_partial_overlap_both_flag_outside():
+    """A car with ~0 bay overlap and a car half-out of a bay both report the
+    same status and reason — one bucket, one overlay colour, no sub-category."""
+    no_overlap = classify_vehicle_parking([80, 80, 95, 95], ROIS, W, H)
+    partly_in  = classify_vehicle_parking([0, 50, 24, 90], ROIS, W, H)
+    assert no_overlap["status"] == partly_in["status"] == "misparked"
+    assert no_overlap["reason"] == partly_in["reason"] == "outside"
 
 
 def test_classify_partly_in_one_spot_is_outside():
@@ -196,6 +206,19 @@ def test_aggregate_off_lot_car_flagged():
     assert result["occupied"] == 0
 
 
+def test_aggregate_counts_straddling_and_outside_together():
+    """Straddling and outside land in one misparked bucket — the admin reviews
+    the list, so the two reasons are not counted or coloured apart."""
+    cars = [
+        {"bbox": [15, 10, 65, 90], "confidence": 0.85},  # straddles A+B
+        {"bbox": [80, 80, 95, 95], "confidence": 0.70},  # no bay overlap
+        {"bbox": [12, 12, 38, 88], "confidence": 0.9},   # ok, inside A
+    ]
+    result = aggregate_lot(cars, ROIS, W, H)
+    assert result["misparked_count"] == 2
+    assert {m["reason"] for m in result["misparked"]} == {"straddling", "outside"}
+
+
 def test_aggregate_mixed():
     """One ok car + one straddler → 1 misparked, 2 occupied slots."""
     cars = [
@@ -222,6 +245,7 @@ if __name__ == "__main__":
         test_overlap_fraction_half,
         test_classify_straddling,
         test_classify_off_lot_car_is_outside,
+        test_classify_zero_and_partial_overlap_both_flag_outside,
         test_classify_partly_in_one_spot_is_outside,
         test_classify_ok_in_single_spot,
         test_classify_small_car_in_oversized_spot_not_outside,
@@ -232,6 +256,7 @@ if __name__ == "__main__":
         test_aggregate_one_car_ok,
         test_aggregate_straddling_car,
         test_aggregate_off_lot_car_flagged,
+        test_aggregate_counts_straddling_and_outside_together,
         test_aggregate_mixed,
     ]
     passed = failed = 0

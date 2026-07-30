@@ -13,6 +13,7 @@ Features:
   - Rate limiting on uploads
   - Training management endpoints
   - Model switching (cnn_scratch / resnet18 / resnet50 / mobilenetv4s / mobilenetv4m / yolo26{n,s,m}_classify)
+  - Anomaly detection(yolo26s_detector)
   - Multi-camera registry with persistent activation
 """
 
@@ -30,13 +31,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-# ── CPU thread budgeting (must run before cv2/torch/ncnn are imported) ─────────
-# This app is a single uvicorn process: the asyncio API loop shares cores with
-# every camera's decode + inference threads. By default OpenCV/OpenMP/BLAS each
-# fan a single op out to one thread per core, so a few active cameras
-# oversubscribe all cores, spike one core to 100%, and starve the event loop —
-# every HTTP/WS request then hangs. Pinning each native op to one thread lets the
-# OS spread camera work across cores and keep one free for the API. Explicit env
+# CPU thread budgeting
+# OS spread camera work(OpenCV/OpenMP/BLAS) across cores and keep one free for the API. Explicit env
 # overrides are respected.
 for _t in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
     os.environ.setdefault(_t, "1")
@@ -74,7 +70,7 @@ async def lifespan(app: FastAPI):
     if config.API_THREADS:
         # Sync endpoints run on anyio's default threadpool (40 tokens). The pool
         # never shrinks, and each thread pins a SQLite connection + malloc arena,
-        # so on the edge profile we bound it (dashboard polling needs only a few).
+        # Bound on edge devices.
         from anyio import to_thread
         to_thread.current_default_thread_limiter().total_tokens = config.API_THREADS
     db.init_db()
@@ -91,16 +87,13 @@ async def lifespan(app: FastAPI):
     from src.sync.sync_worker import SyncWorker
     SyncWorker().start()
     # Restore active cameras and pre-warm the active classifier in a background
-    # thread so the server starts accepting connections immediately — model loading
-    # is slow (5–15 s) and must not block the asyncio event loop.
+    # to not block the asyncio event loop.
     def _startup_warmup():
         camera_registry._restore_active()
         from src.inference.inference_pool import InferencePool
         InferencePool.get()
-        # Pre-load only the active classifier. The others load lazily on first
-        # use and stay cached after — pre-loading all five bloated startup time
-        # and resident memory (and on edge dragged in the torch/ultralytics path
-        # for the YOLO models, which the ncnn-only profile cannot satisfy).
+        # Pre-load only the active classifier. Others load lazily on first
+        # use and stay cached after
         try:
             processor_service.get_classifier(processor_service.active_mode or config.ACTIVE_MODEL)
         except Exception as e:
@@ -275,10 +268,8 @@ def spa_fallback(full_path: str):
 
 # ── Entry point ───────────────────────────────────────────
 if __name__ == "__main__":
-    # Reload is off by default: it spawns a child process (breaks Ctrl+C on
-    # Windows) and watching the huge data/ + venv/ trees is wasteful and can
-    # retrigger a full reload — which reloads every model — on each DB write.
-    # Opt in with BERTH_RELOAD=1; even then, only watch *.py and skip the big
+    # Reload is off by default: it spawns a child process 
+    # only watch *.py and skip the big
     # data/venv/db dirs.
     _reload = os.getenv("BERTH_RELOAD") == "1"
     uvicorn.run(

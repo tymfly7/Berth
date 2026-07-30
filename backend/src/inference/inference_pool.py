@@ -39,7 +39,10 @@ class InferencePool:
         self._num_workers = num_workers or int(
             os.getenv("BERTH_INFERENCE_WORKERS", str(_DEFAULT_WORKERS))
         )
-        self._queue: queue.Queue = queue.Queue(maxsize=64)
+        # Queue depth sets inference latency: a submission waits roughly
+        # (depth / workers) x service-time before a worker picks it up. Keep it
+        # shallow — a deep buffer just converts overload into staleness.
+        self._queue: queue.Queue = queue.Queue(maxsize=max(2, self._num_workers * 2))
         self._workers: list[threading.Thread] = []
         self._running = False
 
@@ -56,11 +59,27 @@ class InferencePool:
         logger.info(f"InferencePool started ({self._num_workers} workers)")
 
     def submit(self, detector, frame, camera_id: str, callback) -> None:
-        """Submit a frame for inference. Drops silently if the queue is full."""
+        """Submit a frame for inference, evicting the oldest queued frame when full.
+
+        Live video wants the freshest frame available, not a backlog. Dropping the
+        incoming frame instead left the pool draining stale ones, which surfaced as
+        tens of seconds of inference latency once submissions outpaced the workers.
+        """
+        item = (detector, frame, camera_id, callback)
         try:
-            self._queue.put_nowait((detector, frame, camera_id, callback))
+            self._queue.put_nowait(item)
+            return
         except queue.Full:
-            pass  # drop: camera submits next frame on the next infer_event
+            pass
+        try:
+            self._queue.get_nowait()  # evict oldest
+            self._queue.task_done()
+        except queue.Empty:
+            pass
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            pass  # another camera refilled it; next infer_event submits again
 
     def _worker(self) -> None:
         while self._running:

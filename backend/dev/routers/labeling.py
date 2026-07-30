@@ -27,6 +27,7 @@ import config
 from src.api.deps import verify_api_key
 from src.api.operations import finish_op, register_op, update_op_progress
 from src.api.processor_service import processor_service
+from dev.data_prep.vehicle_bootstrap import build_bundle
 from dev.data_prep.yolo_converter import build_yolo_detect_dataset
 from src.roi.roi_crop import crop_roi
 from src.roi.roi_store import RoiStore
@@ -256,7 +257,7 @@ def label_batch(
         raise HTTPException(400, f"No images found under {base} (date filter '{date_glob}').")
 
     _running.add(lot_id)
-    op_id = register_op("label_batch", f"Labeling {lot_id}…")
+    op_id = register_op("label_batch", f"Labeling {lot_id}…", lot_id=lot_id)
     threading.Thread(
         target=_run_batch,
         args=(lot_id, base, rois, polys, model_name, conf_threshold,
@@ -466,3 +467,75 @@ def calibrate(lot_id: str, date_glob: str = "2026-*", sample: int = 200, image_d
         "below": {str(t): int((lums < t).sum()) for t in thresholds},
         "darkest_thumbnails": thumbs,
     }
+
+
+# ── Vehicle detector bootstrap ───────────────────────────
+def _vehicle_root(lot_id: str) -> Path:
+    return _out_root(lot_id) / "vehicle_annotation"
+
+
+def _run_bootstrap(lot_id: str, images: list, weights: str, n_frames: int,
+                   conf: float, imgsz: int, out_w: int, out_h: int, op_id: str) -> None:
+    try:
+        report = build_bundle(images, _vehicle_root(lot_id), weights, n_frames, conf,
+                              imgsz, out_w, out_h,
+                              progress=lambda p: update_op_progress(op_id, p))
+        _last_run[lot_id] = {"ok": True, "error": None}
+        logger.info(f"Vehicle bootstrap done for '{lot_id}': {report['n_selected']} "
+                    f"frames, {report['total_boxes']} boxes")
+    except Exception as e:
+        _last_run[lot_id] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        logger.exception(f"Vehicle bootstrap failed for '{lot_id}'")
+    finally:
+        _running.discard(lot_id)
+        finish_op(op_id)
+
+
+@router.post("/api/label-batch/{lot_id}/bootstrap-vehicles", dependencies=[Depends(verify_api_key)])
+def bootstrap_vehicles(
+    lot_id: str,
+    n_frames: int = 200,
+    conf: float = 0.25,
+    imgsz: int = 1280,
+    out_w: int = 1600,
+    out_h: int = 900,
+    date_glob: str = "2026-*",
+    image_dir: str = "",
+    weights: str = "",
+):
+    """Sample frames and pre-label vehicles with stock COCO weights. Unlike
+    label_batch this needs no ROIs: it annotates whole frames, which is the only
+    way a vehicle parked outside the marked bays can be represented."""
+    _validate_lot(lot_id)
+    if n_frames < 1:
+        raise HTTPException(400, "n_frames must be at least 1")
+    if lot_id in _running:
+        raise HTTPException(409, "A labeling run is already in progress for this lot.")
+    base = _resolve_base(lot_id, image_dir)
+    images = _list_images(base, date_glob)
+    if not images:
+        raise HTTPException(400, f"No images found under {base} (date filter '{date_glob}').")
+    weights_path = weights or str(config.VEHICLE_DETECT_PATH)
+    if not Path(weights_path).exists():
+        raise HTTPException(400, f"Detector weights not found: {weights_path}")
+
+    _running.add(lot_id)
+    op_id = register_op("label_batch", f"Bootstrapping vehicles for {lot_id}…", lot_id=lot_id)
+    threading.Thread(
+        target=_run_bootstrap,
+        args=(lot_id, images, weights_path, n_frames, conf, imgsz, out_w, out_h, op_id),
+        daemon=True,
+    ).start()
+    return {"started": True, "op_id": op_id, "lot_id": lot_id,
+            "image_count": len(images), "sample_target": min(n_frames, len(images))}
+
+
+@router.get("/api/label-batch/{lot_id}/vehicle-report", dependencies=[Depends(verify_api_key)])
+def vehicle_report(lot_id: str):
+    """Report from the most recent vehicle bootstrap run, or 404 before the first."""
+    _validate_lot(lot_id)
+    path = _vehicle_root(lot_id) / "report.json"
+    if not path.exists():
+        raise HTTPException(404, "No vehicle bootstrap run found for this lot.")
+    with open(path) as f:
+        return json.load(f)

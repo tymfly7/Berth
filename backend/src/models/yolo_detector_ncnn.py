@@ -33,7 +33,7 @@ class EdgeYoloDetector:
 
     _INPUT_LAYER  = "in0"
     _OUTPUT_LAYER = "out0"
-    _IMGSZ        = config.YOLO_DETECT_IMG_SIZE   # 960
+    _IMGSZ        = config.YOLO_DETECT_IMG_SIZE   # 640
 
     def __init__(self, model_path: str, conf: float = 0.40, iou: float = 0.7):
         model_dir  = Path(model_path)

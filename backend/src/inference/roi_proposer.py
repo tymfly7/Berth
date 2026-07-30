@@ -264,8 +264,8 @@ def propose_from_frames(
 
         if yolo_model is not None:
             for frame in frames:
-                # Match the resolution the detect model was trained at (960) —
-                # the default 640 drops small/distant cars (far rows over asphalt).
+                # Match the resolution the detect model was trained at (640) —
+                # pinned explicitly so it can't drift from ultralytics' own default.
                 results = yolo_model(
                     frame, verbose=False, conf=conf_threshold,
                     imgsz=cfg.YOLO_DETECT_IMG_SIZE,

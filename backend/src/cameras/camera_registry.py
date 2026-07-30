@@ -185,6 +185,18 @@ class CameraRegistry:
                 proc.set_video_source(self._resolve_source(cam), source_type=cam["type"])
                 proc.start_processing()
                 self._processors[id] = proc
+                # A fresh VideoProcessor starts with anomaly detection off, so
+                # every path that rebuilds one (model switch, upload, startup
+                # restore) has to re-apply the service setting here. Doing it at
+                # the call sites instead left three of the four paths silently
+                # dropping anomaly detection while the API still reported it on.
+                from src.api.processor_service import processor_service
+                if processor_service.anomaly_enabled:
+                    try:
+                        proc.set_anomaly_detection(True)
+                        proc.set_anomaly_sensitivity(processor_service.anomaly_park_thresh)
+                    except Exception as e:
+                        logger.warning(f"Anomaly setup failed for camera '{id}': {e}")
                 self._cameras[id]["active"] = True
                 self._save()
                 logger.info(f"Camera '{id}' activated ({cam['type']}:{cam['source']})")

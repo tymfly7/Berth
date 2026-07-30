@@ -159,6 +159,10 @@ def classify_vehicle_parking(
                        a car sticking half-out of a stall and a car with no spot
                        overlap at all (parked off the marked bays entirely).
 
+    Any vehicle not properly inside a bay is flagged; the operator decides
+    whether a given flag is a real violation. Deliberately inclusive — a missed
+    violation is worse than a flag an admin dismisses at a glance.
+
     A car is only "ok" when it sits mostly inside one spot. With no ROIs defined
     at all, classification is impossible, so the car is treated as "ok".
 

@@ -470,8 +470,11 @@ Each active camera streams via its own WebSocket at `/ws/cameras/<camera_id>`.
 
 ## Anomaly Detection
 
-When enabled, the system uses the YOLO26 Detect model to identify vehicles parked
-outside designated slot boundaries.
+When enabled, a COCO-pretrained vehicle detector locates the cars in each frame
+and the system flags any that are not parked squarely inside a marked bay.
+
+Every vehicle outside the ROI markings is flagged for review, and the admin
+decides whether a given flag is a real violation.
 
 ### Enable via UI
 
@@ -490,17 +493,25 @@ as parked-in-bounds.
 
 ### Classification logic
 
-| Status | Condition |
-|--------|-----------|
-| `ok` | Vehicle center falls inside exactly one ROI polygon |
-| `straddling` | Vehicle bounding box overlaps more than one ROI |
-| `outside_markings` | Vehicle detected but center is outside all ROI polygons |
+Overlap between a vehicle and a bay is the fraction of the *vehicle's* box area
+that falls inside the bay polygon. A car parked squarely in a bay reads close to
+1.0; a car straddling two bays reads about 0.5 in each. The vehicle box is
+clipped against the bay's polygon edges, so overlap stays accurate for angled
+(e.g. 45°) stalls and for bays drawn larger than the vehicles using them.
 
-Misparked vehicles are highlighted in orange on the video feed and lot map. The
-Misparked count appears as an additional metric card in the Admin dashboard.
+| Status | Reason | Condition |
+|--------|--------|-----------|
+| `ok` | — | ≥ `park_thresh` of the vehicle lies inside one bay |
+| `misparked` | `straddling` | ≥ 35% of the vehicle lies inside each of ≥ 2 bays |
+| `misparked` | `outside` | best single-bay overlap < `park_thresh`, covering both a vehicle half-out of a bay and one with no bay overlap at all |
 
-Requires the YOLO26 Detect model (`backend/models/best_yolo26_detect.pt`) to be
-trained first.
+Both reasons share one bucket: each is highlighted orange on the video feed and
+lot map, and they are counted together in the Misparked metric card.
+
+The detector reads from `backend/models/yolo26s_vehicle.pt`, overridable with
+`BERTH_VEHICLE_DETECT_PATH`. These are stock COCO weights, so no training step is
+required. Detections are filtered to the COCO vehicle classes: car, motorcycle,
+bus, and truck.
 
 ### Occupancy sensitivity
 
@@ -631,7 +642,6 @@ laptop or Pi 5). Results land in
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/predict` | Classify a single spot image |
-| POST | `/api/analyze-lot` | Grid-based analysis of a full lot image (`?rows=&cols=`) |
 | POST | `/api/analyze-roi` | ROI-polygon-based analysis of a lot image |
 | POST | `/api/analyze-misparked` | Detect misparked vehicles in an image |
 | POST | `/api/augment/preview` | Preview augmented dataset samples |
@@ -739,7 +749,7 @@ School Project/
 │   ├── src/                             # Runtime tree — API, inference, cameras, ROI, sync
 │   │   ├── api/
 │   │   │   ├── routers/
-│   │   │   │   ├── inference.py          # predict / analyze-lot|roi|misparked / augment
+│   │   │   │   ├── inference.py          # predict / analyze-roi|misparked / augment
 │   │   │   │   ├── analytics.py          # metrics, heatmap, history, trends, alerts, ingest
 │   │   │   │   ├── models.py             # active-model switch + /api/model/info
 │   │   │   │   ├── cameras.py            # camera CRUD, video source, anomaly/occupancy settings

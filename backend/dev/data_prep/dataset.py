@@ -12,9 +12,10 @@ Labels:
     1 = Occupied (car present)
 """
 
+import random
 import sys
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageEnhance
 
 import torch
 from torch.utils.data import Dataset
@@ -22,6 +23,28 @@ from torchvision import transforms
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import config
+
+
+class _RandomDetail:
+    """Randomly soften or sharpen a crop.
+
+    The t10lot crops carry a texture-energy cue that tracks the label: occupied
+    crops hold ~6x the high-frequency energy of vacant ones (Laplacian variance at
+    224 px, median 162 vs 28). A from-scratch CNN learns that edge density instead
+    of shape, and the cue does not survive a change of camera, stream resolution or
+    lighting — on the Krom feed a vacant bay holding painted chevrons or a hard
+    shadow edge reads as occupied. Randomising detail per sample makes it unusable.
+    """
+
+    def __call__(self, img):
+        r = random.random()
+        if r < 0.4:                      # soften — simulate a lower-resolution source
+            f = random.uniform(0.35, 1.0)
+            small = (max(8, int(img.width * f)), max(8, int(img.height * f)))
+            return img.resize(small, Image.BILINEAR).resize(img.size, Image.BILINEAR)
+        if r < 0.8:                      # sharpen — simulate a sharper/contrastier camera
+            return ImageEnhance.Sharpness(img).enhance(random.uniform(1.5, 8.0))
+        return img
 
 
 class ParkingDataset(Dataset):
@@ -116,6 +139,8 @@ class ParkingDataset(Dataset):
                     translate=(0.05, 0.05),
                     scale=(0.95, 1.05)
                 ),
+                # Last before ToTensor so it has final say over detail level.
+                _RandomDetail(),
                 transforms.ToTensor(),
                 transforms.Normalize(
                     mean=self.IMAGENET_MEAN,

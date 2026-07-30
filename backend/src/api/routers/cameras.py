@@ -75,10 +75,10 @@ async def set_anomaly(request: Request):
         except (TypeError, ValueError):
             raise HTTPException(400, "park_thresh must be a number between 0 and 1")
     # Surface a missing-model error at toggle time (no phantom processor to
-    # probe anymore). Mirrors VideoProcessor._load_yolo_detector: NCNN on edge,
-    # else the torch .pt — either satisfies the requirement.
-    if enabled and not (config.YOLO26_DETECT_NCNN_PATH.exists() or config.YOLO26_DETECT_PATH.exists()):
-        raise HTTPException(400, "YOLO26 detect model not found. Train it first via the Training panel.")
+    # probe anymore). Mirrors load_vehicle_detector: NCNN on edge, else the
+    # torch .pt — either satisfies the requirement.
+    if enabled and not (config.VEHICLE_DETECT_NCNN_PATH.exists() or config.VEHICLE_DETECT_PATH.exists()):
+        raise HTTPException(400, f"Vehicle detector weights not found at '{config.VEHICLE_DETECT_PATH}'.")
     processor_service.anomaly_enabled = enabled
     for cam in camera_registry.get_all():
         if cam.get("active"):
@@ -88,7 +88,7 @@ async def set_anomaly(request: Request):
                     p.set_anomaly_detection(enabled)
                     p.set_anomaly_sensitivity(processor_service.anomaly_park_thresh)
                 except Exception as e:
-                    logger.debug(f"Anomaly toggle skipped for camera {cam['id']}: {e}")
+                    logger.warning(f"Anomaly toggle failed for camera {cam['id']}: {e}")
     return {"enabled": processor_service.anomaly_enabled, "park_thresh": processor_service.anomaly_park_thresh}
 
 
@@ -204,14 +204,6 @@ def activate_camera(camera_id: str):
         raise HTTPException(409, str(e))
     if not ok:
         raise HTTPException(500, "Failed to activate camera")
-    if processor_service.anomaly_enabled:
-        p = camera_registry.get_processor(camera_id)
-        if p:
-            try:
-                p.set_anomaly_detection(True)
-                p.set_anomaly_sensitivity(processor_service.anomaly_park_thresh)
-            except Exception as e:
-                logger.debug(f"Anomaly setup skipped for {camera_id}: {e}")
     return {"activated": camera_id}
 
 
