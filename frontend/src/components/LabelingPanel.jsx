@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom'
 import { apiFetch } from '../api'
 
 // Two pre-labelers. Classification crops each saved ROI and calls it occupied or
-// vacant. Detection annotates whole frames with stock COCO weights, which is the
-// only mode that can represent a vehicle parked outside the marked bays.
+// vacant. Detection annotates whole frames, which is the only mode that can
+// represent a vehicle parked outside the marked bays. The server picks its own
+// detector checkpoint, so there is no weights field here.
 const MODES = [
   { id: 'classify', label: 'Classification (CNN)' },
   { id: 'detect',   label: 'Detection (YOLO)'     },
@@ -68,7 +69,6 @@ export default function LabelingPanel({ apiBase }) {
   // Typed fields, so these hold strings while being edited and are coerced on submit.
   const [nFrames, setNFrames] = useState('200')
   const [detConf, setDetConf] = useState('0.25')
-  const [weights, setWeights] = useState('')
   const [vreport, setVreport] = useState(null)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -95,10 +95,11 @@ export default function LabelingPanel({ apiBase }) {
 
   const fetchVreport = useCallback(async () => {
     try {
-      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/vehicle-report`)
+      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/vehicle-report`
+        + `?image_dir=${encodeURIComponent(imageDir)}`)
       setVreport(res.ok ? await res.json() : null)
     } catch { setVreport(null) }
-  }, [apiBase, lotId])
+  }, [apiBase, lotId, imageDir])
 
   useEffect(() => { fetchManifest() }, [fetchManifest])
   useEffect(() => { fetchVreport() }, [fetchVreport])
@@ -184,7 +185,7 @@ export default function LabelingPanel({ apiBase }) {
     const n = Math.max(1, parseInt(nFrames, 10) || 200)
     const c = parseFloat(detConf) || 0.25
     const qs = `n_frames=${n}&conf=${c}&date_glob=${encodeURIComponent(dateGlob)}`
-      + `&image_dir=${encodeURIComponent(imageDir)}&weights=${encodeURIComponent(weights)}`
+      + `&image_dir=${encodeURIComponent(imageDir)}`
     try {
       const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/bootstrap-vehicles?${qs}`, { method: 'POST' })
       const data = await res.json()
@@ -235,7 +236,9 @@ export default function LabelingPanel({ apiBase }) {
         {MODES.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
       </select>
 
-      <label style={labelStyle}>Lot ID (ROI set + output name)</label>
+      <label style={labelStyle}>{mode === 'classify'
+        ? 'Lot ID (ROI set + output name)'
+        : 'Lot ID (run label, and source folder if Image folder is blank)'}</label>
       <input style={fieldStyle} list="labeling-lots" value={lotId}
         onChange={e => setLotId(e.target.value)} placeholder="lot-t10lot" />
       <datalist id="labeling-lots">
@@ -263,10 +266,6 @@ export default function LabelingPanel({ apiBase }) {
         </>
       ) : (
         <>
-          <label style={labelStyle}>Detector weights (blank = stock COCO yolo26s)</label>
-          <input style={fieldStyle} value={weights} onChange={e => setWeights(e.target.value)}
-            placeholder="models/yolo26s_vehicle.pt" />
-
           <label style={labelStyle}>Frames to sample (capped at what the folder holds)</label>
           <input style={fieldStyle} type="number" min="1" step="10" value={nFrames}
             onChange={e => setNFrames(e.target.value)} placeholder="200" />

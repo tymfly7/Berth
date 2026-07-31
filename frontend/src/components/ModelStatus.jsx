@@ -140,6 +140,95 @@ function CompResultsTable({ rows }) {
   )
 }
 
+// Vehicle detector results: baseline, confidence sweep, per-luminance bands.
+// Its own table because these are mAP over boxes, not per-crop accuracy.
+function DetectorResults({ result }) {
+  const th = { textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }
+  const td = { padding: '4px 2px', textAlign: 'right' }
+  const num = (v) => (v != null ? v.toFixed(2) : '—')
+  const b = result.baseline
+  return (
+    <div style={{ marginTop: 14, overflow: 'hidden' }}>
+      <div className="section-title" style={{ marginBottom: 6 }}>
+        Vehicle Detector — {result.label}
+      </div>
+
+      <div style={{ fontSize: '0.72rem', marginBottom: 6 }}>
+        <span className="text-muted">Baseline (raw model output) </span>
+        <span style={{ color: 'var(--color-vacant)', fontWeight: 600 }}>mAP@50 {num(b.map50)}%</span>
+        <span className="text-muted"> · mAP@50-95 </span>{num(b.map50_95)}%
+        <span className="text-muted"> · P </span>{num(b.precision)}%
+        <span className="text-muted"> · R </span>{num(b.recall)}%
+        <span className="text-muted"> · {result.images} frames, imgsz {result.imgsz}</span>
+      </div>
+
+      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 8 }}>
+        Confidence sweep — post-filter. The baseline above is raw model output; the sweep
+        applies the deployed path's minimum-area and maximum-aspect-ratio checks, so the two
+        do not agree. The gap is the phantom detections those checks remove off painted bay
+        markings, not a bug.
+      </div>
+      <table style={style.compTable}>
+        <thead>
+          <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)', verticalAlign: 'top' }}>
+            <th style={{ ...th, textAlign: 'left', padding: '5px 4px' }}>Conf</th>
+            <th style={th}>Prec<span style={style.pctSub}>%</span></th>
+            <th style={th}>Rec<span style={style.pctSub}>%</span></th>
+            <th style={{ ...th, padding: '5px 4px' }}>F1<span style={style.pctSub}>%</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.sweep.points.map(p => {
+            const isBest = p.conf === result.sweep.best_conf
+            const isCfg  = p.conf === result.sweep.config_conf
+            return (
+              <tr key={p.conf} style={{
+                borderBottom: '1px solid var(--border-color)',
+                background: isBest ? 'rgba(99,102,241,0.08)' : 'transparent',
+              }}>
+                <td style={{ padding: '4px 4px', fontWeight: isBest ? 700 : 400 }}>
+                  {p.conf.toFixed(2)}
+                  {isCfg && <span className="badge badge-info" style={{ marginLeft: 4, fontSize: '0.6rem', padding: '1px 4px' }}>CONFIG</span>}
+                  {isBest && <span className="badge badge-vacant" style={{ marginLeft: 4, fontSize: '0.6rem', padding: '1px 4px' }}>BEST F1</span>}
+                </td>
+                <td style={td}>{num(p.precision)}</td>
+                <td style={td}>{num(p.recall)}</td>
+                <td style={{ ...td, padding: '4px 4px' }}>{num(p.f1)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 8 }}>
+        Per luminance band (mean grayscale). Night is the hard case and a pooled mAP hides it.
+      </div>
+      <table style={style.compTable}>
+        <thead>
+          <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)', verticalAlign: 'top' }}>
+            <th style={{ ...th, textAlign: 'left', padding: '5px 4px' }}>Band</th>
+            <th style={th}>Frames</th>
+            <th style={th}>Boxes</th>
+            <th style={th}>mAP@50<span style={style.pctSub}>%</span></th>
+            <th style={{ ...th, padding: '5px 4px' }}>mAP@50-95<span style={style.pctSub}>%</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {result.bands.map(r => (
+            <tr key={r.band} style={{ borderBottom: '1px solid var(--border-color)' }}>
+              <td style={{ padding: '4px 4px', fontWeight: 600 }}>{r.band}</td>
+              <td style={td}>{r.images}</td>
+              <td style={td}>{r.instances}</td>
+              <td style={{ ...td, color: 'var(--color-vacant)', fontWeight: 600 }}>{num(r.map50)}</td>
+              <td style={{ ...td, padding: '4px 4px' }}>{num(r.map50_95)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   const [expanded, setExpanded]     = useState(null)
   const [evalStatus, setEvalStatus] = useState(null)   // null | {status, message}
@@ -151,6 +240,14 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
   const [datasets, setDatasets]             = useState([{ id: 'standard', label: 'Standard split' }])
   const [selectedDataset, setSelectedDataset] = useState('standard')
   const [benchResult, setBenchResult]       = useState(null)   // null | { label, rows }
+
+  // Vehicle detector evaluation — its own dataset list (single-class vehicle
+  // datasets only) and its own results, kept out of the classifier comparison.
+  const [detDatasets, setDetDatasets]         = useState([])
+  const [selectedDetDataset, setSelectedDetDataset] = useState('standard')
+  const [detBusy, setDetBusy]                 = useState(false)
+  const [detResult, setDetResult]             = useState(null)   // null | {label, ...run()}
+  const [detError, setDetError]               = useState(null)
 
   // Past-run history for the selected dataset.
   const [historySnapshots, setHistorySnapshots] = useState([])   // [{file, timestamp, count}]
@@ -174,6 +271,16 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
     apiFetch(`${apiBase}/api/eval/datasets`)
       .then(r => r.json())
       .then(d => { if (alive && Array.isArray(d.datasets)) setDatasets(d.datasets) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [apiBase])
+
+  // Load the datasets the vehicle detector may be scored against.
+  useEffect(() => {
+    let alive = true
+    apiFetch(`${apiBase}/api/eval/detector/datasets`)
+      .then(r => r.json())
+      .then(d => { if (alive && Array.isArray(d.datasets)) setDetDatasets(d.datasets) })
       .catch(() => {})
     return () => { alive = false }
   }, [apiBase])
@@ -292,6 +399,29 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
       pollEvalStatus()
     } catch (e) {
       setEvalStatus({ status: 'error', message: String(e) })
+    }
+  }
+
+  // ── Evaluate Detector ───────────────────────────────────────────────────────
+  // Runs synchronously on the server (a val pass plus one per luminance band),
+  // so the button simply waits for the response.
+  const handleEvaluateDetector = async () => {
+    setDetBusy(true)
+    setDetError(null)
+    setDetResult(null)
+    try {
+      const res = await apiFetch(
+        `${apiBase}/api/evaluate/detector?dataset=${encodeURIComponent(selectedDetDataset)}`,
+        { method: 'POST' },
+      )
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || `Server error ${res.status}`)
+      const ds = detDatasets.find(d => d.id === selectedDetDataset)
+      setDetResult({ label: ds?.label || selectedDetDataset, ...data })
+    } catch (e) {
+      setDetError(String(e.message || e))
+    } finally {
+      setDetBusy(false)
     }
   }
 
@@ -533,6 +663,45 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
           </button>
         </div>
       )}
+
+      {/* ── Evaluate Detector — separate from the classifier evaluation ──────── */}
+      {!isEdge && detDatasets.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 6 }}>
+          <select
+            className="panel-select"
+            style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+            value={selectedDetDataset}
+            disabled={detBusy}
+            onChange={e => setSelectedDetDataset(e.target.value)}
+            title="Single-class vehicle detection dataset to score against"
+          >
+            {detDatasets.map(d => (
+              <option key={d.id} value={d.id}>{d.label}</option>
+            ))}
+          </select>
+          <button
+            className="btn btn-ghost-blue btn-sm"
+            style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+            disabled={detBusy}
+            onClick={handleEvaluateDetector}
+            title="Baseline mAP, confidence sweep and per-luminance-band mAP for the vehicle detector"
+          >
+            {detBusy ? 'Evaluating…' : 'Evaluate Detector'}
+          </button>
+        </div>
+      )}
+
+      {detError && (
+        <div style={{
+          ...style.evalStatus,
+          color: 'var(--color-occupied)',
+          background: 'rgba(244,63,94,0.1)',
+        }}>
+          {detError}
+        </div>
+      )}
+
+      {detResult && <DetectorResults result={detResult} />}
 
       {/* Export progress */}
       {exportStatus && (

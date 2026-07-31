@@ -23,8 +23,9 @@ import config
 
 logger = logging.getLogger("berth.history")
 
-EVAL_HISTORY_DIR  = config.OUTPUT_DIR / "eval_history"
-TRAIN_HISTORY_DIR = config.OUTPUT_DIR / "train_history"
+EVAL_HISTORY_DIR     = config.OUTPUT_DIR / "eval_history"
+TRAIN_HISTORY_DIR    = config.OUTPUT_DIR / "train_history"
+DETECTOR_HISTORY_DIR = config.OUTPUT_DIR / "detector_eval_history"
 
 # Per-dataset / per-model cap, sourced from config so operators can cap
 # retention via BERTH_HISTORY_MAX without code changes. 0 = keep everything.
@@ -104,6 +105,21 @@ def list_eval_snapshots(dataset_id: str) -> list[dict]:
 
 def load_eval_snapshot(fname: str) -> dict | None:
     return _load(EVAL_HISTORY_DIR, fname)
+
+
+# ── Detector evaluation snapshots ────────────────────────────────────────────
+def save_detector_snapshot(dataset_id: str, result: dict) -> str | None:
+    """Archive one vehicle-detector evaluation. The payload is a single dict of
+    baseline, sweep and band sections rather than the per-model list the
+    classifier path produces, so it gets its own directory."""
+    try:
+        return _save(DETECTOR_HISTORY_DIR, _slug(dataset_id),
+                     {"dataset": dataset_id,
+                      "timestamp": datetime.now().isoformat(timespec="seconds"),
+                      "result": result})
+    except OSError as e:
+        logger.warning(f"Could not archive detector snapshot for '{dataset_id}': {e}")
+        return None
 
 
 # ── Training snapshots ───────────────────────────────────────────────────────

@@ -74,7 +74,7 @@ export default function AnomalyPanel({ apiBase }) {
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.4 }}>
             Flags any vehicle not parked squarely inside a marked bay, for an
-            admin to review. Uses the COCO vehicle detector.
+            admin to review. Uses the project's vehicle detector.
           </div>
         </div>
         <button

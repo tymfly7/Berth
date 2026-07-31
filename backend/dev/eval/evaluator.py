@@ -116,22 +116,28 @@ def evaluate_model(model, test_loader, device=None):
     }
 
 
-def evaluate_yolo_classify(weights_path, split="val", imgsz=None):
+def evaluate_yolo_classify(weights_path, split="test", imgsz=None):
     """Evaluate a YOLO26 classify checkpoint on the internal classify split.
 
     Ultralytics classify models can't go through evaluate_model() (they aren't
     torch nn.Modules with a sigmoid head), so this runs the native .val() and
     returns the same metric shape. occupied = class 0 (alphabetical) = positive.
+
+    Scored on the capped, class-balanced subset's test split — the same crops
+    prepare_dataset() gives the PyTorch classifiers — so the two families are
+    comparable. The full split is imbalanced ~1.7:1 occupied and would inflate
+    accuracy relative to the CNN numbers.
     """
     import config
     from ultralytics import YOLO
-    from dev.data_prep.preprocessor import build_classify_split
+    from dev.data_prep.preprocessor import build_classify_split, build_classify_subset
 
     imgsz = imgsz or config.YOLO_CLASSIFY_IMG_SIZE
-    build_classify_split()  # idempotent; ensures the split folders exist
+    build_classify_split()               # idempotent; ensures the split folders exist
+    data_dir = build_classify_subset()   # idempotent; falls back to the full split when no cap applies
     model = YOLO(str(weights_path))
     res = model.val(
-        data=str(config.CLASSIFY_SPLIT_DIR),
+        data=str(data_dir),
         split=split,
         imgsz=imgsz,
         verbose=False,

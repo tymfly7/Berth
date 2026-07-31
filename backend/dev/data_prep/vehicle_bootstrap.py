@@ -1,15 +1,16 @@
-"""COCO-bootstrapped vehicle annotations for manual correction.
+"""Bootstrapped vehicle annotations for manual correction.
 
 Samples frames stratified by capture day and time-of-day, downscales them, and
-pre-labels every vehicle with stock COCO YOLO weights. The output is a bundle the
-author corrects by hand in makesense.ai.
+pre-labels every vehicle with the checkpoint passed in `weights`, stock COCO or a
+trained vehicle detector. The output is a bundle the author corrects by hand in
+makesense.ai.
 
-This exists because the trained detector is a parking-BAY detector with classes
-{0: vacant, 1: occupied}. A bay box cannot represent a vehicle parked outside the
-marked bays, so a bay-derived dataset structurally cannot contain off-bay or lane
-vehicles. Adding those by hand is the point of the bundle, which is why the
-detection pass is tuned for recall: deleting a spurious box is cheaper for the
-author than drawing a missed one.
+This exists because whole-frame vehicle boxes cannot be derived from the ROI bay
+polygons. A bay box cannot represent a vehicle parked outside the marked bays, so a
+bay-derived dataset structurally cannot contain off-bay or lane vehicles. Adding
+those by hand is the point of the bundle, which is why the detection pass is tuned
+for recall: deleting a spurious box is cheaper for the author than drawing a missed
+one.
 """
 
 import csv
@@ -23,7 +24,10 @@ import cv2
 from ultralytics import YOLO
 
 SPLITS = ("train", "val")
-COCO_VEHICLES = [2, 3, 5, 7]
+# Names, not ids. A checkpoint's class indices only mean something relative to its
+# own names map, so a fixed id list silently matches nothing on a checkpoint that
+# does not share COCO's ordering.
+COCO_VEHICLE_NAMES = frozenset(("car", "motorcycle", "bus", "truck"))
 
 # Capture filenames come in two shapes, both starting with a 10-character date.
 _FMT_COMPACT = re.compile(r"^(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})$")       # 2026-03-10_1229
@@ -183,12 +187,15 @@ def _report_text(report: dict) -> str:
 
 
 def _write_readme(root: Path, report: dict, params: dict) -> None:
+    ids = params["classes"]
+    kept = (f"COCO classes `{ids}` (car, motorcycle, bus, truck)" if ids
+            else "every class of a single-class checkpoint")
     text = f"""# Vehicle annotation bundle
 
-Bootstrap labels for a vehicle detector. Boxes were produced by stock COCO
+Bootstrap labels for a vehicle detector. Boxes were produced by
 `{Path(params['weights']).name}` at `conf={params['conf']}`, `imgsz={params['imgsz']}`,
-COCO classes `{COCO_VEHICLES}` (car, motorcycle, bus, truck) collapsed to a single
-class `0 vehicle`. They are a starting point, not ground truth.
+{kept} collapsed to a single class `0 vehicle`. They are a starting point, not
+ground truth.
 
 Detection ran on the full resolution originals. The images here are
 {params['out_w']}x{params['out_h']} copies. YOLO labels are normalised, so the
@@ -296,10 +303,13 @@ def build_bundle(images: list, out_root: Path, weights: str, n_frames: int,
 
     # Detect on the full-resolution originals, not the downscaled copies.
     model = YOLO(str(weights))
+    # Resolve the filter against the loaded checkpoint. None means no filter, which
+    # is what a single-class 'vehicle' model needs: every class it has is a vehicle.
+    vehicle_ids = [i for i, n in model.names.items() if n in COCO_VEHICLE_NAMES] or None
     for i in range(0, len(selected), 8):
         chunk = selected[i:i + 8]
         results = model.predict([str(f["path"]) for f in chunk], conf=conf,
-                                imgsz=imgsz, classes=COCO_VEHICLES, verbose=False)
+                                imgsz=imgsz, classes=vehicle_ids, verbose=False)
         for f, res in zip(chunk, results):
             f["boxes"] = [tuple(b) for b in res.boxes.xywhn.tolist()]
             lines = [f"0 {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}" for xc, yc, w, h in f["boxes"]]
@@ -343,5 +353,6 @@ def build_bundle(images: list, out_root: Path, weights: str, n_frames: int,
     }
     (out_root / "report.json").write_text(json.dumps(report), encoding="utf-8")
     _write_readme(out_root, report, {"weights": weights, "conf": conf, "imgsz": imgsz,
-                                     "out_w": out_w, "out_h": out_h})
+                                     "out_w": out_w, "out_h": out_h,
+                                     "classes": vehicle_ids})
     return report

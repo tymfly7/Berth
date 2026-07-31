@@ -103,6 +103,38 @@ def evaluate_all(dataset: str = "standard"):
     return result
 
 
+@router.get("/api/eval/detector/datasets", dependencies=[Depends(verify_api_key)])
+def eval_detector_datasets():
+    """Datasets the vehicle detector can be scored against.
+
+    Filtered to single-class vehicle datasets, so an operator cannot pick a bay
+    detector dataset and get a plausible-looking number off the wrong labels.
+    """
+    from dev.eval.vehicle_detect_eval import list_datasets
+    return {"datasets": list_datasets()}
+
+
+@router.post("/api/evaluate/detector", dependencies=[Depends(verify_api_key)])
+def evaluate_detector(dataset: str = "standard"):
+    """Evaluate the single-class vehicle detector: baseline, conf sweep, bands.
+
+    Separate from evaluate_all, which scores the classifiers per crop. This is
+    mAP over boxes and does not feed the comparison table.
+    """
+    if config.DEPLOYMENT_PROFILE == "edge":
+        raise HTTPException(403, "Evaluation is not available on edge nodes. Use the hub server.")
+    from dev.eval.vehicle_detect_eval import resolve_dataset, run
+    try:
+        yaml_path, split = resolve_dataset(dataset)
+        return run(yaml_path, split)
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Detector evaluation failed: {e}")
+
+
 @router.get("/api/evaluate/excel", dependencies=[Depends(verify_api_key)])
 def download_evaluation_excel(dataset: str = "standard", file: str | None = None):
     from dev.eval import external_datasets

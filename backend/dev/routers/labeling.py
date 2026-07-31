@@ -470,14 +470,10 @@ def calibrate(lot_id: str, date_glob: str = "2026-*", sample: int = 200, image_d
 
 
 # ── Vehicle detector bootstrap ───────────────────────────
-def _vehicle_root(lot_id: str) -> Path:
-    return _out_root(lot_id) / "vehicle_annotation"
-
-
-def _run_bootstrap(lot_id: str, images: list, weights: str, n_frames: int,
+def _run_bootstrap(lot_id: str, out_root: Path, images: list, weights: str, n_frames: int,
                    conf: float, imgsz: int, out_w: int, out_h: int, op_id: str) -> None:
     try:
-        report = build_bundle(images, _vehicle_root(lot_id), weights, n_frames, conf,
+        report = build_bundle(images, out_root, weights, n_frames, conf,
                               imgsz, out_w, out_h,
                               progress=lambda p: update_op_progress(op_id, p))
         _last_run[lot_id] = {"ok": True, "error": None}
@@ -503,9 +499,10 @@ def bootstrap_vehicles(
     image_dir: str = "",
     weights: str = "",
 ):
-    """Sample frames and pre-label vehicles with stock COCO weights. Unlike
-    label_batch this needs no ROIs: it annotates whole frames, which is the only
-    way a vehicle parked outside the marked bays can be represented."""
+    """Sample frames and pre-label vehicles. Unlike label_batch this needs no ROIs:
+    it annotates whole frames, which is the only way a vehicle parked outside the
+    marked bays can be represented. The bundle is written into the image folder
+    itself, so frames, labels and the makesense exports stay together."""
     _validate_lot(lot_id)
     if n_frames < 1:
         raise HTTPException(400, "n_frames must be at least 1")
@@ -515,7 +512,12 @@ def bootstrap_vehicles(
     images = _list_images(base, date_glob)
     if not images:
         raise HTTPException(400, f"No images found under {base} (date filter '{date_glob}').")
-    weights_path = weights or str(config.VEHICLE_DETECT_PATH)
+    # The operator does not choose weights. Prefer the trained vehicle detector and
+    # fall back to stock COCO, which is all a fresh clone has before the first train.
+    weights_path = weights or str(
+        config.VEHICLE_DETECT_PATH if config.VEHICLE_DETECT_PATH.exists()
+        else config.BASE_DIR / "yolo26s.pt"
+    )
     if not Path(weights_path).exists():
         raise HTTPException(400, f"Detector weights not found: {weights_path}")
 
@@ -523,7 +525,7 @@ def bootstrap_vehicles(
     op_id = register_op("label_batch", f"Bootstrapping vehicles for {lot_id}…", lot_id=lot_id)
     threading.Thread(
         target=_run_bootstrap,
-        args=(lot_id, images, weights_path, n_frames, conf, imgsz, out_w, out_h, op_id),
+        args=(lot_id, base, images, weights_path, n_frames, conf, imgsz, out_w, out_h, op_id),
         daemon=True,
     ).start()
     return {"started": True, "op_id": op_id, "lot_id": lot_id,
@@ -531,10 +533,11 @@ def bootstrap_vehicles(
 
 
 @router.get("/api/label-batch/{lot_id}/vehicle-report", dependencies=[Depends(verify_api_key)])
-def vehicle_report(lot_id: str):
-    """Report from the most recent vehicle bootstrap run, or 404 before the first."""
+def vehicle_report(lot_id: str, image_dir: str = ""):
+    """Report from the most recent vehicle bootstrap run, or 404 before the first.
+    Takes the same image_dir as the run, since that is where the bundle was written."""
     _validate_lot(lot_id)
-    path = _vehicle_root(lot_id) / "report.json"
+    path = _resolve_base(lot_id, image_dir) / "report.json"
     if not path.exists():
         raise HTTPException(404, "No vehicle bootstrap run found for this lot.")
     with open(path) as f:

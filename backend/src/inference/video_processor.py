@@ -99,10 +99,12 @@ class VideoProcessor:
         # Jitter buffer: source pushes every raw frame here; display pops at
         # STREAM_FPS. Absorbs bursty HLS segment delivery so the display
         # thread drains the buffer smoothly during the inter-segment gap
-        # instead of freezing. maxlen caps memory and prevents unbounded
-        # latency on sources faster than STREAM_FPS.
+        # instead of freezing. maxlen caps memory. The display loop trims down
+        # to _jitter_target so a source faster than STREAM_FPS cannot pin the
+        # buffer full and hold a permanent maxlen-deep lag.
         _jitter_secs = 2
         self._jitter_buffer: deque = deque(maxlen=config.STREAM_FPS * _jitter_secs)
+        self._jitter_target = max(1, config.STREAM_FPS // 2)
         self._jitter_lock = threading.Lock()
         self._last_display_raw: np.ndarray | None = None
 
@@ -503,6 +505,12 @@ class VideoProcessor:
                 with self._jitter_lock:
                     has_new = bool(self._jitter_buffer)
                     if has_new:
+                        # Discard the surplus above the target depth. A 30 fps
+                        # source drained at STREAM_FPS otherwise keeps the
+                        # buffer full, so every frame shown is maxlen old and
+                        # maxlen eviction drops frames at the read end.
+                        while len(self._jitter_buffer) > self._jitter_target:
+                            self._jitter_buffer.popleft()
                         raw = self._jitter_buffer.popleft()
                         self._last_display_raw = raw
                     else:

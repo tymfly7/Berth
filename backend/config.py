@@ -97,7 +97,10 @@ YOLO26_DETECT_NCNN_PATH   = EDGE_MODEL_DIR / "best_yolo26_detect_ncnn_model"
 # ONLY by the misparked-vehicle pass. Trained at 640px via the yolo26_detect
 # pipeline (see YOLO_DATASET_DIR); shares the checkpoint with YOLO26_DETECT_PATH.
 VEHICLE_DETECT_PATH       = Path(os.getenv("BERTH_VEHICLE_DETECT_PATH", str(MODEL_DIR / "best_yolo26_detect.pt")))
-VEHICLE_DETECT_NCNN_PATH  = EDGE_MODEL_DIR / "yolo26s_vehicle_ncnn_model"
+# Same export as YOLO26_DETECT_NCNN_PATH, because it is the same checkpoint. The
+# old name pointed at a directory that was never produced, so the edge profile
+# found nothing and silently fell back to the .pt instead of running NCNN.
+VEHICLE_DETECT_NCNN_PATH  = YOLO26_DETECT_NCNN_PATH
 # Set below the neutral 0.40 default: anomaly flags are reviewed by an
 # operator, which makes a spurious box cheaper than a missed one. Carried over
 # from the COCO-detector era; not yet re-validated against the retrained
@@ -169,10 +172,10 @@ CACHE_DATASET = os.getenv("BERTH_CACHE_DATASET", "1") == "1"
 # Subset size for CNN models (0 = full dataset)
 SUBSET_SIZE = int(os.getenv("BERTH_SUBSET", "25000"))
 
-# Match CNN_INPUT_SIZE so every classifier sees identical input and the roster
-# stays comparable. t10lot crops arrive at ~273 px equivalent side, so 224 is
-# near-native; the previous 64 px discarded ~94% of the available pixels.
-YOLO_CLASSIFY_IMG_SIZE = int(os.getenv("BERTH_YOLO_CLASSIFY_IMGSZ", "224"))
+# The bays arrive already cropped, so the YOLO classify heads run at 64 px,
+# roughly ten times faster than 224. All three were retrained at 224 on
+# 2026-07-31 for comparison and showed no measurable gain, so 64 is kept.
+YOLO_CLASSIFY_IMG_SIZE = int(os.getenv("BERTH_YOLO_CLASSIFY_IMGSZ", "64"))
 
 # YOLO detect — full-frame scenes pack ~30+ small parking spots, so 640 px
 # starves them; 960 px recovers small-object recall. yolo26s gives more
@@ -208,8 +211,8 @@ CAPTURE_INTERVAL_SECS = float(os.getenv("BERTH_CAPTURE_INTERVAL", "600"))  # 10 
 # per-profile values are defaults only — override per board via env so a single
 # arm64 image can run on both a Pi 5 and a much weaker Pi Zero 2 W (separate
 # compose files supply the tuning).
-FRAME_WIDTH   = int(os.getenv("BERTH_FRAME_WIDTH",  "960" if DEPLOYMENT_PROFILE == "edge" else "1920"))
-FRAME_HEIGHT  = int(os.getenv("BERTH_FRAME_HEIGHT", "540" if DEPLOYMENT_PROFILE == "edge" else "1080"))
+FRAME_WIDTH   = int(os.getenv("BERTH_FRAME_WIDTH",  "960" if DEPLOYMENT_PROFILE == "edge" else "1280"))
+FRAME_HEIGHT  = int(os.getenv("BERTH_FRAME_HEIGHT", "540" if DEPLOYMENT_PROFILE == "edge" else "720"))
 STREAM_FPS    = int(os.getenv("BERTH_STREAM_FPS",   "15"  if DEPLOYMENT_PROFILE == "edge" else "20"))
 JPEG_QUALITY  = 90   if DEPLOYMENT_PROFILE == "edge" else 80  # edge raised for sharpness; server keeps bandwidth-optimised 80
 
@@ -245,13 +248,13 @@ YOUTUBE_STREAM_CACHE_TTL = int(os.getenv("BERTH_YT_CACHE_TTL", "240"))  # second
 
 # Cap YouTube stream height: full-quality (1080p) decode overwhelms low-RAM
 # edge boxes. Pick the best rendition at or below this height.
-YOUTUBE_MAX_HEIGHT = int(os.getenv("BERTH_MAX_STREAM_HEIGHT", "1080"))
+YOUTUBE_MAX_HEIGHT = int(os.getenv("BERTH_MAX_STREAM_HEIGHT", "720"))
 
 # Cap ingested frame height for every source (file / USB / RTSP / YouTube):
 # raw frames fill the jitter buffer and the inference slot, so a native-
 # resolution upload (e.g. 3200x1800 ≈ 17 MB/frame) blows the edge RAM budget.
 # ROIs are normalized, so downscaling is safe for slot crops. 0 = no cap.
-MAX_FRAME_HEIGHT = int(os.getenv("BERTH_MAX_FRAME_HEIGHT", "720" if DEPLOYMENT_PROFILE == "edge" else "0"))
+MAX_FRAME_HEIGHT = int(os.getenv("BERTH_MAX_FRAME_HEIGHT", "720" if DEPLOYMENT_PROFILE == "edge" else "720"))
 
 # ---------------------------------------------------------------------------
 # Alerts

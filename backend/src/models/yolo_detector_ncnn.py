@@ -8,7 +8,7 @@ Interface mirrors ParkingYOLO26: predict_frame(frame_bgr) -> list[dict] with the
 same 'bbox'/'confidence'/'class_id' shape and the same phantom-box filters.
 
 The exported head (end2end:false) already does DFL + anchor decode and sigmoids
-the class scores, so out0 is (4+nc, N): rows 0:4 = cx,cy,w,h in 960-letterbox
+the class scores, so out0 is (4+nc, N): rows 0:4 = cx,cy,w,h in 640-letterbox
 pixels, rows 4: = per-class scores. This wrapper only has to threshold, run a
 class-agnostic NMS, and map boxes back to source-frame pixels.
 """

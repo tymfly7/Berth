@@ -341,7 +341,7 @@ small, so retention defaults to keeping all of them. Set a limit with `BERTH_HIS
 | `BERTH_WORKERS` | `2` | DataLoader workers |
 | `BERTH_CACHE_DATASET` | `1` | Cache decoded/resized images in RAM after first read (`0` to disable) |
 | `BERTH_YOLO_CLASSIFY_IMGSZ` | `64` | Input size for YOLO classify (spots are pre-cropped) |
-| `BERTH_YOLO_DETECT_IMGSZ` | `960` | Input size for YOLO detect (recovers small-object recall) |
+| `BERTH_YOLO_DETECT_IMGSZ` | `640` | Input size for YOLO detect |
 | `BERTH_YOLO_DETECT_MODEL` | `yolo26s.pt` | Base weights for YOLO detect fine-tuning |
 
 ---
@@ -470,7 +470,7 @@ Each active camera streams via its own WebSocket at `/ws/cameras/<camera_id>`.
 
 ## Anomaly Detection
 
-When enabled, a COCO-pretrained vehicle detector locates the cars in each frame
+When enabled, the project's vehicle detector locates the cars in each frame
 and the system flags any that are not parked squarely inside a marked bay.
 
 Every vehicle outside the ROI markings is flagged for review, and the admin
@@ -508,10 +508,10 @@ clipped against the bay's polygon edges, so overlap stays accurate for angled
 Both reasons share one bucket: each is highlighted orange on the video feed and
 lot map, and they are counted together in the Misparked metric card.
 
-The detector reads from `backend/models/yolo26s_vehicle.pt`, overridable with
-`BERTH_VEHICLE_DETECT_PATH`. These are stock COCO weights, so no training step is
-required. Detections are filtered to the COCO vehicle classes: car, motorcycle,
-bus, and truck.
+The detector reads from `backend/models/best_yolo26_detect.pt`, overridable with
+`BERTH_VEHICLE_DETECT_PATH`. It is a single-class ("vehicle") model fine-tuned
+on hand-corrected labels via the `yolo26_detect` training pipeline, trained
+at 640px.
 
 ### Occupancy sensitivity
 

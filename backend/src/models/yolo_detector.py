@@ -63,8 +63,8 @@ class ParkingYOLO26:
                 'confidence': float detection score
                 'class_id':   int class index
         """
-        # imgsz must be passed explicitly: ultralytics defaults to 640, which
-        # silently disagrees with the 960 the NCNN edge path letterboxes to.
+        # imgsz must be passed explicitly so it can't drift from the 640 the
+        # NCNN edge path letterboxes to.
         kwargs = {}
         if self._imgsz:
             kwargs["imgsz"] = self._imgsz

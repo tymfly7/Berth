@@ -217,8 +217,7 @@ async def analyze_misparked(
                 f"No ROIs saved for camera '{camera_id}'. Draw and save ROIs first.",
             )
 
-        # Load the COCO-pretrained vehicle detector — surface a clear error if
-        # weights are missing.
+        # Load the vehicle detector — surface a clear error if weights are missing.
         try:
             from src.models.yolo_detector import load_vehicle_detector
             detector = load_vehicle_detector()

@@ -50,8 +50,16 @@ def _classifier_dir(root: Path) -> Path | None:
 
 
 def _detector_yaml(root: Path) -> Path | None:
-    y = root / "crop_yolo_detect" / "data.yaml"
-    return y if y.is_file() else None
+    """The detector data yaml, in either layout.
+
+    The older benchmark bundles keep it at crop_yolo_detect/data.yaml.
+    build_vehicle_dataset.py writes dataset.yaml at the dataset root instead, so
+    a held-out lot built by that script is invisible unless both are accepted.
+    """
+    for y in (root / "crop_yolo_detect" / "data.yaml", root / "dataset.yaml"):
+        if y.is_file():
+            return y
+    return None
 
 
 def list_external_datasets() -> list[dict]:

@@ -438,7 +438,7 @@ class TrainManager:
                 task="detect",
                 epochs=config.YOLO_DETECT_EPOCHS,
                 batch=-1,                              # AutoBatch: adapt to the larger model/imgsz, avoid OOM
-                imgsz=config.YOLO_DETECT_IMG_SIZE,     # 960 — recover small parking-spot recall
+                imgsz=config.YOLO_DETECT_IMG_SIZE,     # 640
                 cache="ram",                           # cache decoded images in RAM
                 workers=min(8, config.NUM_WORKERS * 4),
                 amp=True,                              # mixed-precision (fp16 on GPU)
@@ -668,7 +668,14 @@ class TrainManager:
             # An external dataset gates which models can run: classifier crops
             # drive the classify models, detect labels drive the detector.
             allow_classify = ext is None or ext["has_classifier"]
-            allow_detect   = ext is None or ext["has_detector"]
+            # has_detector only means detect labels exist. Scoring the vehicle
+            # detector against a bay dataset's vacant/occupied labels returns a
+            # low but plausible number instead of an error, so check the class
+            # map too and skip the row rather than report the wrong figure.
+            from dev.eval.vehicle_detect_eval import is_vehicle_dataset
+            allow_detect = ext is None or (
+                ext["has_detector"] and is_vehicle_dataset(ext["detector_yaml"])
+            )
             eval_cnn     = bool(cnn_present) and allow_classify
             eval_yolo_cl = bool(yolo_cl_present) and allow_classify
             eval_yolo_dt = yolo_dt_present  and allow_detect
@@ -785,7 +792,9 @@ class TrainManager:
                     try:
                         # Ultralytics classify ConfusionMatrix: try .matrix, fall back to .data
                         raw_cm = val_res.confusion_matrix
-                        cm = getattr(raw_cm, "matrix", None) or getattr(raw_cm, "data", None)
+                        cm = getattr(raw_cm, "matrix", None)
+                        if cm is None:
+                            cm = getattr(raw_cm, "data", None)
                         if cm is None:
                             raise AttributeError(f"Cannot read confusion matrix from {type(raw_cm)}")
                         tp = float(cm[0][0])
@@ -842,12 +851,13 @@ class TrainManager:
 
                 # Actual evaluation. Standard uses the internal detect test split;
                 # an external dataset supplies its own data.yaml (val = its images).
-                if ext is None:
-                    yaml_path = config.YOLO_DATASET_DIR / "dataset.yaml"
-                    split = "test"
-                else:
-                    yaml_path = ext["detector_yaml"]
-                    split = "val"
+                # The split comes from the yaml rather than being assumed: the
+                # internal dataset has no test split, so the old hardcoded
+                # "test" resolved to nothing and failed the whole run here.
+                from dev.eval.vehicle_detect_eval import declared_split
+                yaml_path = (config.YOLO_DATASET_DIR / "dataset.yaml"
+                             if ext is None else ext["detector_yaml"])
+                split = declared_split(yaml_path)
                 yolo_dt = YOLO(str(config.YOLO26_DETECT_PATH))
                 val_res = yolo_dt.val(
                     data=str(yaml_path),

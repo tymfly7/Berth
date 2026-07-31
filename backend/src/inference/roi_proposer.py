@@ -20,8 +20,8 @@ import cv2
 
 logger = logging.getLogger("berth.roi_proposer")
 
-# Classes from the custom YOLO26 detect model (vacant=0, occupied=1)
-_VEHICLE_CLASSES = frozenset([0, 1])
+# Class id from the project's single-class ("vehicle") detect model.
+_VEHICLE_CLASSES = frozenset([0])
 
 
 # ── IoU / clustering helpers ─────────────────────────────────────────────────
