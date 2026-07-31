@@ -162,7 +162,7 @@ def _report_text(report: dict) -> str:
     lines = [
         f"Frames selected: {report['n_selected']} of {report['n_available']}",
         f"Capture days covered: {len(report['day_hist'])} of {report['n_days']}",
-        f"Split: " + ", ".join(f"{s} {report['split_counts'].get(s, 0)}" for s in SPLITS),
+        "Split: " + ", ".join(f"{s} {report['split_counts'].get(s, 0)}" for s in SPLITS),
         f"Total boxes: {report['total_boxes']}",
         f"Mean boxes per frame: {report['mean_boxes']}",
         "",

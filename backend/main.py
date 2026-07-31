@@ -268,7 +268,7 @@ def spa_fallback(full_path: str):
 
 # ── Entry point ───────────────────────────────────────────
 if __name__ == "__main__":
-    # Reload is off by default: it spawns a child process 
+    # Reload is off by default: it spawns a child process
     # only watch *.py and skip the big
     # data/venv/db dirs.
     _reload = os.getenv("BERTH_RELOAD") == "1"
