@@ -12,7 +12,7 @@ services:
     environment:
       - BERTH_HOST=0.0.0.0
       - BERTH_PORT=8000
-      - BERTH_MODEL=yolo26_classify
+      - BERTH_MODEL=yolo26s_classify
       - BERTH_API_KEY=${BERTH_API_KEY:-}
       - BERTH_EPOCHS=30
       - BERTH_BATCH_SIZE=64

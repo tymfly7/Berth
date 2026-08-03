@@ -594,35 +594,49 @@ export default function DocsPage() {
       {/* ── Section 7: Anomaly Detection ─────────────────────── */}
       <SectionCard num={7} id="s7" title="Enabling Anomaly Detection">
         <p style={s.body}>
-          Anomaly detection flags <span style={s.label}>double-parked</span>{' '}
-          vehicles — a car that straddles two or more marked spots instead of
-          sitting inside a single one. It deliberately does <em>not</em> flag cars
-          outside the lot (passing traffic, street parking, or false detections on
-          fountains and trees), so it stays quiet on busy public-area cameras.
+          Anomaly detection flags any vehicle that is not parked squarely inside a
+          single marked spot. Two cases are reported. A{' '}
+          <span style={s.label}>straddling</span> car intrudes on two or more
+          marked spots. An <span style={s.label}>outside</span> car sits mostly
+          beyond the markings, which also covers a car parked well off the bays.
+        </p>
+        <p style={s.body}>
+          The detector has no notion of where your lot ends, so vehicles on a
+          nearby road or on adjacent property can be flagged as well. The rule is
+          deliberately inclusive, on the basis that a missed violation costs more
+          than a flag you dismiss at a glance. Expect some noise on cameras that
+          overlook public space.
         </p>
         <ol style={s.steps}>
           <li style={s.step}>
             Open <span style={s.label}>Settings → Controls</span>.
           </li>
           <li style={s.step}>
-            Toggle <span style={s.label}>Anomaly Detection</span> on.
+            Toggle <span style={s.label}>Misparked Vehicle Detection</span> on.
           </li>
           <li style={s.step}>
             A <span style={s.label}>Misparked</span> count card appears in the
-            Metric Cards row, showing how many vehicles are straddling spots.
+            Metric Cards row. It totals the flagged vehicles across every active
+            camera, not only the one on screen.
           </li>
           <li style={s.step}>
-            Straddling cars are outlined in <span style={s.label}>orange</span> on
-            the live feed (highlighting the spots they span); the{' '}
-            <span style={s.label}>Anomaly Panel</span> gives a per-camera breakdown.
+            Flagged vehicles are drawn in <span style={s.label}>orange</span> on
+            the live feed. A straddling car highlights the spots it spans, and a
+            car outside the markings gets a box drawn around it.
+          </li>
+          <li style={s.step}>
+            <span style={s.label}>Sensitivity</span> sets how much of a car must
+            sit inside its best spot to count as properly parked. Raise it to flag
+            more, lower it to flag less. The change takes effect live.
           </li>
         </ol>
         <div style={s.calloutWarn}>
           <span style={s.label}>Prerequisite:</span> requires a trained{' '}
           <span style={s.label}>YOLO26 detector</span> and at least one ROI per
-          camera. A vehicle is flagged when a large share of its footprint overlaps
-          two or more adjacent spots (compared against each spot’s exact polygon, so
-          angled stalls don’t trigger false alarms).
+          camera. With no ROIs there is nothing to measure a car against, so
+          nothing is flagged. Overlap is measured against each spot’s exact
+          polygon, not its bounding box, so angled stalls don’t trigger false
+          alarms.
         </div>
       </SectionCard>
 
