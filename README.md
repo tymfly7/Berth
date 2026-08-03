@@ -1,10 +1,10 @@
 # Berth
 
-AI-powered real-time parking detection using Computer Vision and Deep Learning.
-Monitors parking occupancy via live camera, RTSP, YouTube, or uploaded video,
-draws custom slot regions, detects misparked vehicles, and surfaces everything
-through a two-view dashboard. Runs as a full **server** stack or as an
-inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
+Real-time parking occupancy detection built on computer vision and deep learning.
+The system monitors occupancy from a live camera, RTSP feed, YouTube stream, or
+uploaded video, applies custom slot regions, detects misparked vehicles, and
+reports the result through a two-view dashboard. It runs as a full server stack
+or as an inference-only edge node (e.g. Raspberry Pi 5) that syncs back to a hub.
 
 ---
 
@@ -23,7 +23,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 - [API Reference](#api-reference)
 - [Project Structure](#project-structure)
 - [Configuration](#configuration)
-- [Environment & Secrets (.env)](#environment--secrets-env)
+- [Environment and Secrets (.env)](#environment-and-secrets-env)
 - [Model Comparison](#model-comparison)
 - [Common Errors](#common-errors)
 - [Docker Deployment](#docker-deployment)
@@ -31,8 +31,8 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 - [License](#license)
 - [Acknowledgements](#acknowledgements)
 
-> Operator tips, camera/ROI field notes, and hardening recommendations live in
-> [OPERATIONS.md](OPERATIONS.md).
+> Camera field notes, anomaly and capture guidance, and hardening recommendations
+> are in [OPERATIONS.md](OPERATIONS.md).
 
 ---
 
@@ -52,15 +52,15 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 
 | Feature | Description |
 |---------|-------------|
-| 8 Classifier Architectures | CNN from scratch, ResNet-18/50, MobileNetV4 Small/Medium, and per-scale YOLO26 Classify (n/s/m) |
+| Eight Classifier Architectures | CNN from scratch, ResNet-18/50, MobileNetV4 Small/Medium, and per-scale YOLO26 Classify (n/s/m) |
 | YOLO26 Detector | Bounding-box vehicle detector used for misparked-vehicle (anomaly) detection |
 | Real-Time Detection | Per-camera WebSocket video stream (~20 FPS server / ~15 FPS edge) with slot-wise occupancy overlay |
 | ROI Editor | Draw, edit, and manage custom parking slot polygons per camera |
 | Orientation Layer | Display-only lot frame (outer perimeter, gates, flow arrows, anchor) drawn in the ROI editor and shown on the lot map |
 | Polygon Editing | Vertex drag, edge-midpoint insertion, duplicate, scale, undo/redo |
-| Multi-Camera Registry | USB, RTSP, and YouTube sources; one WebSocket feed per camera; cameras can share an ROI config |
+| Multi-Camera Registry | USB, RTSP, and YouTube sources, one WebSocket feed per camera, and cameras can share an ROI config |
 | Anomaly Detection | YOLO26 Detect flags misparked vehicles (straddling or outside markings) |
-| Public / Admin Views | Public board shows live availability (no auth); Admin dashboard requires server-side password login |
+| Public / Admin Views | Public board shows live availability (no auth). Admin dashboard requires server-side password login |
 | ROI Proposals | Auto-propose candidate slot regions from an uploaded reference image (optional line-snapping) |
 | Lot Map | SVG canvas color-coded by occupancy (vacant = green, occupied = red, misparked = amber) |
 | Analytics Chart | Occupancy trend over configurable time ranges (today / day / week / month) |
@@ -69,10 +69,10 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 | Model Comparison | Train all models, evaluate side-by-side, export to Excel |
 | Run History | Timestamped snapshots of past evaluation and training runs, browsable by date/time |
 | Edge / Hub Mode | Inference-only edge nodes run NCNN models and sync occupancy/alerts to a central hub |
-| Snapshot Mode | Grab one frame every N seconds instead of continuous decode (`BERTH_SNAPSHOT_INTERVAL`), for weak edge boards |
+| Snapshot Mode | Grab one frame every N seconds instead of continuous decode (`BERTH_SNAPSHOT_INTERVAL`), for constrained edge boards |
 | Edge Eval CLI | Torch-free on-device benchmark: accuracy, latency, system stats, and PyTorch→NCNN parity |
 | SQLite Persistence | Trends, alerts, and training runs stored across restarts |
-| Backend Auth | Admin password validated server-side → short-lived signed Bearer token; static `X-API-Key` for machine clients (edge→hub sync) |
+| Backend Auth | Admin password validated server-side, returning a signed Bearer token. Static `X-API-Key` for machine clients (edge→hub sync) |
 
 ---
 
@@ -89,7 +89,7 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
               ▼
 ┌──────────────────────────────────────────────────────┐
 │ FastAPI Backend  (:8001)                             │
-│ main.py — app assembly · WebSockets · SPA fallback   │
+│ main.py : app assembly · WebSockets · SPA fallback   │
 ├──────────────────────────────────────────────────────┤
 │ src/api/routers/   inference · analytics · training  │
 │                    cameras · roi                     │
@@ -109,8 +109,8 @@ inference-only **edge** node (e.g. Raspberry Pi 5) that syncs back to a hub.
 ```
 
 In production (Docker) the backend serves the built frontend from `static/`, so
-the whole app runs on a single origin. In local dev, Vite serves the frontend on
-`:5173` and talks to the backend on `:8001`.
+the whole app runs on a single origin. In local development, Vite serves the
+frontend on `:5173` and talks to the backend on `:8001`.
 
 ### Views
 
@@ -138,10 +138,10 @@ cd "School Project/backend"
 # Create virtual environment
 python -m venv venv
 
-# Activate — Windows
+# Activate on Windows
 venv\Scripts\activate
 
-# Activate — Linux / macOS
+# Activate on Linux / macOS
 # source venv/bin/activate
 
 # Install dependencies
@@ -151,7 +151,7 @@ pip install -r requirements.txt
 ### 2. GPU setup (optional)
 
 ```bash
-# Check your CUDA version
+# Check the installed CUDA version
 nvidia-smi
 
 # Install PyTorch with CUDA 12.1
@@ -170,14 +170,14 @@ npm install
 
 ### 4. Run the application
 
-**Terminal 1 — Backend:**
+**Terminal 1, backend:**
 ```bash
 cd "School Project/backend"
 python main.py
 # API available at http://localhost:8001
 ```
 
-**Terminal 2 — Frontend:**
+**Terminal 2, frontend:**
 ```bash
 cd "School Project/frontend"
 npm run dev
@@ -188,7 +188,7 @@ Open `http://localhost:5173` for the public view, or `http://localhost:5173/admi
 
 > **Admin login:** the dashboard requires a password. Set `BERTH_ADMIN_PASSWORD`
 > (and ideally `BERTH_AUTH_SECRET`) in `backend/.env` before starting, or admin
-> login returns `503`. See [Environment & Secrets](#environment--secrets-env).
+> login returns `503`. See [Environment and Secrets](#environment-and-secrets-env).
 
 > **Port note:** the backend defaults to **8001** (8000 is left free for other
 > local services / Docker). Override with `BERTH_PORT`.
@@ -204,9 +204,9 @@ annotated full-scene dataset (`backend/data/labeled/lot-t10lot/yolo_detect_datas
 ### Option A: Labeled lot-t10lot dataset (recommended)
 
 The classifier trains on `occupied` / `vacant` slot crops under
-`backend/data/labeled/<lot>/`. A labeled set for the **lot-t10lot** lot — cropped
-and annotated from the [parking-lot-t10](https://github.com/tomas-fryza/parking-lot-t10)
-time-lapse dataset — lives under `backend/data/labeled/lot-t10lot/`:
+`backend/data/labeled/<lot>/`. A labeled set for **lot-t10lot**, cropped and
+annotated from the [parking-lot-t10](https://github.com/tomas-fryza/parking-lot-t10)
+time-lapse dataset, lives under `backend/data/labeled/lot-t10lot/`:
 
 ```
 backend/data/labeled/lot-t10lot/
@@ -215,9 +215,10 @@ backend/data/labeled/lot-t10lot/
 └── yolo_detect_dataset/       # YOLO detect images/labels + dataset.yaml
 ```
 
-At training time the backend builds a leakage-safe train/val/test split from these
-crops into `backend/data/classify_split/{train,val,test}/{occupied,vacant}/`
-automatically (split by source frame), so no manual organizing step is needed.
+At training time the backend automatically builds a leakage-safe train/val/test
+split from these crops into
+`backend/data/classify_split/{train,val,test}/{occupied,vacant}/`, split by source
+frame. No manual organizing step is required.
 
 ### Option B: Generate sample data (quick testing)
 
@@ -245,7 +246,7 @@ Data** subsection browses on-disk dataset folders and counts.
 
 ## Training Models
 
-Nine model targets are supported — eight occupancy classifiers plus the detector.
+Nine model targets are supported: eight occupancy classifiers plus the detector.
 Training is launched from the Admin UI or via REST. Note the naming: the detector
 is referred to as `yolo26` at **inference** time and `yolo26_detect` at
 **training** time.
@@ -253,13 +254,13 @@ is referred to as `yolo26` at **inference** time and `yolo26_detect` at
 | Training ID | Architecture | Notes |
 |-------------|-------------|-------|
 | `cnn_scratch` | Custom CNN (SE blocks) | Trained from scratch on the binary dataset |
-| `resnet18` | ResNet-18 | Transfer learning; lighter ResNet |
+| `resnet18` | ResNet-18 | Transfer learning, lighter ResNet |
 | `resnet50` | ResNet-50 | Transfer learning |
-| `mobilenetv4s` | MobileNetV4-Small (timm) | Lightweight; default model on edge nodes |
+| `mobilenetv4s` | MobileNetV4-Small (timm) | Lightweight, suited to edge nodes |
 | `mobilenetv4m` | MobileNetV4-Medium (timm) | Higher-capacity MobileNet variant |
-| `yolo26n_classify` | YOLO26 Classify (nano) | NMS-free; smallest — targets the Pi Zero 2 W |
-| `yolo26s_classify` | YOLO26 Classify (small) | NMS-free, edge-optimized; default active model |
-| `yolo26m_classify` | YOLO26 Classify (medium) | NMS-free; heaviest classify scale — targets the Pi 5 |
+| `yolo26n_classify` | YOLO26 Classify (nano) | NMS-free, smallest scale, targets the Pi Zero 2 W |
+| `yolo26s_classify` | YOLO26 Classify (small) | NMS-free, edge-optimized, default active model |
+| `yolo26m_classify` | YOLO26 Classify (medium) | NMS-free, heaviest classify scale, targets the Pi 5 |
 | `yolo26_detect` | YOLO26 Detect (`yolo26s.pt`) | Object detector for anomaly / misparked detection |
 
 The three YOLO26 classify scales share one training path and fine-tune the
@@ -322,11 +323,12 @@ outputs/
 ### Run history
 
 Evaluate-all overwrites `model_comparison.json` and each training run overwrites
-its `history_<model>.json`, so only the latest result was ever kept. Every run is
-now additionally archived as a timestamped JSON snapshot under
-`outputs/eval_history/` and `outputs/train_history/`, so past runs stay browsable
-by date/time (via the Admin UI or the history endpoints below). Snapshots are
-small, so retention defaults to keeping all of them. Set a limit with `BERTH_HISTORY_MAX`.
+its `history_<model>.json`, so those files hold only the latest result. Every run
+is additionally archived as a timestamped JSON snapshot under
+`outputs/eval_history/` and `outputs/train_history/`, which keeps past runs
+browsable by date and time through the Admin UI or the history endpoints below.
+Snapshots are small, so retention defaults to keeping all of them. Set a limit
+with `BERTH_HISTORY_MAX`.
 
 ### Training environment variables
 
@@ -348,9 +350,9 @@ small, so retention defaults to keeping all of them. Set a limit with `BERTH_HIS
 
 ## ROI Editor
 
-The ROI (Region of Interest) editor lets you define custom parking slot polygons
-directly on a reference image snapshot. ROIs are stored per camera and used for
-both occupancy classification and anomaly detection.
+The ROI (Region of Interest) editor defines custom parking slot polygons directly
+on a reference image snapshot. ROIs are stored per camera and used for both
+occupancy classification and anomaly detection.
 
 ### How to use
 
@@ -358,15 +360,15 @@ both occupancy classification and anomaly detection.
 2. Open the **ROI Editor**.
 3. Upload a reference snapshot from the live feed.
 4. Draw slot polygons using **Polygon** or **Rectangle** draw mode.
-5. Save — ROIs are stored in `backend/configs/roi/<camera_id>.json`.
+5. Save. ROIs are stored in `backend/configs/roi/<camera_id>.json`.
 
 ### Editing tools
 
 | Tool | Action |
 |------|--------|
-| Polygon | Click to place vertices; double-click / snap to close |
+| Polygon | Click to place vertices, then double-click or snap to close |
 | Rectangle | Click-drag to draw a rectangular slot |
-| Edit | Drag vertices (white circles) or edge midpoints (white squares) to reshape; drag inside polygon to translate |
+| Edit | Drag vertices (white circles) or edge midpoints (white squares) to reshape. Drag inside a polygon to translate it |
 | Duplicate | Copy selected ROI with a small offset |
 | Scale +/- | Resize selected polygon around its centroid |
 | Undo / Redo | Ctrl+Z / Ctrl+Y |
@@ -374,11 +376,11 @@ both occupancy classification and anomaly detection.
 
 ### Orientation layer
 
-Besides slot ROIs, the editor can draw a display-only **orientation layer** — an
+Besides slot ROIs, the editor can draw a display-only orientation layer holding an
 outer perimeter, entry/exit gates, traffic-flow arrows, and an anchor marker. It
 is rendered on the lot map (admin and public views) to make the map easier to
-read at a glance. The layer is stored separately from the slot ROIs and is never
-fed to inference.
+read. The layer is stored separately from the slot ROIs and is never fed to
+inference.
 
 ### Auto-propose ROIs
 
@@ -394,16 +396,17 @@ curl -X POST "http://localhost:8001/api/roi/default/propose?use_line_detection=t
   -F "file=@parking_lot_snapshot.jpg"
 ```
 
-Proposals are returned for review and are **not** persisted automatically — saving
-is a separate step. See [OPERATIONS.md](OPERATIONS.md#roi-editor-workflow) for
-when auto-propose works well.
+Proposals are returned for review and are not persisted automatically, so saving
+is a separate step. They are driven by vehicle detections, so they reliably cover
+occupied slots. Empty slots are only detected with `use_line_detection=true` and
+clearly visible markings.
 
 ---
 
 ## Camera Management
 
 The system supports multiple simultaneous camera sources. Each camera runs its
-own `VideoProcessor`; detection work is dispatched to a shared `InferencePool`.
+own `VideoProcessor`, and detection work is dispatched to a shared `InferencePool`.
 
 ### Supported source types
 
@@ -416,21 +419,21 @@ own `VideoProcessor`; detection work is dispatched to a shared `InferencePool`.
 ### Connecting a camera
 
 Add a camera from **Admin > Settings > Camera Registry** (or via the API below),
-choosing the source type for where the camera physically lives:
+choosing the source type according to where the camera physically sits:
 
 | Type | Source value | Notes |
 |------|--------------|-------|
-| `usb` | device index (`0`, `1`, …) | Read server-side; camera must be on the backend host |
+| `usb` | device index (`0`, `1`, …) | Read server-side, so the camera must be on the backend host |
 | `rtsp` | `rtsp://user:pass@<camera-ip>:554/<stream-path>` | `<stream-path>` is vendor-specific |
 | `youtube` | YouTube live URL | Resolved to an HLS stream, cached `BERTH_YT_CACHE_TTL` s |
 
 A camera's `roi_camera_id` can point at another camera's ROI config to share one
 layout across feeds.
 
-**Keeping RTSP credentials out of `cameras.json`** — set the source as an
-environment variable named `BERTH_CAM_SOURCE_<CAMERA_ID>` (uppercase, hyphens →
-underscores). If present, the registry uses it at runtime and the on-disk config
-stays credential-free:
+**Keeping RTSP credentials out of `cameras.json`.** Set the source as an
+environment variable named `BERTH_CAM_SOURCE_<CAMERA_ID>` (uppercase, hyphens
+replaced by underscores). If present, the registry uses it at runtime and the
+on-disk config stays credential-free:
 
 ```
 # camera id "lot-a-1f3c2d" →
@@ -470,8 +473,8 @@ Each active camera streams via its own WebSocket at `/ws/cameras/<camera_id>`.
 
 ## Anomaly Detection
 
-When enabled, the project's vehicle detector locates the cars in each frame
-and the system flags any that are not parked squarely inside a marked bay.
+When enabled, the vehicle detector locates every vehicle in each frame and the
+system flags those that are not parked squarely inside a marked slot.
 
 Every vehicle outside the ROI markings is flagged for review, and the admin
 decides whether a given flag is a real violation.
@@ -493,30 +496,29 @@ as parked-in-bounds.
 
 ### Classification logic
 
-Overlap between a vehicle and a bay is the fraction of the *vehicle's* box area
-that falls inside the bay polygon. A car parked squarely in a bay reads close to
-1.0; a car straddling two bays reads about 0.5 in each. The vehicle box is
-clipped against the bay's polygon edges, so overlap stays accurate for angled
-(e.g. 45°) stalls and for bays drawn larger than the vehicles using them.
+Overlap between a vehicle and a slot is the fraction of the *vehicle's* box area
+that falls inside the slot polygon. A vehicle parked squarely in a slot reads
+close to 1.0, and one straddling two slots reads about 0.5 in each. The vehicle
+box is clipped against the slot's polygon edges, so overlap stays accurate for
+angled (e.g. 45°) slots and for slots drawn larger than the vehicles using them.
 
 | Status | Reason | Condition |
 |--------|--------|-----------|
-| `ok` | — | ≥ `park_thresh` of the vehicle lies inside one bay |
-| `misparked` | `straddling` | ≥ 35% of the vehicle lies inside each of ≥ 2 bays |
-| `misparked` | `outside` | best single-bay overlap < `park_thresh`, covering both a vehicle half-out of a bay and one with no bay overlap at all |
+| `ok` | — | ≥ `park_thresh` of the vehicle lies inside one slot |
+| `misparked` | `straddling` | ≥ 35% of the vehicle lies inside each of ≥ 2 slots |
+| `misparked` | `outside` | best single-slot overlap < `park_thresh`, covering both a vehicle half-out of a slot and one with no slot overlap at all |
 
-Both reasons share one bucket: each is highlighted orange on the video feed and
+Both reasons share one bucket. Each is highlighted orange on the video feed and
 lot map, and they are counted together in the Misparked metric card.
 
 The detector reads from `backend/models/best_yolo26_detect.pt`, overridable with
-`BERTH_VEHICLE_DETECT_PATH`. It is a single-class ("vehicle") model fine-tuned
-on hand-corrected labels via the `yolo26_detect` training pipeline, trained
-at 640px.
+`BERTH_VEHICLE_DETECT_PATH`. It is a single-class ("vehicle") model fine-tuned at
+640 px on hand-corrected labels via the `yolo26_detect` training pipeline.
 
 ### Occupancy sensitivity
 
-The YOLO-classify occupancy decision threshold is tunable live (it biases toward
-calling a spot "occupied" to cut false negatives):
+The YOLO-classify occupancy decision threshold can be tuned at runtime. It biases
+the decision toward "occupied" in order to reduce false negatives:
 
 ```bash
 curl -X POST http://localhost:8001/api/settings/occupancy \
@@ -533,16 +535,17 @@ Berth can run in two profiles, selected with `BERTH_DEPLOYMENT`:
 | Profile | Value | Role |
 |---------|-------|------|
 | Server (default) | `server` | Full stack: training, evaluation, dashboard, inference |
-| Edge | `edge` | Inference-only node (e.g. Raspberry Pi 5 / ARM64); training & evaluation disabled |
+| Edge | `edge` | Inference-only node (e.g. Raspberry Pi 5 / ARM64), with training and evaluation disabled |
 
-**Edge nodes** run lighter NCNN models at reduced resolution/FPS and buffer
-occupancy + alerts in a local SQLite DB. A background `SyncWorker` pushes
-unsynced rows to the hub every 60 s when `BERTH_EDGE_HUB_URL` is set; if the hub
-is unreachable, rows stay buffered and retry on the next tick, so no data is lost.
+Edge nodes run lighter NCNN models at reduced resolution and FPS, and buffer
+occupancy and alerts in a local SQLite DB. A background `SyncWorker` pushes
+unsynced rows to the hub every 60 s when `BERTH_EDGE_HUB_URL` is set. If the hub
+is unreachable, rows stay buffered and retry on the following cycle.
 
-On very weak boards (e.g. the Pi Zero 2 W) set `BERTH_SNAPSHOT_INTERVAL=<seconds>`
-to enable **snapshot mode**: the processor grabs a single frame every N seconds
-instead of decoding the stream continuously, freeing the CPU for inference.
+On the most constrained boards (e.g. the Pi Zero 2 W) set
+`BERTH_SNAPSHOT_INTERVAL=<seconds>` to enable snapshot mode. The processor then
+grabs a single frame every N seconds instead of decoding the stream continuously,
+which frees the CPU for inference.
 
 The **hub** receives those rows via the ingest endpoints (`POST
 /api/ingest/occupancy`, `POST /api/ingest/alerts`).
@@ -551,7 +554,7 @@ The **hub** receives those rows via the ingest endpoints (`POST
 
 Trained models are exported to NCNN (CNN models via `torch.jit.trace` + pnnx,
 YOLO models via Ultralytics export). This happens automatically after a
-successful training run, or run it manually — via the CLI or the export endpoint:
+successful training run, or it can be run manually via the CLI or the export endpoint:
 
 ```bash
 cd backend
@@ -575,16 +578,16 @@ without FastAPI and torch-free by default, against a crops dataset (`occupied/` 
 
 | Script | Runs on | Purpose |
 |--------|---------|---------|
-| `eval_edge.py` | edge / laptop | Classify every crop; writes a timestamped session of `predictions.csv`, `summary.csv` (metrics + latency stats), and `system.csv` (CPU / RAM / temperature / throttling) |
+| `eval_edge.py` | edge / laptop | Classifies every crop and writes a timestamped session of `predictions.csv`, `summary.csv` (metrics + latency stats), and `system.csv` (CPU / RAM / temperature / throttling) |
 | `run_eval.sh` | edge | Wrapper that stops the `berth` systemd service so the eval gets the full CPU/RAM budget, then restarts it on exit |
 | `make_goldens.py` | hub / dev | Run a fixed crop set through the full torch classifier and save golden probabilities |
 | `edge_check.py` | edge | Post-deploy smoke check: NCNN model loads + one sane inference (exit 0 = pass) |
 
 ```bash
-# On the edge device (service auto-stopped / restarted; args passed through)
+# On the edge device (service auto-stopped / restarted, args passed through)
 ./edge_eval/run_eval.sh --dataset data/t12lot_subset --model yolo26n_classify
 
-# Direct, e.g. on a dev laptop — pick the runtime to benchmark
+# Direct, e.g. on a dev laptop. Pick the runtime to benchmark
 python edge_eval/eval_edge.py --dataset data/t12lot_subset --runtime ncnn
 python edge_eval/eval_edge.py --dataset data/t12lot_subset --runtime torch
 
@@ -594,14 +597,14 @@ python edge_eval/eval_edge.py --dataset data/t12lot_subset \
   --parity eval_results/goldens_yolo26n_classify.json
 ```
 
-`--runtime` selects the inference backend — `ncnn` (default, torch-free) or
-`torch` (imported lazily; for benchmarking the same model with PyTorch on a dev
+`--runtime` selects the inference backend, either `ncnn` (default, torch-free) or
+`torch` (imported lazily, for benchmarking the same model with PyTorch on a dev
 laptop or Pi 5). Results land in
 `backend/eval_results/<device>_<model>_<runtime>_<timestamp>/` (gitignored).
 
-> The full per-device runbook — shipping the scripts and datasets, the Docker and
-> native run procedures, parity checks, and the native PyTorch comparison on the
-> Pi 5 — is in
+> The full per-device runbook covers shipping the scripts and datasets, the Docker
+> and native run procedures, parity checks, and the native PyTorch comparison on
+> the Pi 5. It is in
 > [Edge Device Evaluation](backend/edge_eval/README.md).
 
 ---
@@ -612,7 +615,7 @@ laptop or Pi 5). Results land in
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/auth/login` | Validate admin password → returns `{token, expires_in}` (Bearer session token); `503` if `BERTH_ADMIN_PASSWORD` is unset, `401` if wrong |
+| POST | `/api/auth/login` | Validate admin password, returning `{token, expires_in}` (Bearer session token). Returns `503` if `BERTH_ADMIN_PASSWORD` is unset and `401` if the password is wrong |
 
 ### Core / meta
 
@@ -668,13 +671,13 @@ laptop or Pi 5). Results land in
 | GET | `/api/model/info` | Available models + dataset stats + comparison (cached 60 s) |
 | POST | `/api/use-model/{name}` | Switch active model |
 | POST | `/api/test-model/{name}` | Per-patch accuracy eval of a trained classifier |
-| POST | `/api/train/start` | Start training (`?model_name=&compare_all=`) — server only |
+| POST | `/api/train/start` | Start training (`?model_name=&compare_all=`), server only |
 | GET | `/api/train/status` | Training progress |
-| POST | `/api/train/cancel` | Cancel an in-progress training run — server only |
-| POST | `/api/evaluate/all` | Evaluate all trained models — server only |
+| POST | `/api/train/cancel` | Cancel an in-progress training run, server only |
+| POST | `/api/evaluate/all` | Evaluate all trained models, server only |
 | GET | `/api/eval/datasets` | List datasets available for evaluation |
 | GET | `/api/evaluate/excel` | Download comparison as an Excel file (`?file=` for an archived snapshot) |
-| POST | `/api/export/ncnn` | Export trained models to NCNN for the edge — server only |
+| POST | `/api/export/ncnn` | Export trained models to NCNN for the edge, server only |
 | GET | `/api/export/status` | NCNN export progress |
 
 ### Run history
@@ -734,19 +737,19 @@ School Project/
 ├── backend/
 │   ├── main.py                          # FastAPI app assembly, WebSockets, SPA fallback
 │   ├── config.py                        # Centralized config (paths, env vars, profiles)
-│   ├── .env                             # Local secrets (gitignored) — loaded by config.py
+│   ├── .env                             # Local secrets (gitignored), loaded by config.py
 │   ├── requirements.txt                 # Full server deps
 │   ├── requirements.edge.txt            # Slim edge deps (used by deploy/edge/docker/Dockerfile.rpi)
 │   ├── edge_eval/                       # On-device eval pipeline (see Edge / Hub Deployment)
-│   │   ├── README.md                    # Edge Device Evaluation — per-device runbook
+│   │   ├── README.md                    # Edge Device Evaluation, per-device runbook
 │   │   ├── eval_edge.py                 # Torch-free eval CLI (accuracy + latency + system CSVs)
 │   │   ├── make_goldens.py              # Hub-side torch goldens for NCNN parity checks
 │   │   ├── edge_check.py                # Post-deploy model load / inference smoke check
 │   │   └── run_eval.sh                  # Stops/restarts the berth service around a run
-│   ├── berth.db                         # SQLite — trends, alerts, training runs
+│   ├── berth.db                         # SQLite: trends, alerts, training runs
 │   ├── models/                          # Trained weights (*.pth / *.pt)
 │   ├── edge_models/                     # NCNN exports (*_ncnn_model/ dirs) for edge deployment
-│   ├── src/                             # Runtime tree — API, inference, cameras, ROI, sync
+│   ├── src/                             # Runtime tree: API, inference, cameras, ROI, sync
 │   │   ├── api/
 │   │   │   ├── routers/
 │   │   │   │   ├── inference.py          # predict / analyze-roi|misparked / augment
@@ -766,7 +769,7 @@ School Project/
 │   │   │   └── yolo_detector_ncnn.py    # Torch-free NCNN detect wrapper (ARM64 edge)
 │   │   ├── inference/
 │   │   │   ├── classifier.py            # Torch-free classifier dispatcher (profile → backend)
-│   │   │   ├── torch_classifier.py      # ParkingClassifier — full torch path (server)
+│   │   │   ├── torch_classifier.py      # ParkingClassifier, full torch path (server)
 │   │   │   ├── ncnn_classifier.py       # NCNN edge classifier (ARM64)
 │   │   │   ├── inference_pool.py        # Shared detection worker pool
 │   │   │   ├── slot_detector.py         # ROI-crop occupancy detection
@@ -804,7 +807,7 @@ School Project/
 │   │       ├── train_all.py             # CLI: train all models in sequence
 │   │       ├── export_models.py         # CLI: export trained models to NCNN for edge
 │   │       └── verify.py                # CLI: environment / structure check (run from backend/)
-│   ├── tests/                           # pytest suite; tests/dev/ covers the dev routers
+│   ├── tests/                           # pytest suite, tests/dev/ covers the dev routers
 │   ├── data/                            # Training images (occupied / vacant) + YOLO datasets
 │   ├── outputs/                         # Training logs, plots, YOLO run artifacts
 │   ├── configs/                         # Runtime config: roi/<camera_id>.json + cameras.json
@@ -820,7 +823,7 @@ School Project/
 │   │   │   ├── DocsPage.jsx             # In-app documentation
 │   │   │   └── NotFoundPage.jsx         # 404
 │   │   ├── components/
-│   │   │   ├── PinGate.jsx              # Login form; password verified server-side via /api/auth/login
+│   │   │   ├── PinGate.jsx              # Login form, password verified server-side via /api/auth/login
 │   │   │   ├── Header.jsx               # App header + connection indicator
 │   │   │   ├── VideoFeed.jsx            # WebSocket video frame display
 │   │   │   ├── MultiCameraGrid.jsx      # Grid of CameraFeedCell for active cameras
@@ -849,11 +852,11 @@ School Project/
 │   └── vite.config.js
 ├── configs/
 │   └── model_configs.yaml
-├── deploy/                              # Deployment tiers — see deploy/README.md
+├── deploy/                              # Deployment tiers, see deploy/README.md
 │   ├── docker/                          # Server image + compose (x86, 127.0.0.1:9000 → 8000)
 │   └── edge/                            # Raspberry Pi: docker/ (Pi 5, Zero 2 W) + native/ (systemd)
 ├── .dockerignore                        # Build-context excludes (build context = repo root)
-├── .env_edge                            # Secrets template for compose (gitignored)
+├── .env                                 # Secrets read by compose (gitignored)
 ├── OPERATIONS.md                        # Operator tips, field notes, hardening
 └── README.md
 ```
@@ -869,10 +872,10 @@ environment variables.
 |----------|---------|-------------|
 | `BERTH_HOST` | `0.0.0.0` | Backend bind host |
 | `BERTH_PORT` | `8001` | Backend port |
-| `BERTH_ADMIN_PASSWORD` | _(empty — login returns 503)_ | Admin password, validated server-side by `/api/auth/login` |
-| `BERTH_AUTH_SECRET` | _(random per start)_ | Signing key for session tokens; set it to keep logins valid across restarts |
-| `BERTH_AUTH_TTL` | `315360000` | Admin session token lifetime in seconds (~10 years by default, so local logins do not expire; lower it for network-facing deployments) |
-| `BERTH_API_KEY` | _(empty — static-key path open)_ | Static service key (`X-API-Key`) for machine clients (edge→hub sync) + WS token |
+| `BERTH_ADMIN_PASSWORD` | _(empty, login returns 503)_ | Admin password, validated server-side by `/api/auth/login` |
+| `BERTH_AUTH_SECRET` | _(random per start)_ | Signing key for session tokens. Set it to keep logins valid across restarts |
+| `BERTH_AUTH_TTL` | `315360000` | Admin session token lifetime in seconds (~10 years by default, so local logins do not expire). Lower it for network-facing deployments |
+| `BERTH_API_KEY` | _(empty, static-key path open)_ | Static service key (`X-API-Key`) for machine clients (edge→hub sync) + WS token |
 | `BERTH_ALLOWED_ORIGIN` | _(empty)_ | Extra explicit CORS origin (LAN ranges allowed by default) |
 | `BERTH_UPLOAD_RATE_LIMIT` | `10/minute` | Rate limit on upload endpoints |
 | `BERTH_MODEL` | `yolo26s_classify` | Default active model on startup |
@@ -884,8 +887,8 @@ environment variables.
 | `BERTH_OCCUPANCY_THRESHOLD` | `0.40` | YOLO-classify "occupied" decision threshold |
 | `BERTH_INFER_FPS` | `8` server / `4` edge | Inference rate, decoupled from stream FPS |
 | `BERTH_NCNN_THREADS` | `1` server / `3` edge | Cores one NCNN inference spreads across (keep workers × threads within the core count) |
-| `BERTH_SNAPSHOT_INTERVAL` | `0` | Snapshot mode: grab one frame every N seconds instead of continuous decode (`0` = off), for weak edge boards |
-| `BERTH_ANOMALY_FPS` | `0.2` | Anomaly (YOLO detect) pass cadence — one pass every 5 s by default |
+| `BERTH_SNAPSHOT_INTERVAL` | `0` | Snapshot mode: grab one frame every N seconds instead of continuous decode (`0` = off), for constrained edge boards |
+| `BERTH_ANOMALY_FPS` | `0.0667` | Anomaly (YOLO detect) pass cadence, roughly one pass every 15 s by default |
 | `BERTH_HISTORY_MAX` | `0` | Max run-history snapshots kept per dataset/model (`0` = keep all) |
 | `BERTH_API_THREADS` | `8` edge / `0` server | Cap on the anyio threadpool for sync endpoints (`0` = anyio default) |
 | `BERTH_CAPTURE_DIR` | `~/berth_captures` | Base directory for per-camera data-gathering captures |
@@ -915,24 +918,24 @@ Training-specific variables are listed under [Training Models](#training-models)
 
 ### Authentication
 
-All authentication is handled by the backend; the frontend holds no secrets.
+All authentication is handled by the backend, and the frontend holds no secrets.
 
 - **Admin login.** The `/admin` password is sent to `POST /api/auth/login`, which
   compares it (constant-time) against `BERTH_ADMIN_PASSWORD`. On success the
-  backend returns a short-lived HMAC-signed Bearer token (signed with
-  `BERTH_AUTH_SECRET`, valid `BERTH_AUTH_TTL` seconds). The frontend sends it as
+  backend returns an HMAC-signed Bearer token (signed with `BERTH_AUTH_SECRET`,
+  valid for `BERTH_AUTH_TTL` seconds). The frontend sends it as
   `Authorization: Bearer <token>` on REST calls and as `?token=` on the admin
   WebSocket. If `BERTH_ADMIN_PASSWORD` is unset, login returns `503` and the
   dashboard is unreachable.
 - **Service key.** Protected endpoints also accept a static `X-API-Key` equal to
   `BERTH_API_KEY`. This is for machine-to-machine clients, chiefly the edge→hub
   sync worker, and not the browser. When `BERTH_API_KEY` is empty, the static-key
-  path is open (any request without a valid Bearer token still passes); set it for
-  network-facing deployments.
+  path is open, so any request without a valid Bearer token still passes. Set it
+  for network-facing deployments.
 - **Public endpoints** (`/api/public/*`) require no auth, so the public board
-  works without logging in. They expose whitelisted fields only — never camera
+  works without logging in. They expose whitelisted fields only, never camera
   sources or credentials.
-- **CORS** allows localhost and private LAN ranges by default; add a public origin
+- **CORS** allows localhost and private LAN ranges by default. Add a public origin
   with `BERTH_ALLOWED_ORIGIN`.
 
 For hardening recommendations (TLS, strong secrets) see
@@ -940,24 +943,22 @@ For hardening recommendations (TLS, strong secrets) see
 
 ---
 
-## Environment & Secrets (.env)
+## Environment and Secrets (.env)
 
-There are **two separate `.env` mechanisms**, which should not be confused:
+There are two separate `.env` mechanisms, and they are easily confused:
 
 | File | Used by | When it is read |
 |------|---------|----------------|
 | `backend/.env` | bare-metal `python main.py` | Loaded by `python-dotenv` in `config.py` at startup |
-| `.env` in the dir you run compose from (repo root) | `docker compose` | Interpolated into `${BERTH_*}` placeholders in the compose files, then passed to the container |
+| `.env` in the directory compose is run from (repo root) | `docker compose` | Interpolated into `${BERTH_*}` placeholders in the compose files, then passed to the container |
 
-All `.env*` files are **gitignored** (`.env`, `frontend/.env`, `.env_edge`). They
-hold secrets and must never be committed. `.env_edge` (project root) is a template
-whose intent is tracked but whose content is not, copied to `.env` and filled in.
+All `.env*` files are gitignored. They hold secrets and must never be committed.
 
 ### Bare-metal: `backend/.env`
 
 ```ini
 # backend/.env
-BERTH_ADMIN_PASSWORD=choose-a-strong-pin     # REQUIRED — without it admin login returns 503
+BERTH_ADMIN_PASSWORD=choose-a-strong-pin     # REQUIRED. Without it admin login returns 503
 BERTH_AUTH_SECRET=paste-a-long-random-string # keeps login tokens valid across restarts
 BERTH_API_KEY=                               # only needed for machine clients (edge→hub sync)
 ```
@@ -965,22 +966,25 @@ BERTH_API_KEY=                               # only needed for machine clients (
 ### Docker: compose-dir `.env`
 
 Compose reads variables for `${BERTH_API_KEY:-}`, `${BERTH_ADMIN_PASSWORD:-}`, and
-`${BERTH_AUTH_SECRET:-}` from a `.env` in the directory compose is run from (the repo
-root, where compose should always be invoked) or from the shell. Copy the template and fill it in:
+`${BERTH_AUTH_SECRET:-}` from a `.env` in the directory compose is run from, which should
+always be the repo root, or from the shell. A fresh clone carries no `.env`, since the file is
+gitignored and private to each machine, so write your own at the repo root:
 
 ```bash
-cp .env_edge .env        # then edit .env with real values
+# .env, repo root
+BERTH_ADMIN_PASSWORD=choose-a-real-password
+BERTH_API_KEY=paste-a-long-random-string
+BERTH_AUTH_SECRET=paste-a-long-random-string
+```
+
+```bash
 docker compose -f deploy/edge/docker/docker-compose.rpi.yml up -d
 ```
 
-To keep the template under a different name, point compose at it explicitly:
+The file name is `.env` here and on the Pi. Nothing is renamed or copied between the two.
 
-```bash
-docker compose --env-file .env_edge -f deploy/edge/docker/docker-compose.rpi.yml up -d
-```
-
-`frontend/.env` no longer holds any secret — the browser authenticates with the
-session token from login, so there is nothing to bake into the bundle.
+`frontend/.env` holds no secret. The browser authenticates with the session token
+from login, so there is nothing to bake into the bundle.
 
 ---
 
@@ -989,12 +993,12 @@ session token from login, so there is nothing to bake into the bundle.
 | Model | Type | Params | Notes |
 |-------|------|--------|-------|
 | CNN Scratch | Classifier | ~1.5 M | Trained from scratch (SE blocks) |
-| ResNet-18 | Classifier | ~11 M | Transfer learning; lighter ResNet |
+| ResNet-18 | Classifier | ~11 M | Transfer learning, lighter ResNet |
 | ResNet-50 | Classifier | ~25 M | Transfer learning |
-| MobileNetV4-Small | Classifier | ~3 M | Lightweight; default on edge nodes |
+| MobileNetV4-Small | Classifier | ~3 M | Lightweight, suited to edge nodes |
 | MobileNetV4-Medium | Classifier | ~10 M | Higher-capacity MobileNet variant |
-| YOLO26 Classify (n/s/m) | Classifier | — | NMS-free, per-scale; `yolo26s_classify` is the default active model |
-| YOLO26 Detect | Detector | — | Bounding-box detector; used for anomaly detection |
+| YOLO26 Classify (n/s/m) | Classifier | — | NMS-free, per-scale. `yolo26s_classify` is the default active model |
+| YOLO26 Detect | Detector | — | Bounding-box detector, used for anomaly detection |
 
 Run `POST /api/evaluate/all` from the Admin UI or API to compare all trained
 classifiers side-by-side. Download results as a formatted Excel file from
@@ -1012,11 +1016,11 @@ classifiers side-by-side. Download results as a formatted Excel file from
 | `ncnn` import error (edge) | Install the `ncnn` package on the ARM64 node |
 | CUDA out of memory | Reduce `BERTH_BATCH_SIZE` or use CPU-only PyTorch |
 | No images found | Run dataset preparation first |
-| WebSocket will not connect | Start the backend before the frontend; check the `:8001` port |
+| WebSocket will not connect | Start the backend before the frontend, then check the `:8001` port |
 | YOLO26 weights not found | Train `yolo26_detect` / `yolo26{n,s,m}_classify` via the Training panel first |
-| Anomaly detection 400 error | YOLO26 Detect weights are missing — train it first |
-| Training/evaluation 403 | The node is in `edge` profile — use the hub server |
-| YouTube stream errors | URL may have expired; HLS URLs are cached for `BERTH_YT_CACHE_TTL` seconds |
+| Anomaly detection 400 error | YOLO26 Detect weights are missing, so train it first |
+| Training/evaluation 403 | The node is in `edge` profile, so use the hub server |
+| YouTube stream errors | URL may have expired. HLS URLs are cached for `BERTH_YT_CACHE_TTL` seconds |
 | Rate limit exceeded | Wait a minute or raise `BERTH_UPLOAD_RATE_LIMIT` |
 
 ---
@@ -1028,9 +1032,9 @@ reachable on a single origin/port. **Inside every container the backend listens 
 `8000`** (the `8001` default applies only to bare-metal `python main.py`).
 
 Secrets are passed as container env, never baked into the image. With compose,
-`${BERTH_*}` placeholders are interpolated from a `.env` file **in the directory you run
-compose from** (the repo root) or from your shell — this is a *different* file from
-`backend/.env`. See [Environment & Secrets](#environment--secrets-env).
+`${BERTH_*}` placeholders are interpolated from a `.env` file in the directory compose
+is run from (the repo root) or from the shell. This is a *different* file from
+`backend/.env`. See [Environment and Secrets](#environment-and-secrets-env).
 
 ### 1. Server, on a normal machine (x86-64)
 
@@ -1046,27 +1050,28 @@ docker run -p 8000:8000 \
   -e BERTH_AUTH_SECRET=your-long-random-string \
   berth:1.0
 
-# Or with compose (reads ./.env; publishes 127.0.0.1:9000 → 8000)
+# Or with compose (reads ./.env, publishes 127.0.0.1:9000 → 8000)
 docker compose -f deploy/docker/docker-compose.yml up -d --build
 ```
 
 `deploy/docker/docker-compose.yml` binds to `127.0.0.1:9000`, so the app is reachable at
-`http://localhost:9000` and not exposed on the network — put a reverse proxy in
-front for remote access. It bind-mounts `backend/{data,models,outputs,uploads}` so
+`http://localhost:9000` and not exposed on the network. A reverse proxy in front is
+required for remote access. It bind-mounts `backend/{data,models,outputs,uploads}` so
 datasets, weights, and runs persist on the host.
 
 ### 2. Edge node, on a Raspberry Pi 5 (ARM64)
 
 The edge image (`deploy/edge/docker/Dockerfile.rpi`) runs the `edge` profile
-(inference-only, NCNN). You do **not** build it on the Pi — cross-build it on an x86 machine and
+(inference-only, NCNN). It is not built on the Pi. Cross-build it on an x86 machine and
 ship the prebuilt image (see [§3](#3-baking-the-edge-image-on-x86-and-shipping-it-to-the-pi)
-below); the Pi needs only the image, the compose file, and a `.env`. The container reaches
+below). The Pi needs only the image, the compose file, and a `.env`. The container reaches
 webcams through a `/dev` passthrough (a USB camera plugged in after start is opened when a
 camera is activated) and keeps the SQLite DB + ROI/camera config in named volumes.
 
-Once it is up, the app is reachable at `http://<pi-ip>:8001`. Required env (in the `.env` next
-to the compose file on the Pi): `BERTH_ADMIN_PASSWORD` (else login → `503`); recommended:
-`BERTH_AUTH_SECRET`, `BERTH_API_KEY`, and `BERTH_EDGE_HUB_URL` to point the node at the hub. The
+Once it is up, the app is reachable at `http://<pi-ip>:8001`. The `.env` next to the compose
+file on the Pi must set `BERTH_ADMIN_PASSWORD`, otherwise login returns `503`. Recommended
+alongside it: `BERTH_AUTH_SECRET`, `BERTH_API_KEY`, and `BERTH_EDGE_HUB_URL` to point the node
+at the hub. The
 NCNN models (`backend/edge_models/*_ncnn_model/`) are baked into the image at build time, so
 populate them on the **build machine** (see [Edge / Hub Deployment](#edge--hub-deployment))
 before cross-building.
@@ -1084,7 +1089,7 @@ Run these from the repo root (the build context), which writes the tarball into
 `deploy/edge/docker/`, next to the compose file that consumes it:
 
 ```bash
-# On the x86 build machine — cross-compile for ARM64
+# On the x86 build machine: cross-compile for ARM64
 docker buildx build --platform linux/arm64 \
   -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi . --load
 
@@ -1095,17 +1100,17 @@ docker save berth-rpi:latest | gzip > deploy/edge/docker/berth-rpi.tar.gz
 scp deploy/edge/docker/berth-rpi.tar.gz \
     deploy/edge/docker/docker-compose.rpi.yml pi@raspberrypi.local:~/berth/
 
-# On the Pi (~/berth) — create .env first (see deploy/edge/docker/README.md), then load + start
+# On the Pi (~/berth): create .env first (see deploy/edge/docker/README.md), then load + start
 cd ~/berth
 docker load < berth-rpi.tar.gz
 docker compose -f docker-compose.rpi.yml up -d   # no --build: uses the loaded image
 ```
 
 The compose file references `image: berth-rpi:latest`, so once the image is loaded the compose
-run picks it up without rebuilding — its `build.context` points at a repo tree that is not on
-the Pi, which is harmless while the image is present. (Building on the Pi instead —
-`docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .` from a checkout — also
-works, just slower.)
+run picks it up without rebuilding. Its `build.context` points at a repo tree that is not on
+the Pi, which is harmless while the image is present. Building on the Pi instead, with
+`docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .` from a checkout, also
+works, just slower.
 
 > The `.tar`/`.tar.gz` artifacts are gitignored and should not be committed. Rebuild
 > after any frontend or backend change so the image is not stale.
@@ -1115,7 +1120,7 @@ works, just slower.)
 ## Contributing
 
 Branch off `main`, run the checks below, and open a PR against `main`. CI
-(`.github/workflows/ci.yml`) runs the same three jobs — all must be green.
+(`.github/workflows/ci.yml`) runs the same three jobs, and all must be green.
 
 ```bash
 git checkout -b feature/your-change
@@ -1133,23 +1138,25 @@ npm run test          # vitest
 npx eslint src --max-warnings 0
 ```
 
-Contribution etiquette (scope, docs, when to open an issue first) is in
-[OPERATIONS.md](OPERATIONS.md#contributing-etiquette).
+Keep each diff scoped to one concern, match the existing code style, and update the
+README, the in-app `/admin/docs` page, and any affected env-var or API tables when
+behavior changes. For larger features or architectural changes, open an issue first.
 
 ---
 
 ## License
 
-Released under the MIT License; see [LICENSE](LICENSE) for the full text. The
+Released under the MIT License. See [LICENSE](LICENSE) for the full text. The
 third-party datasets and reference implementations this project builds on retain
 their own licenses (see [Acknowledgements](#acknowledgements)).
 
 ---
 
 ## Acknowledgements
-- [AI-Parking-Lot-Detection](https://github.com/Nandini60/AI-Parking-Lot-Detection/tree/main/parking_ai) — Reference implementation and architectural inspiration
 
-- [parking-lot-t10](https://github.com/tomas-fryza/parking-lot-t10) — Tomas Fryza — time-lapse parking lot (lot T10) dataset used to build the occupied/vacant classifier crops and the YOLO detect set
+- [AI-Parking-Lot-Detection](https://github.com/Nandini60/AI-Parking-Lot-Detection/tree/main/parking_ai). Reference implementation and architectural inspiration.
 
-- Ultralytics YOLO26 — object detection and classification models
+- [parking-lot-t10](https://github.com/tomas-fryza/parking-lot-t10) by Tomas Fryza. Time-lapse parking lot (lot T10) dataset used to build the occupied/vacant classifier crops and the YOLO detect set.
+
+- Ultralytics YOLO26. Object detection and classification models.
 

@@ -2,16 +2,16 @@
 
 Native deployment of the Berth edge backend on the low-RAM boards: **Pi Zero 2 W**
 (512 MB, 4× Cortex-A53) and **Pi 3B** (1 GB, 4× Cortex-A53). [Docker](../docker/) stays the
-path for the Pi 5; on the small boards the Docker daemon alone costs 100–150 MB, so the
+path for the Pi 5. On the small boards the Docker daemon alone costs 100–150 MB, so the
 backend runs directly under **systemd** instead.
 
 On this hardware the failure mode is usually a freeze rather than a crash. When RAM runs out
-and the box swaps to SD card, the symptom is "no logs, SSH dead, UI gone", which is hard to
-tell from a hang. The steps below aim to turn that freeze into a recoverable service restart.
+and the board swaps to the SD card, the symptom is "no logs, SSH dead, UI gone", which is hard
+to tell from a hang. The steps below aim to turn that freeze into a recoverable service restart.
 
-Throughout: user is `edge`, host is `IP` (the Zero 2 W), project lives in `~/berth`,
-backend listens on port `8001`. Adjust to taste; the 3B follows the same procedure with the
-deltas in [Pi 3B profile](#pi-3b-profile).
+Throughout: the user is `edge`, the host is `IP` (the Zero 2 W), the project lives in
+`~/berth`, and the backend listens on port `8001`. Adjust these to the local setup. The 3B
+follows the same procedure with the deltas in [Pi 3B profile](#pi-3b-profile).
 
 ---
 
@@ -30,7 +30,7 @@ deltas in [Pi 3B profile](#pi-3b-profile).
 #    and ship this native/ folder to the Pi.
 
 # 2. On the Pi, as user `edge`:
-cd ~/berth/deploy/edge/native      # wherever you dropped this folder
+cd ~/berth/deploy/edge/native      # wherever this folder was dropped
 chmod +x install.sh
 ./install.sh                       # runs steps 1-3, then asks for a reboot
 sudo reboot
@@ -44,7 +44,7 @@ journalctl -u berth -f
 > If bash reports `bad interpreter` / `\r`, the script picked up CRLF line endings on
 > Windows: run `dos2unix install.sh` on the Pi first.
 
-The rest of this document is the **reference** for what `install.sh` automates, plus the parts
+The rest of this document is the reference for what `install.sh` automates, plus the parts
 that stay manual (code transfer, updates, recovery).
 
 ---
@@ -56,57 +56,57 @@ Flash **Raspberry Pi OS Lite, 64-bit (Bookworm)**. Lite has no desktop and idles
 ships prebuilt `aarch64` wheels, so nothing compiles on the device. In the Imager's advanced
 settings, preconfigure hostname, the `edge` user, Wi-Fi, and SSH for a headless first boot.
 
-`install.sh` step [1/5] then: updates the OS; installs `python3-venv python3-pip libgl1
-libglib2.0-0`; sets `gpu_mem=16` + `dtoverlay=disable-bt` in `/boot/firmware/config.txt`;
-disables `bluetooth triggerhappy ModemManager`; and sets journald `Storage=volatile` (logs
-live in RAM, so they don't survive a reboot, which is fine here and stops steady SD writes).
+`install.sh` step [1/5] then updates the OS, installs `python3-venv python3-pip libgl1
+libglib2.0-0`, sets `gpu_mem=16` and `dtoverlay=disable-bt` in `/boot/firmware/config.txt`,
+disables `bluetooth triggerhappy ModemManager`, and sets journald `Storage=volatile`. Volatile
+logs live in RAM and do not survive a reboot, which stops steady SD writes.
 
 Do not install a desktop, Docker, or anything else: every resident megabyte comes out of the
 model/stream budget.
 
 ## 2. zram swap + earlyoom
 
-SD-card swap is what freezes the box. zram (compressed swap in RAM, ~3–4× with zstd) plus
+SD-card swap is what freezes the board. zram (compressed swap in RAM, ~3–4× with zstd) plus
 earlyoom (kills the biggest process *before* the kernel livelocks) replaces it. `install.sh`
 step [2/5]: removes the stock `dphys-swapfile`, installs `zram-tools earlyoom`, writes
 `ALGO=zstd`/`PERCENT=60`, sets `vm.swappiness=100` + `vm.page-cluster=0`, and enables both
 services.
 
-> **Gotcha:** if `zramswap.service` fails with `mkswap: /dev/zram0 is mounted` or `Device or
+> **Note:** if `zramswap.service` fails with `mkswap: /dev/zram0 is mounted` or `Device or
 > resource busy`, another mechanism claimed the device, and a reboot resolves it. After reboot,
 > `swapon --show` must list **only** `/dev/zram0` (no `/var/swap`).
 
 ## 3. Enable the memory cgroup controller
 
-**Raspberry Pi OS disables the kernel memory cgroup by default**: the firmware injects
-`cgroup_disable=memory`. Without this, the unit's `MemoryHigh=`/`MemoryMax=` are **silently
-ignored** and `systemctl show berth -p MemoryCurrent` returns `[not set]`.
+Raspberry Pi OS disables the kernel memory cgroup by default, because the firmware injects
+`cgroup_disable=memory`. Without this step, the unit's `MemoryHigh=` and `MemoryMax=` are
+silently ignored and `systemctl show berth -p MemoryCurrent` returns `[not set]`.
 
 `install.sh` step [3/5] appends `cgroup_enable=memory cgroup_memory=1` to
 `/boot/firmware/cmdline.txt`.
 
-> **Critical:** `cmdline.txt` is a **single line**. The installer appends to the end of line 1;
-> never add a newline. After the reboot, verify:
+> **Critical:** `cmdline.txt` is a single line. The installer appends to the end of line 1 and
+> never adds a newline. After the reboot, verify:
 > ```bash
 > grep cgroup /proc/cmdline     # must contain cgroup_enable=memory
 > grep memory /proc/cgroups     # last column 1 = enabled
 > ```
 
 Accounting overhead is ~1–2 % of RAM. In exchange, a runaway backend is killed at its cap and
-restarted by systemd instead of dragging the box into a swap freeze.
+restarted by systemd instead of dragging the board into a swap freeze.
 
-**zram and the cgroup both need a reboot**, which is why `install.sh` stops after step 3 and
-asks you to reboot, then finishes on the second run.
+zram and the cgroup both need a reboot, which is why `install.sh` stops after step 3 and asks
+for a reboot, then finishes on the second run.
 
 ## 4. Install the backend
 
 ### Transfer the code (from the dev machine)
 
-`rsync` isn't in Git Bash on Windows; use tar-over-ssh from the project root. Exclude
-everything heavy or machine-specific. Throughout this guide, replace `USER@HOST` with your
-Pi's `user@ip` (e.g. `pi@raspberrypi.local`) and `HOST` with its IP or hostname.
+`rsync` is not available in Git Bash on Windows, so use tar-over-ssh from the project root.
+Exclude everything heavy or machine-specific. Throughout this guide, replace `USER@HOST` with
+the Pi's `user@ip` (e.g. `pi@raspberrypi.local`) and `HOST` with its IP or hostname.
 
-**Every block in this guide is bash** — run them in Git Bash, WSL, macOS, or Linux. They fail in
+Every block in this guide is bash, so run them in Git Bash, WSL, macOS, or Linux. They fail in
 Windows PowerShell for two independent reasons: the trailing `\` is a bash line continuation
 PowerShell does not support (it parses each line as its own command, reporting `USER@HOST : The
 term 'USER@HOST' is not recognized as the name of a cmdlet`), and `tar -czf - | ssh` pipes
@@ -124,7 +124,7 @@ tar -czf - \
 ```
 
 This includes `backend/configs/` on purpose, since a first deploy needs the config skeleton. For
-**updates**, use the section-7 commands instead (they preserve the device's camera config).
+updates, use the section-6 commands instead, which preserve the device's camera config.
 
 Also ship this native folder so `install.sh` + `berth.service` are on the Pi, e.g.:
 ```bash
@@ -137,15 +137,15 @@ The ncnn models must be present as `backend/edge_models/*_ncnn_model/` directori
 #### From PowerShell
 
 Stage the archive to a file instead of piping it, and keep every exclude on the one line. Windows
-ships `tar.exe` (bsdtar) since Windows 10, so nothing needs installing. **Run these one at a
-time** — pasted as a block they can merge into a single line, and `backend` fuses onto the next
+ships `tar.exe` (bsdtar) since Windows 10, so nothing needs installing. Run these one at a
+time. Pasted as a block they can merge into a single line, and `backend` fuses onto the next
 command as `backendscp`, which surfaces as a row of `tar.exe: : Couldn't visit directory` errors:
 
 ```powershell
 # 1. Build the archive (project root)
 tar -czf berth-code.tar.gz --exclude=backend/data --exclude=backend/venv --exclude=backend/models --exclude=backend/outputs --exclude=backend/uploads --exclude=__pycache__ --exclude=backend/berth.db* --exclude=backend/*.pt --exclude=backend/.env --exclude=backend/eval_results --exclude=backend/.pytest_cache --exclude=backend/.ruff_cache --exclude=backend/.vscode backend
 
-# 2. Check it before shipping — a failed run still leaves a partial file behind
+# 2. Check it before shipping. A failed run still leaves a partial file behind
 (Get-Item berth-code.tar.gz).Length / 1MB
 tar -tzf berth-code.tar.gz | Select-Object -First 5      # entries should start with backend/
 
@@ -166,9 +166,9 @@ ssh USER@HOST 'mkdir -p ~/berth && tar -xzf ~/native.tar.gz -C ~/berth && rm ~/n
 Remove-Item native.tar.gz
 ```
 
-Plain `scp` and `ssh` invocations work unchanged in PowerShell; only the `tar … | ssh` pipes need
-this treatment. The excludes are unquoted on purpose — PowerShell does not glob-expand arguments,
-so `--exclude=backend/*.pt` reaches `tar` intact.
+Plain `scp` and `ssh` invocations work unchanged in PowerShell. Only the `tar … | ssh` pipes need
+this treatment. The excludes are unquoted on purpose, since PowerShell does not glob-expand
+arguments, so `--exclude=backend/*.pt` reaches `tar` intact.
 
 ### Secrets: the `.env` file
 
@@ -195,12 +195,12 @@ chmod 600 .env
 | `BERTH_API_KEY` | Every protected endpoint is publicly accessible. `main.py` warns at startup. |
 | `BERTH_AUTH_SECRET` | A random signing key is generated per process, so every restart invalidates issued tokens. |
 
-Write values bare — `BERTH_ADMIN_PASSWORD=secret`, **not** `="secret"`; the quotes become part of
-the value and show up later as a 401 on a password that looks correct.
+Write values bare, as `BERTH_ADMIN_PASSWORD=secret` and not `="secret"`. The quotes become part
+of the value and surface later as a 401 on a password that looks correct.
 
 `load_dotenv()` never overrides a variable already in the environment, so anything on the unit's
 `Environment=` line wins over `.env`. Keep the two sets disjoint: tuning in the unit, secrets in
-`.env`. After editing `.env`, `sudo systemctl restart berth` is enough — unlike Docker, where env
+`.env`. After editing `.env`, `sudo systemctl restart berth` is enough, unlike Docker, where env
 is frozen at container creation. Verify:
 
 ```bash
@@ -208,7 +208,9 @@ curl -i -X POST http://HOST:8001/api/auth/login \
   -H 'Content-Type: application/json' -d '{"password":"choose-a-real-password"}'
 ```
 
-`503` = the file was not read; `401` = read but mismatched; `200` with a JSON `token` = working.
+- `503`: the file was not read.
+- `401`: read but mismatched.
+- `200` with a JSON `token`: working.
 
 ### Python environment + smoke test
 
@@ -218,7 +220,7 @@ test in the foreground before enabling the service:
 
 ```bash
 cd ~/berth/backend
-BERTH_DEPLOYMENT=edge BERTH_MODEL=cnn_scratch BERTH_INFERENCE_WORKERS=1 \
+BERTH_DEPLOYMENT=edge BERTH_MODEL=yolo26n_classify BERTH_INFERENCE_WORKERS=1 \
   ~/berth/venv/bin/python main.py
 ```
 
@@ -226,9 +228,10 @@ Expect: SQLite ready → InferencePool (1 worker) → ncnn model loaded → Uvic
 `0.0.0.0:8001`. Check: `curl http://HOST:8001/api/health`.
 
 > **Before first start, audit `backend/configs/cameras.json`.** A camera carried over from dev
-> with `"active": true` starts decoding at boot, and a 1080p stream can eat all RAM before you
-> can log in. Set every camera `"active": false` for first boot, and `"data_gathering": false`
-> unless you want the Zero writing training crops to SD on every inference pass.
+> with `"active": true` starts decoding at boot, and a 1080p stream can exhaust RAM before the
+> login page is reachable. Set every camera `"active": false` for first boot, and
+> `"data_gathering": false` unless the Zero should write training crops to SD on every
+> inference pass.
 
 ## 5. The systemd unit
 
@@ -237,26 +240,26 @@ matters:
 
 | Setting | Why |
 |---|---|
-| `BERTH_INFERENCE_WORKERS=1` | Default pool is `min(cores−1, 4)` = 3; one worker fits the budget. |
-| `BERTH_MAX_ACTIVE_CAMERAS=1` | Edge default is 2; a second decode loop kills a 512 MB box. Over-activation becomes a clean API refusal. |
-| `BERTH_MAX_STREAM_HEIGHT=480` | Caps the YouTube rendition yt-dlp picks. 1080p decode is the #1 OOM cause. |
-| `BERTH_MAX_FRAME_HEIGHT=480` | Downscales *every* source at ingest. A 3200×1800 upload is ~17 MB/frame; 480p is ~1.2 MB. |
+| `BERTH_INFERENCE_WORKERS=1` | Default pool is `min(cores−1, 4)` = 3. One worker fits the budget. |
+| `BERTH_MAX_ACTIVE_CAMERAS=1` | Edge default is 2. A second decode loop exhausts a 512 MB board. Over-activation becomes a clean API refusal. |
+| `BERTH_MAX_STREAM_HEIGHT=720` | Caps the YouTube rendition yt-dlp picks. 1080p decode is the largest single cause of OOM. |
+| `BERTH_MAX_FRAME_HEIGHT=720` | Downscales *every* source at ingest. A 3200×1800 upload is ~17 MB/frame, against ~2.8 MB at 720p. |
 | `BERTH_SNAPSHOT_INTERVAL=15` | Snapshot mode: one frame every 15 s instead of continuous decode. `0`/unset = continuous. The single biggest CPU lever on this hardware. |
-| `MALLOC_ARENA_MAX=2` | glibc otherwise makes up to 8×cores malloc arenas, a notorious RSS inflator for Python servers. |
-| `MemoryHigh=340M` | Reclaim threshold. Idle RSS is ~294 MB; setting this below the real footprint makes the kernel reclaim in a permanent loop. |
+| `MALLOC_ARENA_MAX=2` | glibc otherwise makes up to 8×cores malloc arenas, a known RSS inflator for Python servers. |
+| `MemoryHigh=340M` | Reclaim threshold. Idle RSS is ~294 MB. Setting this below the real footprint makes the kernel reclaim in a permanent loop. |
 | `MemoryMax=420M` + `OOMPolicy=kill` | Hard kill line. 463 MB total − ~80 MB base leaves ~380 MB. |
-| `MemorySwapMax=200M` | `MemoryHigh/Max` cap RAM only. Without this, an over-cap process spills unlimited pages into zram and thrashes instead of dying. This makes the kill actually fire. |
+| `MemorySwapMax=200M` | `MemoryHigh/Max` cap RAM only. Without this, an over-cap process spills unlimited pages into zram and thrashes instead of dying. This makes the kill fire. |
 
 Three more slimming measures are built into the code (no unit knobs needed): the FastAPI
 sync-endpoint threadpool is capped at 8 threads, each per-thread SQLite connection's page cache
 is 256 KB (not 2 MB), and yt-dlp resolves stream URLs in a subprocess instead of pinning
 ~50–80 MB as an in-process import. The worst case is then a dying service (auto-restarted in
-10 s) rather than a dying box.
+10 s) rather than a frozen board.
 
 ## Pi 3B profile
 
-The 3B runs the same install (sections 1–4) with relaxed caps and its own model. Edit
-`berth.service` before installing:
+The 3B runs the same install (sections 1–4) with relaxed memory caps. Edit `berth.service`
+before installing:
 
 ```ini
 MemoryHigh=580M
@@ -264,12 +267,10 @@ MemoryMax=620M
 MemorySwapMax=200M
 ```
 
-And its `.env` — same file and location as [Secrets](#secrets-the-env-file), with two extra
-model-specific lines (regenerate secrets rather than hunt for the live values):
+And its `.env`, the same file and location as [Secrets](#secrets-the-env-file), with two extra
+tuning lines (regenerate the secrets rather than hunt for the live values):
 
 ```
-BERTH_DEPLOYMENT=edge
-BERTH_MODEL=yolo26n_classify
 BERTH_NCNN_THREADS=1
 BERTH_AUTH_TTL=315360000
 BERTH_API_KEY=<regenerate>
@@ -277,10 +278,14 @@ BERTH_ADMIN_PASSWORD=<regenerate>
 BERTH_AUTH_SECRET=<regenerate>
 ```
 
-The 3B runs `yolo26n_classify` (the Zero's unit uses `cnn_scratch`). Same 4× Cortex-A53 CPU as
-the Zero, so every CPU lever (snapshot mode above all) matters just as much; only the memory
-pressure is softer. `BERTH_INFERENCE_WORKERS=2` is affordable on 1 GB if needed, but start with
-the Zero's conservative values.
+`BERTH_DEPLOYMENT` and `BERTH_MODEL` do not belong in this file. The unit already sets both on
+its `Environment=` line, and `load_dotenv()` never overrides a variable already in the
+environment, so `.env` values for them are ignored. Both boards therefore run
+`yolo26n_classify`. To change the model on the 3B, edit `berth.service`.
+
+The 3B has the same 4× Cortex-A53 CPU as the Zero, so every CPU lever (snapshot mode above
+all) matters just as much, and only the memory pressure is softer. `BERTH_INFERENCE_WORKERS=2`
+is affordable on 1 GB if needed, but start with the Zero's conservative values.
 
 ## 6. Updating a deployed device
 
@@ -292,7 +297,7 @@ scp backend/src/inference/video_processor.py USER@HOST:~/berth/backend/src/infer
 ssh USER@HOST 'sudo systemctl restart berth'
 ```
 
-`scp` overwrites exactly those files; everything else stays byte-for-byte.
+`scp` overwrites exactly those files, and everything else stays byte-for-byte.
 
 ### 6b. Full resync: delete-then-extract
 
@@ -320,7 +325,8 @@ device in sync. No pip reinstall unless `requirements.edge.txt` changed.
 
 From PowerShell, use the staged-file form from [From PowerShell](#from-powershell) with the two
 extra excludes above (`--exclude=backend/configs --exclude=backend/cameras.json`), and extract
-with `tar -xzf ~/berth-code.tar.gz -C ~/berth` — no `mkdir`, the tree already exists.
+with `tar -xzf ~/berth-code.tar.gz -C ~/berth`. No `mkdir` is needed, since the tree already
+exists.
 
 ## 7. Reading memory reports
 
@@ -331,23 +337,23 @@ cat /sys/fs/cgroup/system.slice/berth.service/memory.peak
 cat /sys/fs/cgroup/system.slice/berth.service/memory.swap.current
 ```
 
-(`memory.peak` resets on restart. `systemctl show -p MemoryPeak` needs systemd ≥ 254; Bookworm
-has 252, so read the cgroup file.) Whole-box view: `free -h` (watch Swap), `top` (a busy
-`kswapd0` = thrashing), `systemd-cgtop`. Interpreting on the Zero:
+(`memory.peak` resets on restart. `systemctl show -p MemoryPeak` needs systemd ≥ 254 and
+Bookworm has 252, so read the cgroup file.) Whole-board view: `free -h` (watch Swap), `top` (a
+busy `kswapd0` means thrashing), `systemd-cgtop`. Interpreting on the Zero:
 
 - **~294 MiB idle** is normal: the import weight of the full aarch64 stack before any camera.
-- `memory.current` pinned at `MemoryHigh` = perpetual reclaim; raise the cap or shrink work.
+- `memory.current` pinned at `MemoryHigh` means perpetual reclaim. Raise the cap or shrink work.
 - `memory.swap.current` pinned at `MemorySwapMax` = over budget, one allocation from the kill.
 
-## 8. Recovery: the box is frozen / SSH is dead
+## 8. Recovery: the board is frozen / SSH is dead
 
 1. Power-cycle. Nothing else works once SD-swap thrash sets in.
 2. The service auto-starts and may re-enter the same state. From another machine, repeat until
-   it lands (the app needs ~15 s to load models, your window):
+   it lands. The app needs ~15 s to load models, which is the available window:
    ```bash
    ssh USER@HOST 'sudo systemctl stop berth.service'
    ```
-3. Defuse the trigger - usually a camera in `configs/cameras.json` with `"active": true` (video
+3. Defuse the trigger, usually a camera in `configs/cameras.json` with `"active": true` (video
    uploads auto-register *and auto-activate* as `file` cameras).
 4. `sudo systemctl start berth.service` and watch `journalctl -u berth -f`.
 
@@ -372,7 +378,6 @@ ssh USER@HOST 'mkdir -p ~/berth/backend/static && tar -xzf ~/dist.tar.gz -C ~/be
 Remove-Item dist.tar.gz
 ```
 
-Restart the service; the UI is then at `http://HOST:8001/`. Serving pre-built static
+Restart the service, and the UI is then at `http://HOST:8001/`. Serving pre-built static
 files costs almost nothing at runtime. (Same-origin from the device: no `VITE_API_BASE`, no CORS.)
-
 

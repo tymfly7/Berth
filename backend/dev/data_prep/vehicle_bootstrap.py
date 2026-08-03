@@ -21,7 +21,6 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import cv2
-from ultralytics import YOLO
 
 SPLITS = ("train", "val")
 # Names, not ids. A checkpoint's class indices only mean something relative to its
@@ -300,6 +299,10 @@ def build_bundle(images: list, out_root: Path, weights: str, n_frames: int,
                     [cv2.IMWRITE_JPEG_QUALITY, 95])
         if progress:
             progress((i + 1) / total_steps)
+
+    # Imported here, not at module level: the edge image is torch-free and has no
+    # ultralytics, so a top-level import breaks main.py's router import on edge.
+    from ultralytics import YOLO
 
     # Detect on the full-resolution originals, not the downscaled copies.
     model = YOLO(str(weights))

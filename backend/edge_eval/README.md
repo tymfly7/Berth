@@ -5,17 +5,17 @@ boards and on the development laptop. The eval CLI never starts FastAPI/uvicorn,
 so the full CPU and RAM budget goes to inference and the latency numbers are
 clean.
 
-Default runtime is **NCNN and torch-free** — that is what the edge nodes actually
-run, and it is the only runtime that fits on the 512 MB / 1 GB boards. A
-`--runtime torch` path exists for benchmarking the same weights with PyTorch; on
-the Pi it needs a separate ~1.5 GB virtualenv and is documented **last**, in
+The default runtime is NCNN and torch-free, which is what the edge nodes actually
+run and the only runtime that fits on the 512 MB / 1 GB boards. A
+`--runtime torch` path exists for benchmarking the same weights with PyTorch. On
+the Pi it needs a separate ~1.5 GB virtualenv and is documented last, in
 section 10, because nothing else in this guide depends on it.
 
 Every block below is bash (Git Bash / WSL / macOS / Linux) unless marked
-PowerShell. `USER@HOST` is the device login — substitute per board. The install
+PowerShell. `USER@HOST` is the device login, substituted per board. The install
 path is written as `~/berth` (native devices, matching
-[deploy/edge/native/README.md](../../deploy/edge/native/README.md)); the Pi 5
-Docker host uses `~/berth` too but the backend lives inside the image.
+[deploy/edge/native/README.md](../../deploy/edge/native/README.md)). The Pi 5
+Docker host uses `~/berth` too, but there the backend lives inside the image.
 
 ---
 
@@ -27,7 +27,7 @@ Docker host uses `~/berth` too but the backend lives inside the image.
 4. [Outputs](#4-outputs)
 5. [Shipping scripts and datasets to a device](#5-shipping-scripts-and-datasets-to-a-device)
 6. [Running the evaluation](#6-running-the-evaluation)
-7. [Parity check — PyTorch to NCNN drift](#7-parity-check--pytorch-to-ncnn-drift)
+7. [Parity check: PyTorch to NCNN drift](#7-parity-check-pytorch-to-ncnn-drift)
 8. [Collecting results](#8-collecting-results)
 9. [Reading the numbers](#9-reading-the-numbers)
 10. [PyTorch runtime, natively on the Pi 5](#10-pytorch-runtime-natively-on-the-pi-5)
@@ -40,20 +40,20 @@ All four files live in `backend/edge_eval/`.
 
 | File | Runs on | Purpose |
 |---|---|---|
-| `eval_edge.py` | edge devices, laptop | Eval CLI — classifies a crops dataset, writes three CSVs |
+| `eval_edge.py` | edge devices, laptop | Eval CLI. Classifies a crops dataset, writes three CSVs |
 | `edge_check.py` | edge devices | Post-deploy smoke check (model load + one inference), exit 0/1 |
 | `make_goldens.py` | hub / dev (needs torch) | Generates golden probabilities for parity checks |
 | `run_eval.sh` | native devices | Stops the `berth` service, runs the eval, restarts it on exit |
 
-Dependency budget on a device: **numpy + Pillow + ncnn only**, all already present
-in the edge install. No torch, no sklearn, no psutil — system statistics are read
-from `/proc`, `/sys/class/thermal` and `vcgencmd`, each best-effort and left blank
-on failure.
+The dependency budget on a device is numpy, Pillow, and ncnn only, all already
+present in the edge install. There is no torch, sklearn, or psutil. System
+statistics are read from `/proc`, `/sys/class/thermal` and `vcgencmd`, each
+best-effort and left blank on failure.
 
 The scripts bootstrap `sys.path` from `Path(__file__).resolve().parent.parent` so
 they resolve `config` and `src.inference` at `backend/`. They must stay in
-`backend/edge_eval/`; moving them breaks that anchor, and `run_eval.sh`
-additionally leans on the sibling `venv/` and `data/` paths.
+`backend/edge_eval/`, because moving them breaks that anchor, and `run_eval.sh`
+additionally depends on the sibling `venv/` and `data/` paths.
 
 ---
 
@@ -68,9 +68,9 @@ accepted):
     vacant/    *.jpg
 ```
 
-Ship a small fixed subset (roughly 200–500 crops) to the devices; the Zero 2 W
-cannot hold the full set. `--limit N` caps crops per class on top of whatever was
-shipped.
+Ship a small fixed subset (roughly 200–500 crops) to the devices, since the
+Zero 2 W cannot hold the full set. `--limit N` caps crops per class on top of
+whatever was shipped.
 
 ---
 
@@ -84,12 +84,12 @@ python edge_eval/eval_edge.py --dataset <dir> [options]
 |---|---|---|
 | `--dataset` | *(required)* | Directory holding `occupied/` + `vacant/` crops |
 | `--model` | `BERTH_MODEL` | `cnn_scratch` `resnet18` `resnet50` `mobilenetv4s` `mobilenetv4m` `yolo26n_classify` `yolo26s_classify` `yolo26m_classify` |
-| `--runtime` | `ncnn` | `ncnn` (torch-free) or `torch` (lazily imported — see section 10) |
-| `--threads` | `BERTH_NCNN_THREADS` | Inference threads; honoured by both runtimes |
+| `--runtime` | `ncnn` | `ncnn` (torch-free) or `torch` (lazily imported, see section 10) |
+| `--threads` | `BERTH_NCNN_THREADS` | Inference threads, honored by both runtimes |
 | `--limit` | `0` | Max crops per class (`0` = all) |
 | `--device` | hostname | Device tag written into the session directory name and `summary.csv` |
 | `--out` | `backend/eval_results` | Results base directory |
-| `--parity` | *(off)* | Goldens JSON from `make_goldens.py` — see section 7 |
+| `--parity` | *(off)* | Goldens JSON from `make_goldens.py`, see section 7 |
 | `--sample-interval` | `5.0` | System sampler period in seconds |
 
 The decision rule matches production: YOLO classify heads use
@@ -97,7 +97,7 @@ The decision rule matches production: YOLO classify heads use
 class.
 
 Keep `--device` free of underscores where possible (`rpi5-nvme`, not
-`rpi5_nvme`) — the session directory is `<device>_<model>_<runtime>_<timestamp>`
+`rpi5_nvme`). The session directory is `<device>_<model>_<runtime>_<timestamp>`
 and the dev-side run-history UI parses that name positionally.
 
 ---
@@ -116,8 +116,8 @@ One session directory per run:
 `summary.csv` rows from different devices, models and runtimes share the same
 columns, so they concatenate directly for cross-device comparison.
 
-`backend/eval_results/` is gitignored — it is generated output, not part of the
-harness.
+`backend/eval_results/` is gitignored, as it is generated output rather than part
+of the harness.
 
 ---
 
@@ -139,20 +139,21 @@ ssh USER@HOST "tar -xzf ~/eval_bundle.tar.gz -C ~/berth/backend/data && rm ~/eva
 
 The full resync in
 [deploy/edge/native/README.md](../../deploy/edge/native/README.md) also ships
-`edge_eval/`; the `scp` above is only needed to push the eval scripts without a
+`edge_eval/`. The `scp` above is only needed to push the eval scripts without a
 full resync.
 
 `eval_bundle.tar.gz` is built on the dev machine from the two crop sets and is
 gitignored. After extraction the datasets are:
 
-- `--dataset data/t12lot/crops_classifier` — the cross-lot benchmark set. Use
-  `--parity eval_results/goldens_<model>.json` here; golden filenames only match
-  this set.
-- `--dataset data/classify_split/test` — the held-out test split of the training
-  lot. No parity. Use `--limit` on the Zero 2 W, the full split is 14,686 crops.
+- `--dataset data/t12lot/crops_classifier` is the cross-lot benchmark set. Use
+  `--parity eval_results/goldens_<model>.json` here, since golden filenames only
+  match this set.
+- `--dataset data/classify_split/test` is the held-out test split of the training
+  lot. No parity applies. Use `--limit` on the Zero 2 W, because the full split
+  is 14,686 crops.
 
 If bash reports `bad interpreter` when running `run_eval.sh`, the file picked up
-CRLF line endings in transit — `dos2unix edge_eval/run_eval.sh` on the device.
+CRLF line endings in transit. Run `dos2unix edge_eval/run_eval.sh` on the device.
 
 ### 5.2 Pi 5 (Docker)
 
@@ -177,16 +178,16 @@ Datasets are then addressed inside the container as
 ## 6. Running the evaluation
 
 Stop the running service or container first on every device. The eval is a
-latency measurement; a live inference loop competing for the same cores makes the
-numbers meaningless.
+latency measurement, and a live inference loop competing for the same cores makes
+the numbers meaningless.
 
-### 6.1 Pi 5 — Docker
+### 6.1 Pi 5 (Docker)
 
 ```bash
-# 1. Stop the API container (frees the cores; compose run does not publish ports)
+# 1. Stop the API container (frees the cores, compose run does not publish ports)
 docker compose -f deploy/edge/docker/docker-compose.rpi.yml stop berth-rpi
 
-# 2. Run the eval — the command override replaces the API entrypoint, no server starts
+# 2. Run the eval. The command override replaces the API entrypoint, no server starts
 docker compose -f deploy/edge/docker/docker-compose.rpi.yml run --rm --no-deps \
   -v "$PWD/eval_data:/app/eval_data" \
   -v "$PWD/backend/edge_eval/eval_edge.py:/app/edge_eval/eval_edge.py" \
@@ -204,9 +205,9 @@ CSVs land in `./eval_data/results/` on the host. The two `-v` lines for the
 scripts can be dropped once the image has been rebuilt with the current backend.
 
 `vcgencmd` is not present in the container, so `throttled_hex` stays blank on
-this path; temperature still works via `/sys/class/thermal`.
+this path. Temperature still works via `/sys/class/thermal`.
 
-### 6.2 Pi 3B — native (systemd)
+### 6.2 Pi 3B (native, systemd)
 
 ```bash
 cd ~/berth/backend
@@ -223,10 +224,10 @@ Smoke check (the service can stay running):
 venv/bin/python edge_eval/edge_check.py
 ```
 
-### 6.3 Pi Zero 2 W — native (systemd)
+### 6.3 Pi Zero 2 W (native, systemd)
 
-Same wrapper, but stopping the service matters most here — it frees nearly all
-the RAM — and the dataset must stay small:
+Same wrapper, but stopping the service matters most here, because it frees nearly
+all the RAM. The dataset must also stay small:
 
 ```bash
 cd ~/berth/backend
@@ -234,14 +235,14 @@ cd ~/berth/backend
   --threads 3 --limit 250 --device rpizero2w
 ```
 
-Use `yolo26n_classify` or `cnn_scratch` only; the m-scale model is too heavy for
-this board. Watch `mem_available_mb` in `system.csv` — if it approaches zero the
-run swapped and the latency numbers are void.
+Use `yolo26n_classify` or `cnn_scratch` only, as the m-scale model is too heavy
+for this board. Watch `mem_available_mb` in `system.csv`. If it approaches zero,
+the run swapped and the latency numbers are void.
 
 ### 6.4 Development laptop (baseline)
 
 No service to stop, so the CLI is called directly. Plug the machine in, select a
-high-performance power plan, and close heavy applications; note the CPU model
+high-performance power plan, and close heavy applications. Note the CPU model
 alongside the results.
 
 ```powershell
@@ -249,14 +250,14 @@ alongside the results.
 venv\Scripts\python.exe edge_eval\eval_edge.py --dataset data\classify_split\test --model yolo26n_classify --runtime ncnn --threads 3 --limit 500 --device laptop
 ```
 
-`pip show ncnn` first — the training venv does not necessarily have it; install
-with `pip install ncnn` if missing. If the sampler columns (`cpu_percent`,
-`rss_mb`) come out blank on Windows that is acceptable; latency is the point of
-the laptop baseline.
+Run `pip show ncnn` first, because the training venv does not necessarily have it.
+Install with `pip install ncnn` if missing. If the sampler columns (`cpu_percent`,
+`rss_mb`) come out blank on Windows that is acceptable, since latency is the point
+of the laptop baseline.
 
 ---
 
-## 7. Parity check — PyTorch to NCNN drift
+## 7. Parity check: PyTorch to NCNN drift
 
 Confirms the NCNN export did not change the model's predictions.
 
@@ -281,7 +282,7 @@ Confirms the NCNN export did not change the model's predictions.
 Anything worse points at the NCNN export or a preprocessing mismatch, not at the
 device.
 
-A passing parity run is what licenses the shortcut in section 9: once on-device
+A passing parity run is what permits the shortcut in section 9. Once on-device
 probabilities match the dev-side model, accuracy is established and later runs
 can use a subset purely for latency.
 
@@ -317,8 +318,8 @@ Keep one subdirectory per round (`rpi5/`, `rpi3b/`, `rpizero/`, `laptop/`) so th
 Check these before trusting a run:
 
 - `throttled_hex` is `0x0` for the whole of `system.csv`. A non-zero value means
-  the board thermal-throttled mid-run and the latency figures are suspect —
-  rerun after a cool-down.
+  the board thermal-throttled mid-run and the latency figures are suspect.
+  Rerun after a cool-down.
 - `mem_available_mb` never approaches zero. If it did, the run swapped to SD and
   the latency is measuring the card, not the model.
 - `n_images` is what was intended (`--limit 500` on a two-class set gives 1000).
@@ -338,13 +339,13 @@ across runs unless the caches were dropped between them.
 
 ## 10. PyTorch runtime, natively on the Pi 5
 
-Run this **last**, and only when a torch-versus-NCNN comparison is actually
-wanted. Nothing above depends on it, and it is the one step that puts a ~1.5 GB
-wheel set on the board.
+Run this last, and only when a torch-versus-NCNN comparison is required. Nothing
+above depends on it, and it is the one step that puts a ~1.5 GB wheel set on the
+board.
 
-Scope: **Pi 5 only.** PyTorch is not attempted on the Pi 3B or the Zero 2 W —
+Scope: Pi 5 only. PyTorch is not attempted on the Pi 3B or the Zero 2 W, because
 1 GB and 512 MB of RAM do not realistically hold the torch runtime alongside a
-model. That is a finding in itself: NCNN is the only runtime that runs on those
+model. That is itself a result: NCNN is the only runtime that runs on those
 boards at all.
 
 Why native rather than Docker: the edge image is deliberately torch-free
@@ -411,10 +412,10 @@ venv-torch/bin/python edge_eval/eval_edge.py --dataset ~/berth-torch/eval_data/c
 docker start <berth-container-name>
 ```
 
-`resnet50` is the slow one — on the order of a few minutes for 1000 crops. Watch
-`system.csv` afterwards; a non-zero `throttled_hex` voids that model's run.
+`resnet50` is the slow one, on the order of a few minutes for 1000 crops. Watch
+`system.csv` afterwards, since a non-zero `throttled_hex` voids that model's run.
 
-**Thread-count gotcha, already handled in the runner:**
+**Thread count, already handled in the runner.**
 `src/inference/torch_classifier.py` calls `torch.set_num_threads(1)` at module
 import, so `eval_edge.py` re-applies `torch.set_num_threads(args.threads)` after
 that import ([eval_edge.py:251-253](eval_edge.py#L251-L253)). Without it the
@@ -425,7 +426,7 @@ would be meaningless. Any reworking of that branch must preserve the ordering.
 
 A torch row is only comparable to an NCNN row measured on the **same crops with
 the same flags**. Earlier NCNN sessions run on the full split cannot be paired
-with a `--limit 500` torch run; rerun NCNN with the matching flags:
+with a `--limit 500` torch run. Rerun NCNN with the matching flags:
 
 ```bash
 ./edge_eval/run_eval.sh --dataset data/classify_split/test --model yolo26n_classify \

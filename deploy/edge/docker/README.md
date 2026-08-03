@@ -6,9 +6,9 @@ this board the Docker daemon overhead (~100–150 MB) is affordable. On the 512 
 
 | File | What it is |
 |------|------------|
-| `Dockerfile.rpi` | the image |
-| `docker-compose.rpi.yml` | Pi 5, up to 4 cameras |
-| `README.md` | This guide. |
+| `Dockerfile.rpi` | The image |
+| `docker-compose.rpi.yml` | Pi 5 profile, up to 3 active cameras |
+| `README.md` | This guide |
 
 **Run all commands from the repo root**: the build context is the root (the Dockerfile does
 `COPY backend/` and `COPY frontend/`), so the compose file sets `build.context: ../../..`.
@@ -22,12 +22,12 @@ Publishes host port **8001** → container 8000.
 
 ### Cameras
 
-The container does **not** claim a specific webcam at start. It bind-mounts the host `/dev` and
+The container does not claim a specific webcam at start. It bind-mounts the host `/dev` and
 grants V4L2 (character major 81) through `device_cgroup_rules`, so a USB camera plugged in
-*after* the service is running is opened the moment a camera is activated in the UI — no
-container recreate, and the service still starts on a Pi with no camera attached at all.
-(A fixed `devices: - /dev/video0:/dev/video0` entry fails the container outright when the node
-is absent, which is why it is not used.)
+*after* the service is running is opened the moment a camera is activated in the UI. No
+container recreate is needed, and the service still starts on a Pi with no camera attached at
+all. A fixed `devices: - /dev/video0:/dev/video0` entry fails the container outright when the
+node is absent, which is why it is not used.
 
 Ribbon/CSI cameras on Bookworm go through libcamera rather than a plain `/dev/video0`, and this
 image does not carry the libcamera stack. Use a USB webcam or a network stream.
@@ -35,8 +35,8 @@ image does not carry the libcamera stack. Use a USB webcam or a network stream.
 ## Secrets: the `.env` file
 
 Nothing secret is baked into the image. `config.py` reads three env vars at every start, and
-the compose file interpolates them as `${VAR:-}` — which **defaults to empty rather than
-failing**, so a missing file produces a silently broken login, not an error:
+the compose file interpolates them as `${VAR:-}`, which defaults to empty rather than failing.
+A missing file therefore produces a silently broken login rather than an error:
 
 | Var | If unset |
 |-----|----------|
@@ -44,8 +44,8 @@ failing**, so a missing file produces a silently broken login, not an error:
 | `BERTH_API_KEY` | Every protected endpoint is publicly accessible. `main.py` warns at startup. |
 | `BERTH_AUTH_SECRET` | A random signing key is generated per process, so every container restart invalidates issued tokens. |
 
-The file is **created on the device**, never shipped from the repo (`.env` and `.env_edge` are
-gitignored). On the Pi, put it next to the compose file:
+The file is created on the device and never shipped from the repo (`.env` is gitignored). On
+the Pi, put it next to the compose file:
 
 ```bash
 cd ~/berth                      # wherever docker-compose.rpi.yml lives
@@ -57,20 +57,22 @@ EOF
 chmod 600 .env
 ```
 
-Write values bare: `BERTH_ADMIN_PASSWORD=secret`, **not** `="secret"` — Compose keeps the quotes
-as part of the value, which shows up later as a 401 on a password that looks correct.
+Write values bare, as `BERTH_ADMIN_PASSWORD=secret` and not `="secret"`. Compose keeps the
+quotes as part of the value, which surfaces later as a 401 on a password that looks correct.
 
-Compose auto-loads a file named `.env` from the compose file's directory. Running from anywhere
-else, name it explicitly — this is also how the repo-root `.env_edge` is used when building
-from a checkout:
+Compose auto-loads a file named `.env` from the directory it is run in. On the Pi that is
+`~/berth`, next to the compose file. Building from a checkout instead, it is the repo root,
+because compose is run from there:
 
 ```bash
-docker compose --env-file .env_edge -f deploy/edge/docker/docker-compose.rpi.yml up -d
+docker compose -f deploy/edge/docker/docker-compose.rpi.yml up -d
 ```
 
+The name is `.env` in both places.
+
 **Env is frozen into the container at creation time.** Editing `.env` does nothing to a running
-container: `docker compose restart` keeps the old values, only `up -d` recreates it. Verify what
-the container actually received, and what login does with it:
+container. `docker compose restart` keeps the old values and only `up -d` recreates it. Verify
+what the container actually received, and what login does with it:
 
 ```bash
 docker exec berth-berth-rpi-1 printenv | grep BERTH_
@@ -78,13 +80,14 @@ curl -i -X POST http://localhost:8001/api/auth/login \
   -H 'Content-Type: application/json' -d '{"password":"choose-a-real-password"}'
 ```
 
-`503` = the password never arrived; `401` = it arrived but does not match (check for stray
-quotes or whitespace); `200` with a JSON `token` = working.
+- `503`: the password never arrived.
+- `401`: it arrived but does not match. Check for stray quotes or whitespace.
+- `200` with a JSON `token`: working.
 
 ## Cross-building the image tarball
 
-Build on x86 and ship to the Pi. Both commands run from the **repo root** (the build context is
-the root), but the tarball is written here, next to the compose file that consumes it:
+Build on x86 and ship to the Pi. Both commands run from the repo root, since the build context
+is the root, but the tarball is written here, next to the compose file that consumes it:
 
 ```bash
 docker buildx build --platform linux/arm64 -t berth-rpi:latest \
@@ -92,13 +95,11 @@ docker buildx build --platform linux/arm64 -t berth-rpi:latest \
 docker save berth-rpi:latest | gzip > deploy/edge/docker/berth-rpi.tar.gz
 ```
 
-`*.tar.gz` is gitignored at any depth, so the tarball is ignored here just as it was at the
-root, and `.dockerignore` excludes both `deploy/` and `*.tar.gz`, so a tarball sitting in this
+`*.tar.gz` is gitignored at any depth, so the tarball is ignored here just as it is at the
+root. `.dockerignore` excludes both `deploy/` and `*.tar.gz`, so a tarball sitting in this
 folder never ends up inside the next image.
 
-Then ship it and load it on the Pi:
-
-The Pi needs no repo checkout — only the image, the compose file, and a `.env`:
+The Pi needs no repo checkout, only the image, the compose file, and a `.env`:
 
 ```bash
 # From the dev machine: ship the image and the compose file
@@ -106,21 +107,21 @@ ssh USER@HOST 'mkdir -p ~/berth'
 scp deploy/edge/docker/berth-rpi.tar.gz \
     deploy/edge/docker/docker-compose.rpi.yml USER@HOST:~/berth/
 
-# On the Pi — load the image (docker load reads the gzip directly)
+# On the Pi: load the image (docker load reads the gzip directly)
 cd ~/berth
 docker load < berth-rpi.tar.gz
 
-# Create .env here first — see "Secrets" above — then:
+# Create .env here first, see "Secrets" above, then:
 docker compose -f docker-compose.rpi.yml up -d   # no --build: uses the loaded image
 ```
 
 `docker-compose.rpi.yml` references `image: berth-rpi:latest`, so once the image is loaded the
 compose run picks it up without rebuilding. Its `build.context: ../../..` points at a repo tree
-that does not exist on the Pi, which is harmless while the image is present — but if the load
-failed or the tag differs, Compose falls back to building and fails with a confusing missing-path
+that does not exist on the Pi, which is harmless while the image is present. If the load failed
+or the tag differs, Compose falls back to building and fails with a confusing missing-path
 error rather than "no such image". `docker images | grep berth-rpi` is the quick check.
 
 A native build on the Pi
 (`docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .`) also works, just
-slower. The `.tar.gz` is gitignored; rebuild it after any backend or frontend change so the
+slower. The `.tar.gz` is gitignored. Rebuild it after any backend or frontend change so the
 image does not go stale.

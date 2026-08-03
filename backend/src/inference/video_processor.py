@@ -418,22 +418,32 @@ class VideoProcessor:
 
         stop_grab = threading.Event()
 
-        def _fps_interval(cap) -> float:
+        # Content decimation. The reader runs unthrottled, so frames arrive in
+        # segment-sized bursts. Pushing every frame of a 30 fps source into a
+        # buffer the display drains at STREAM_FPS leaves the trim discarding in
+        # clumps, which shows as jerky motion. Taking every Nth frame keeps the
+        # spacing even in content time. A source that does not report its FPS
+        # falls back to 1, which is the old behaviour.
+        def _stride(cap) -> int:
             fps = cap.get(cv2.CAP_PROP_FPS) if cap else 0
-            return 1.0 / fps if 1 <= fps <= 120 else 0.0
+            if not 1 <= fps <= 120:
+                return 1
+            return max(1, round(fps / config.STREAM_FPS))
 
         def _grab():
             fails = 0
-            frame_interval = _fps_interval(cap_holder[0])
+            seen = 0
+            stride = _stride(cap_holder[0])
+            logger.info(f"YouTube ingest stride {stride} for '{self._source}'")
             while not stop_grab.is_set():
                 cap = cap_holder[0]
                 if cap is None:
                     new = self._open_capture(force_refresh=True)
                     if new:
                         cap_holder[0] = new
-                        frame_interval = _fps_interval(new)
+                        stride = _stride(new)
                         fails = 0
-                        logger.info(f"YouTube stream connected: {self._source}")
+                        logger.info(f"YouTube stream connected: {self._source}, stride {stride}")
                     else:
                         stop_grab.wait(2.0)
                     continue
@@ -441,9 +451,16 @@ class VideoProcessor:
                 ret, frame = cap.read()
                 if ret:
                     fails = 0
-                    self._ingest_raw_frame(frame)
-                    if frame_interval:
-                        time.sleep(frame_interval)
+                    # No pacing sleep here on purpose. Throttling the reader to
+                    # the source FPS keeps ffmpeg's demuxer empty, so every HLS
+                    # segment boundary becomes a cold fetch the reader blocks
+                    # on. Reading as fast as the stream delivers lets ffmpeg
+                    # prefetch the next segment while the display drains the
+                    # jitter buffer. cap.read() blocks on the fetch, so this
+                    # cannot spin.
+                    seen += 1
+                    if seen % stride == 0:
+                        self._ingest_raw_frame(frame)
                 else:
                     fails += 1
                     if fails >= 3:
