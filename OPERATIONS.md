@@ -1,8 +1,6 @@
 # Berth: Operations and Field Notes
 
-Operator-facing tips and hardening notes. The README covers the factual "how to run
-and deploy". This file collects the judgment-call advice that does not belong in a
-reference.
+Operator-facing tips and hardening notes. The README covers how to run and deploy.
 
 ---
 
@@ -10,10 +8,6 @@ reference.
 
 ### USB cameras
 
-- OpenCV reads the device server-side, so the camera must be plugged into the host
-  running the backend rather than the machine the browser runs on.
-- The source is the integer device index: `0` for the first or built-in camera,
-  then `1`, `2`, and so on for additional ones.
 - If the index is wrong, nothing opens and the camera shows offline. Try the next
   index. Only one application can hold a given camera at a time.
 
@@ -27,15 +21,11 @@ reference.
 - Prefer the camera's lower-resolution sub-stream (e.g. Hikvision `Channels/102`,
   Dahua `subtype=1`). Parking detection does not need full resolution, and the
   sub-stream is far lighter on CPU and bandwidth.
-- Keep credentials out of `cameras.json` by setting the source as
-  `BERTH_CAM_SOURCE_<CAMERA_ID>` (uppercase, hyphens replaced by underscores). The
-  registry uses it at runtime and the on-disk config stays credential-free.
 
 ### YouTube live
 
-- Paste a YouTube live URL. The backend resolves it to an HLS stream cached for
-  `BERTH_YT_CACHE_TTL` seconds. If a stream starts erroring, the URL may have
-  expired, and the cache refreshes on the next resolve.
+- If a stream starts erroring, the URL may have expired. The cache refreshes on the
+  next resolve.
 
 ---
 
@@ -43,14 +33,10 @@ reference.
 
 - The detector has no notion of where the lot ends. It reports every vehicle it
   sees, and anything not sitting squarely inside a slot polygon is flagged. On a
-  feed that includes a road or a neighbouring property, passing traffic will be
-  flagged. This is deliberate, and the admin dismisses what is not a violation.
+  feed that includes a road or a neighboring property, passing traffic will be
+  flagged.
 - Drawing slots over the whole parkable area is the cheapest way to cut false
   flags, because any vehicle outside every polygon reads as `outside`.
-- Two reasons share the Misparked bucket. `straddling` fires when at least 35% of
-  a vehicle falls inside each of two or more slots. `outside` fires when the best
-  single-slot overlap falls below `park_thresh`, which covers both a vehicle half
-  out of a slot and one with no slot overlap at all.
 - `park_thresh` is the tuning knob, and the code default is 0.60. Raise it to be
   stricter about what counts as properly parked, lower it to tolerate loosely
   drawn slots. Slots drawn generously larger than the vehicles using them push
@@ -66,9 +52,7 @@ reference.
 ## Data gathering captures
 
 - Each camera has a `data_gathering` flag, off by default, toggled per camera from
-  the registry or through `POST /api/cameras/{camera_id}/data-gathering`. It exists
-  to collect real frames from a deployed lot for labelling and retraining, not as
-  a debugging aid.
+  the registry or through `POST /api/cameras/{camera_id}/data-gathering`.
 - When enabled, one frame is written every `BERTH_CAPTURE_INTERVAL` seconds
   (default 600) to `BERTH_CAPTURE_DIR/<camera name>/<DD-MM-YY>/`.
 - The frame saved is the raw source frame, captured before the downscale to the
@@ -87,8 +71,7 @@ reference.
 ## Security hardening
 
 Auth is intentionally coarse. There are no per-user identities, roles, or audit
-trail. Admin access is a single shared password, and machine-to-machine clients use
-a single shared service key.
+trail.
 
 Before any network-facing deployment:
 

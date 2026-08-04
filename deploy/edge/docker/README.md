@@ -1,8 +1,8 @@
 # Edge: Docker (Pi 5)
 
-Arm64 image (`berth-rpi:latest`, torch-free / NCNN) for the **Raspberry Pi 5** (≥ 4 GB). On
-this board the Docker daemon overhead (~100–150 MB) is affordable. On the 512 MB / 1 GB boards
-(Zero 2 W, 3B) it is not, so those run directly under systemd: see [`../native/`](../native/).
+Arm64 image (`berth-rpi:latest`, torch-free / NCNN) for the **Raspberry Pi 5** (≥ 4 GB). The
+512 MB / 1 GB boards (Zero 2 W, 3B) run directly under systemd instead: see
+[`../native/`](../native/).
 
 | File | What it is |
 |------|------------|
@@ -10,8 +10,8 @@ this board the Docker daemon overhead (~100–150 MB) is affordable. On the 512 
 | `docker-compose.rpi.yml` | Pi 5 profile, up to 3 active cameras |
 | `README.md` | This guide |
 
-**Run all commands from the repo root**: the build context is the root (the Dockerfile does
-`COPY backend/` and `COPY frontend/`), so the compose file sets `build.context: ../../..`.
+**Run all commands from the repo root**: it is the build context, so the compose file sets
+`build.context: ../../..`.
 
 ```bash
 # Pi 5
@@ -26,8 +26,7 @@ The container does not claim a specific webcam at start. It bind-mounts the host
 grants V4L2 (character major 81) through `device_cgroup_rules`, so a USB camera plugged in
 *after* the service is running is opened the moment a camera is activated in the UI. No
 container recreate is needed, and the service still starts on a Pi with no camera attached at
-all. A fixed `devices: - /dev/video0:/dev/video0` entry fails the container outright when the
-node is absent, which is why it is not used.
+all.
 
 Ribbon/CSI cameras on Bookworm go through libcamera rather than a plain `/dev/video0`, and this
 image does not carry the libcamera stack. Use a USB webcam or a network stream.
@@ -86,18 +85,14 @@ curl -i -X POST http://localhost:8001/api/auth/login \
 
 ## Cross-building the image tarball
 
-Build on x86 and ship to the Pi. Both commands run from the repo root, since the build context
-is the root, but the tarball is written here, next to the compose file that consumes it:
+Build on x86 and ship to the Pi. Both commands run from the repo root, but the tarball is
+written here, next to the compose file that consumes it:
 
 ```bash
 docker buildx build --platform linux/arm64 -t berth-rpi:latest \
   -f deploy/edge/docker/Dockerfile.rpi . --load
 docker save berth-rpi:latest | gzip > deploy/edge/docker/berth-rpi.tar.gz
 ```
-
-`*.tar.gz` is gitignored at any depth, so the tarball is ignored here just as it is at the
-root. `.dockerignore` excludes both `deploy/` and `*.tar.gz`, so a tarball sitting in this
-folder never ends up inside the next image.
 
 The Pi needs no repo checkout, only the image, the compose file, and a `.env`:
 
@@ -117,9 +112,9 @@ docker compose -f docker-compose.rpi.yml up -d   # no --build: uses the loaded i
 
 `docker-compose.rpi.yml` references `image: berth-rpi:latest`, so once the image is loaded the
 compose run picks it up without rebuilding. Its `build.context: ../../..` points at a repo tree
-that does not exist on the Pi, which is harmless while the image is present. If the load failed
-or the tag differs, Compose falls back to building and fails with a confusing missing-path
-error rather than "no such image". `docker images | grep berth-rpi` is the quick check.
+that does not exist on the Pi. If the load failed or the tag differs, Compose falls back to
+building and fails with a confusing missing-path error rather than "no such image".
+`docker images | grep berth-rpi` is the quick check.
 
 A native build on the Pi
 (`docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .`) also works, just

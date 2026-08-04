@@ -1,19 +1,21 @@
-"""ROI-driven batch auto-labeling — crop every ROI across a date-foldered image
-directory, pre-label occupied/vacant with the active classifier, and emit both
-classifier training crops (occupied/ vacant/ folders) and a manifest that can be
-exported to a YOLO detector dataset.
+"""Auto-labeling for the two training datasets.
+
+ROI-driven batch labeling crops every ROI across a date-foldered image directory,
+pre-labels occupied/vacant with the active classifier, and emits classifier
+training crops (occupied/ vacant/ folders) plus a reviewable manifest.
+
+Vehicle bootstrapping is the detector path and takes no ROIs. It annotates whole
+frames, which is the only way a vehicle parked outside the marked bays can be
+represented. Its bundle is finished off by dev/data_prep/build_vehicle_dataset.py.
 
 Reuses the exact crop+classify path from analyze-roi (inference.py), the ROI store,
-the operation-progress registry, and the existing yolo_converter — no new crop,
-classify, or detector-conversion code.
+and the operation-progress registry, so there is no new crop or classify code.
 """
 
 import base64
 import json
 import logging
-import random
 import re
-import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,7 +30,6 @@ from src.api.deps import verify_api_key
 from src.api.operations import finish_op, register_op, update_op_progress
 from src.api.processor_service import processor_service
 from dev.data_prep.vehicle_bootstrap import build_bundle
-from dev.data_prep.yolo_converter import build_yolo_detect_dataset
 from src.roi.roi_crop import crop_roi
 from src.roi.roi_store import RoiStore
 
@@ -330,80 +331,6 @@ def reassign_crop(lot_id: str, crop_id: str, status: str = Query(...)):
         rec["crop_path"] = new_rel
         _save_manifest(lot_id, manifest)
         return {"crop_id": crop_id, "status": status, "counts": manifest["counts"]}
-
-
-# ── Detector export ──────────────────────────────────────
-@router.post("/api/label-batch/{lot_id}/export-detector", dependencies=[Depends(verify_api_key)])
-def export_detector(lot_id: str):
-    """Reshape the current (post-curation) manifest into the converter's schema
-    and build a YOLO detection dataset. Only confident occupied+vacant crops are
-    included (review/ and too_dark/ are excluded)."""
-    _validate_lot(lot_id)
-    manifest = _load_manifest(lot_id)
-
-    # Group confident crops by source image.
-    by_img: dict[str, dict] = {}
-    for c in manifest["crops"]:
-        if c["bucket"] not in ("occupied", "vacant"):
-            continue
-        entry = by_img.setdefault(c["source_image"], {"rois": [], "occ": []})
-        entry["rois"].append(c["polygon"])
-        entry["occ"].append(c["bucket"] == "occupied")
-    if not by_img:
-        raise HTTPException(400, "No confident occupied/vacant crops to export.")
-
-    # Deterministic train/val/test split over the unique source images.
-    names = sorted(by_img.keys())
-    random.Random(42).shuffle(names)
-    n = len(names)
-    n_tr = int(n * config.TRAIN_SPLIT)
-    n_va = int(n * config.VAL_SPLIT)
-    split_names = {"train": names[:n_tr], "valid": names[n_tr:n_tr + n_va], "test": names[n_tr + n_va:]}
-
-    # Stage full frames (flat, basename) + annotations.json for the converter.
-    staging = _out_root(lot_id) / "detector_src"
-    img_out = staging / "images"
-    if staging.exists():
-        shutil.rmtree(staging)
-    img_out.mkdir(parents=True, exist_ok=True)
-
-    annotations: dict = {}
-    src_base = Path(manifest.get("image_dir") or (config.DATA_DIR / lot_id))
-    used: set[str] = set()  # flat basenames already taken in img_out (case-insensitive)
-
-    def _unique_name(rel: str) -> str:
-        """Flat basename for img_out; on collision append _1, _2, … to the stem so
-        same-named frames from different date folders don't overwrite each other."""
-        stem, suffix = Path(rel).stem, Path(rel).suffix
-        name, i = f"{stem}{suffix}", 1
-        while name.lower() in used:
-            name, i = f"{stem}_{i}{suffix}", i + 1
-        used.add(name.lower())
-        return name
-
-    for split, split_imgs in split_names.items():
-        file_names, rois_list, occ_list = [], [], []
-        for rel in split_imgs:
-            src = src_base / rel
-            if not src.exists():
-                continue
-            base = _unique_name(rel)
-            shutil.copy2(src, img_out / base)
-            file_names.append(base)
-            rois_list.append(by_img[rel]["rois"])
-            occ_list.append(by_img[rel]["occ"])
-        annotations[split] = {"file_names": file_names, "rois_list": rois_list,
-                              "occupancy_list": occ_list}
-    with open(staging / "annotations.json", "w") as f:
-        json.dump(annotations, f)
-
-    out_dir = config.YOLO_DATASET_DIR
-    yaml_path = build_yolo_detect_dataset(source_dir=staging, out_dir=out_dir, force=True)
-
-    counts = {s: len(annotations[s]["file_names"]) for s in ("train", "valid", "test")}
-    counts["total_images"] = sum(counts.values())
-    counts["total_labels"] = sum(len(e["rois"]) for e in by_img.values())
-    return {"dataset_yaml": str(yaml_path), "counts": counts}
 
 
 # ── Read-only brightness calibration ─────────────────────

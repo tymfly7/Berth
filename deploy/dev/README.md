@@ -17,5 +17,5 @@ For the web UI during dev, run the Vite dev server in [`frontend/`](../../fronte
 (`npm install && npm run dev`) and point it at the backend via `frontend/.env.local`
 (`VITE_API_BASE=http://localhost:8001`).
 
-This is the unconstrained profile. Torch is available, every model loads, and no memory caps
-apply. For the constrained profiles see [`../docker/`](../docker/) and [`../edge/`](../edge/).
+Torch is available, every model loads, and no memory caps apply. For the constrained profiles
+see [`../docker/`](../docker/) and [`../edge/`](../edge/).

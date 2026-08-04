@@ -1,21 +1,17 @@
 # Edge Device Evaluation
 
 Standalone, API-off benchmarking of the exported classifiers on the Raspberry Pi
-boards and on the development laptop. The eval CLI never starts FastAPI/uvicorn,
-so the full CPU and RAM budget goes to inference and the latency numbers are
-clean.
+boards and on the development laptop. The eval CLI never starts FastAPI/uvicorn.
 
 The default runtime is NCNN and torch-free, which is what the edge nodes actually
 run and the only runtime that fits on the 512 MB / 1 GB boards. A
-`--runtime torch` path exists for benchmarking the same weights with PyTorch. On
-the Pi it needs a separate ~1.5 GB virtualenv and is documented last, in
-section 10, because nothing else in this guide depends on it.
+`--runtime torch` path exists for benchmarking the same weights with PyTorch, and
+is documented in section 10.
 
 Every block below is bash (Git Bash / WSL / macOS / Linux) unless marked
 PowerShell. `USER@HOST` is the device login, substituted per board. The install
-path is written as `~/berth` (native devices, matching
-[deploy/edge/native/README.md](../../deploy/edge/native/README.md)). The Pi 5
-Docker host uses `~/berth` too, but there the backend lives inside the image.
+path is `~/berth` on every device, matching
+[deploy/edge/native/README.md](../../deploy/edge/native/README.md).
 
 ---
 
@@ -46,14 +42,12 @@ All four files live in `backend/edge_eval/`.
 | `run_eval.sh` | native devices | Stops the `berth` service, runs the eval, restarts it on exit |
 
 The dependency budget on a device is numpy, Pillow, and ncnn only, all already
-present in the edge install. There is no torch, sklearn, or psutil. System
-statistics are read from `/proc`, `/sys/class/thermal` and `vcgencmd`, each
-best-effort and left blank on failure.
+present in the edge install. System statistics are read from `/proc`,
+`/sys/class/thermal` and `vcgencmd`, each best-effort and left blank on failure.
 
-The scripts bootstrap `sys.path` from `Path(__file__).resolve().parent.parent` so
-they resolve `config` and `src.inference` at `backend/`. They must stay in
-`backend/edge_eval/`, because moving them breaks that anchor, and `run_eval.sh`
-additionally depends on the sibling `venv/` and `data/` paths.
+The scripts must stay in `backend/edge_eval/`. They bootstrap `sys.path` from
+`Path(__file__).resolve().parent.parent`, and `run_eval.sh` additionally depends
+on the sibling `venv/` and `data/` paths.
 
 ---
 
@@ -116,8 +110,7 @@ One session directory per run:
 `summary.csv` rows from different devices, models and runtimes share the same
 columns, so they concatenate directly for cross-device comparison.
 
-`backend/eval_results/` is gitignored, as it is generated output rather than part
-of the harness.
+`backend/eval_results/` is gitignored.
 
 ---
 
@@ -139,18 +132,21 @@ ssh USER@HOST "tar -xzf ~/eval_bundle.tar.gz -C ~/berth/backend/data && rm ~/eva
 
 The full resync in
 [deploy/edge/native/README.md](../../deploy/edge/native/README.md) also ships
-`edge_eval/`. The `scp` above is only needed to push the eval scripts without a
-full resync.
+`edge_eval/`.
 
-`eval_bundle.tar.gz` is built on the dev machine from the two crop sets and is
-gitignored. After extraction the datasets are:
+No dataset is distributed with the repository, so `eval_bundle.tar.gz` is built on
+the dev machine from whichever crop sets are being benchmarked, and it is
+gitignored. Two kinds of set are worth shipping, and the commands throughout this
+guide use them:
 
-- `--dataset data/t12lot/crops_classifier` is the cross-lot benchmark set. Use
-  `--parity eval_results/goldens_<model>.json` here, since golden filenames only
-  match this set.
-- `--dataset data/classify_split/test` is the held-out test split of the training
-  lot. No parity applies. Use `--limit` on the Zero 2 W, because the full split
-  is 14,686 crops.
+- A **cross-lot benchmark set**, written below as `data/<crop_set>/crops_classifier`.
+  This is a lot the model was not trained on, which is what makes it a
+  generalization test. Use `--parity eval_results/goldens_<model>.json` here,
+  since golden filenames only match the set they were generated from.
+- The **held-out test split of the training lot**, at `data/classify_split/test`.
+  This one the backend builds automatically at training time. No parity applies.
+  Use `--limit` on the Zero 2 W, since the full split runs to tens of thousands of
+  crops.
 
 If bash reports `bad interpreter` when running `run_eval.sh`, the file picked up
 CRLF line endings in transit. Run `dos2unix edge_eval/run_eval.sh` on the device.
@@ -170,7 +166,7 @@ ssh USER@HOST "cd ~/berth && tar -xzf eval_bundle.tar.gz -C eval_data && rm eval
 ```
 
 Datasets are then addressed inside the container as
-`/app/eval_data/t12lot/crops_classifier` or
+`/app/eval_data/<crop_set>/crops_classifier` or
 `/app/eval_data/classify_split/test`.
 
 ---
@@ -193,7 +189,7 @@ docker compose -f deploy/edge/docker/docker-compose.rpi.yml run --rm --no-deps \
   -v "$PWD/backend/edge_eval/eval_edge.py:/app/edge_eval/eval_edge.py" \
   -v "$PWD/backend/edge_eval/edge_check.py:/app/edge_eval/edge_check.py" \
   berth-rpi python edge_eval/eval_edge.py \
-    --dataset /app/eval_data/t12lot/crops_classifier \
+    --dataset /app/eval_data/<crop_set>/crops_classifier \
     --out /app/eval_data/results \
     --model yolo26m_classify --threads 3 --device rpi5
 
@@ -211,12 +207,12 @@ this path. Temperature still works via `/sys/class/thermal`.
 
 ```bash
 cd ~/berth/backend
-./edge_eval/run_eval.sh --dataset data/t12lot/crops_classifier --model yolo26n_classify --threads 3 --device rpi3b
+./edge_eval/run_eval.sh --dataset data/<crop_set>/crops_classifier --model yolo26n_classify --threads 3 --device rpi3b
 ```
 
-`run_eval.sh` stops the `berth` service, runs the eval with the venv python under
-`BERTH_DEPLOYMENT=edge`, and restarts the service on exit via a trap even if the
-eval crashes. Override the service name with `BERTH_SERVICE=<name>`.
+`run_eval.sh` runs the eval with the venv python under `BERTH_DEPLOYMENT=edge` and
+restarts the service on exit via a trap even if the eval crashes. Override the
+service name with `BERTH_SERVICE=<name>`.
 
 Smoke check (the service can stay running):
 
@@ -226,12 +222,11 @@ venv/bin/python edge_eval/edge_check.py
 
 ### 6.3 Pi Zero 2 W (native, systemd)
 
-Same wrapper, but stopping the service matters most here, because it frees nearly
-all the RAM. The dataset must also stay small:
+Same wrapper. The dataset must stay small here:
 
 ```bash
 cd ~/berth/backend
-./edge_eval/run_eval.sh --dataset data/t12lot/crops_classifier --model yolo26n_classify \
+./edge_eval/run_eval.sh --dataset data/<crop_set>/crops_classifier --model yolo26n_classify \
   --threads 3 --limit 250 --device rpizero2w
 ```
 
@@ -241,9 +236,8 @@ the run swapped and the latency numbers are void.
 
 ### 6.4 Development laptop (baseline)
 
-No service to stop, so the CLI is called directly. Plug the machine in, select a
-high-performance power plan, and close heavy applications. Note the CPU model
-alongside the results.
+Plug the machine in, select a high-performance power plan, and close heavy
+applications. Note the CPU model alongside the results.
 
 ```powershell
 # PowerShell, from backend\
@@ -264,7 +258,7 @@ Confirms the NCNN export did not change the model's predictions.
 1. On the hub or dev machine (needs torch), from `backend/`:
 
    ```bash
-   python edge_eval/make_goldens.py --dataset data/t12lot/crops_classifier --model yolo26n_classify --limit 30
+   python edge_eval/make_goldens.py --dataset data/<crop_set>/crops_classifier --model yolo26n_classify --limit 30
    # -> eval_results/goldens_yolo26n_classify.json
    ```
 
@@ -273,7 +267,7 @@ Confirms the NCNN export did not change the model's predictions.
 3. Add `--parity` to the eval command:
 
    ```bash
-   ./edge_eval/run_eval.sh --dataset data/t12lot/crops_classifier --model yolo26n_classify \
+   ./edge_eval/run_eval.sh --dataset data/<crop_set>/crops_classifier --model yolo26n_classify \
      --threads 3 --device rpi3b --parity eval_results/goldens_yolo26n_classify.json
    ```
 
@@ -282,9 +276,8 @@ Confirms the NCNN export did not change the model's predictions.
 Anything worse points at the NCNN export or a preprocessing mismatch, not at the
 device.
 
-A passing parity run is what permits the shortcut in section 9. Once on-device
-probabilities match the dev-side model, accuracy is established and later runs
-can use a subset purely for latency.
+Once on-device probabilities match the dev-side model, later runs can use a subset
+purely for latency.
 
 ---
 
@@ -339,25 +332,21 @@ across runs unless the caches were dropped between them.
 
 ## 10. PyTorch runtime, natively on the Pi 5
 
-Run this last, and only when a torch-versus-NCNN comparison is required. Nothing
-above depends on it, and it is the one step that puts a ~1.5 GB wheel set on the
-board.
+Run this last, and only when a torch-versus-NCNN comparison is required. It puts a
+~1.5 GB wheel set on the board.
 
 Scope: Pi 5 only. PyTorch is not attempted on the Pi 3B or the Zero 2 W, because
 1 GB and 512 MB of RAM do not realistically hold the torch runtime alongside a
-model. That is itself a result: NCNN is the only runtime that runs on those
-boards at all.
+model.
 
-Why native rather than Docker: the edge image is deliberately torch-free
-(`backend/requirements.edge.txt`), and adding torch to it would inflate the image
-several-fold for a measurement that runs once. This path builds a throwaway venv
-on the Pi OS host instead and leaves the deployed image untouched.
+The edge image stays torch-free (`backend/requirements.edge.txt`). This path builds
+a throwaway venv on the Pi OS host instead.
 
 ### 10.1 Sync the code and the torch weights
 
-Note the difference from the NCNN path: this needs `backend/models` (the `.pth` /
-`.pt` torch weights), not `backend/edge_models`. `scp` has no `--exclude`, so the
-code is named explicitly, which skips `venv/`, `data/` and `eval_results/`.
+This needs `backend/models` (the `.pth` / `.pt` torch weights), not
+`backend/edge_models`. `scp` has no `--exclude`, so the code is named explicitly,
+which skips `venv/`, `data/` and `eval_results/`.
 
 ```bash
 ssh USER@HOST "mkdir -p ~/berth-torch/backend ~/berth-torch/eval_data"
@@ -392,8 +381,7 @@ venv-torch/bin/pip uninstall -y opencv-python
 venv-torch/bin/pip install opencv-python-headless
 ```
 
-Installing `libgl1 libglib2.0-0` with apt also clears the error, but it puts GUI
-libraries on a headless board to satisfy an import that is never used.
+Installing `libgl1 libglib2.0-0` with apt also clears the error.
 
 ### 10.3 Run
 

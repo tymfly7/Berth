@@ -196,17 +196,6 @@ export default function LabelingPanel({ apiBase }) {
     } catch (e) { setStatus(`✗ ${e.message}`) }
   }
 
-  const exportDetector = async () => {
-    setStatus('Exporting detector dataset…')
-    try {
-      const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/export-detector`, { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) { setStatus(`✗ ${data.detail || 'Export failed'}`); return }
-      const c = data.counts
-      setStatus(`✓ Exported ${c.total_images} imgs (train ${c.train}/val ${c.valid}/test ${c.test}), ${c.total_labels} labels → ${data.dataset_yaml}`)
-    } catch (e) { setStatus(`✗ ${e.message}`) }
-  }
-
   const deleteCrop = async (cropId) => {
     try {
       const res = await apiFetch(`${apiBase}/api/label-batch/${lotId}/crop/${cropId}`, { method: 'DELETE' })
@@ -363,8 +352,6 @@ export default function LabelingPanel({ apiBase }) {
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost btn-sm" style={{ flex: 1 }}
               onClick={() => setGalleryOpen(true)}>Review gallery</button>
-            <button className="btn btn-ghost btn-sm" style={{ flex: 1 }}
-              onClick={exportDetector}>Export detector</button>
           </div>
         </>
       )}

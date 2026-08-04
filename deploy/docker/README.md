@@ -20,9 +20,4 @@ Health check once it is up:
 curl http://127.0.0.1:9000/api/health
 ```
 
-> The build context is the repo root because the Dockerfile does `COPY backend/` and
-> `COPY frontend/`. That is why the compose file sets `build.context: ../..` and why the command
-> is invoked with `-f deploy/docker/docker-compose.yml` from the root rather than from inside
-> this directory.
-
 For Raspberry Pi (arm64) images, see [`../edge/`](../edge/).

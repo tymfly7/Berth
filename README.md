@@ -15,6 +15,7 @@ or as an inference-only edge node (e.g. Raspberry Pi 5) that syncs back to a hub
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
 - [Dataset Setup](#dataset-setup)
+- [Dataset Labeling](#dataset-labeling)
 - [Training Models](#training-models)
 - [ROI Editor](#roi-editor)
 - [Camera Management](#camera-management)
@@ -108,10 +109,6 @@ or as an inference-only edge node (e.g. Raspberry Pi 5) that syncs back to a hub
 └──────────────────────────────────────────────────────┘
 ```
 
-In production (Docker) the backend serves the built frontend from `static/`, so
-the whole app runs on a single origin. In local development, Vite serves the
-frontend on `:5173` and talks to the backend on `:8001`.
-
 ### Views
 
 | Route | Access | Purpose |
@@ -133,7 +130,7 @@ frontend on `:5173` and talks to the backend on `:8001`.
 ### 1. Clone and set up the backend
 
 ```bash
-cd "School Project/backend"
+cd backend
 
 # Create virtual environment
 python -m venv venv
@@ -164,7 +161,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ### 3. Set up the frontend
 
 ```bash
-cd "School Project/frontend"
+cd frontend
 npm install
 ```
 
@@ -172,14 +169,14 @@ npm install
 
 **Terminal 1, backend:**
 ```bash
-cd "School Project/backend"
+cd backend
 python main.py
 # API available at http://localhost:8001
 ```
 
 **Terminal 2, frontend:**
 ```bash
-cd "School Project/frontend"
+cd frontend
 npm run dev
 # Dashboard at http://localhost:5173
 ```
@@ -193,34 +190,58 @@ Open `http://localhost:5173` for the public view, or `http://localhost:5173/admi
 > **Port note:** the backend defaults to **8001** (8000 is left free for other
 > local services / Docker). Override with `BERTH_PORT`.
 
+> **No trained weights ship with the repository.** `backend/models/` and
+> `backend/edge_models/` are gitignored, so a fresh clone starts with no model.
+> The dashboard runs, but occupancy classification stays unavailable until a model
+> is trained (see [Dataset Setup](#dataset-setup) and [Training Models](#training-models))
+> or trained weights are placed in `backend/models/` by hand.
+
 ---
 
 ## Dataset Setup
 
+> **No dataset ships with this repository.** `backend/data/` is gitignored, so a
+> fresh clone starts empty and a dataset has to be supplied before any model can
+> be trained. Option B generates synthetic data and needs nothing external.
+> Options A and C expect a dataset the reader provides.
+
 The CNN / ResNet / MobileNet / YOLO26-classify models are trained on a binary
 `occupied` / `vacant` image dataset. The YOLO26 **Detect** model uses a separate
-annotated full-scene dataset (`backend/data/labeled/lot-t10lot/yolo_detect_dataset/`).
+annotated full-scene dataset.
 
-### Option A: Labeled lot-t10lot dataset (recommended)
+### Option A: Supply a labeled lot dataset
 
 The classifier trains on `occupied` / `vacant` slot crops under
-`backend/data/labeled/<lot>/`. A labeled set for **lot-t10lot**, cropped and
+`backend/data/labeled/<lot>/`, where `<lot>` is any name chosen for the lot. Each
+lot directory is laid out like this:
+
+```
+backend/data/labeled/<lot>/
+└── crops/{occupied,vacant}/   # cropped slot images → classifier training
+```
+
+The results reported for this project use a lot named `lot-t10lot`, cropped and
 annotated from the [parking-lot-t10](https://github.com/tomas-fryza/parking-lot-t10)
-time-lapse dataset, lives under `backend/data/labeled/lot-t10lot/`:
+time-lapse dataset, which is not redistributed here.
 
-```
-backend/data/labeled/lot-t10lot/
-├── crops/{occupied,vacant}/   # cropped slot images → classifier training
-├── detector_src/              # full frames + annotations.json
-└── yolo_detect_dataset/       # YOLO detect images/labels + dataset.yaml
-```
+**Classifier training needs no code change.** `build_classify_split()` in
+[`backend/dev/data_prep/preprocessor.py`](backend/dev/data_prep/preprocessor.py)
+scans every directory under `backend/data/labeled/` and picks up whatever lots are
+present, so dropping a new `<lot>/crops/{occupied,vacant}/` folder in is enough.
+The split is built automatically into
+`backend/data/classify_split/{train,val,test}/{occupied,vacant}/`, divided by
+source frame so that crops from one photo cannot straddle two splits.
 
-At training time the backend automatically builds a leakage-safe train/val/test
-split from these crops into
-`backend/data/classify_split/{train,val,test}/{occupied,vacant}/`, split by source
-frame. No manual organizing step is required.
+**The detector uses a separate dataset with a hardcoded path.** Training
+`yolo26_detect` reads `backend/data/vehicle_dataset/dataset.yaml`, set by
+`YOLO_DATASET_DIR` in [`backend/config.py`](backend/config.py). Unlike most
+settings it has no environment override, so a detect dataset kept anywhere else
+requires editing that one line. It is built by the vehicle bootstrap path in
+[Dataset Labeling](#dataset-labeling), not from the classifier crops.
 
 ### Option B: Generate sample data (quick testing)
+
+Run from `backend/`:
 
 ```bash
 python -m dev.data_prep.downloader --generate-sample --sample-count 500
@@ -236,11 +257,60 @@ curl -X POST "http://localhost:8001/api/dataset/prepare?generate_sample=true&sam
 curl -X POST "http://localhost:8001/api/dataset/prepare?source=/path/to/dataset"
 ```
 
-### Option D: Upload images directly from the Admin UI
+> **There is no dataset upload form in the Admin UI.** Both `prepare` calls act on
+> paths on the backend host, so `source` is a directory already present on the
+> server. Images are placed on the backend host directly, using the layout in
+> Option A. `GET /api/dataset/browse` reports what the backend can currently see.
 
-Go to **Admin > Settings > Model Training** and use the dataset upload form to
-label and upload individual images as `occupied` or `vacant`. The **Training
-Data** subsection browses on-disk dataset folders and counts.
+---
+
+## Dataset Labeling
+
+Raw camera captures are turned into training data by the auto-labeler in
+**Admin > Settings > Batch Labeling**. There are two independent paths, one per
+model type, and they do not feed each other.
+
+### Classifier crops: ROI batch labeling
+
+`POST /api/label-batch/{lot_id}` crops every saved ROI across a date-foldered
+image directory and pre-labels each crop with an existing classifier. Results are
+bucketed into `occupied`, `vacant`, `review`, and `too_dark`, so only the
+confident ones are accepted automatically and the rest are curated by hand in the
+review gallery.
+
+ROIs must be drawn and saved for the lot first.
+`GET /api/label-batch/{lot_id}/calibrate` samples the directory and
+reports a suggested brightness cut-off before committing to a run. Output lands in
+the lot's `crops/{occupied,vacant}/` folders, ready for
+[Dataset Setup](#dataset-setup) Option A.
+
+### Detector labels: vehicle bootstrap
+
+`POST /api/label-batch/{lot_id}/bootstrap-vehicles` is the only route to a
+detector dataset. It takes no ROIs and annotates **whole frames**, which is the
+only way to represent a vehicle parked outside the marked bays. Frames are sampled
+with a per-day quota, pre-labeled with the trained detector where one exists and
+stock `yolo26s.pt` otherwise, and written as a bundle beside the source images
+together with a makesense.ai export.
+
+Correct that export by hand, then build the dataset from `backend/`:
+
+```bash
+python -m dev.data_prep.build_vehicle_dataset \
+  --src <bundle_dir> --zip <corrected_export.zip> --out data/vehicle_dataset
+```
+
+That script splits by capture day rather than by frame, because frames from one
+day share lighting and largely the same parked cars, so a random split would put
+near-duplicates on both sides and inflate the result. Use `--split test` to emit a
+single test split for a lot held out from a detector trained elsewhere.
+
+> **Why bay polygons are not used for the detector.** An earlier pipeline built
+> the detect dataset from the ROI polygons, which trained the model to find
+> *marked bays* rather than *vehicles*. Such a model cannot represent a vehicle
+> outside a bay, which is exactly the case anomaly detection exists to catch. That
+> path has been removed. The detector is single-class (`vehicle`) and comes only
+> from the bootstrap route above.
 
 ---
 
@@ -265,8 +335,6 @@ is referred to as `yolo26` at **inference** time and `yolo26_detect` at
 
 The three YOLO26 classify scales share one training path and fine-tune the
 ImageNet-pretrained `yolo26{n,s,m}-cls.pt` checkpoint (downloaded on first use).
-Pick the scale to match the target edge board: nano for the Pi Zero 2 W, medium
-for the Pi 5.
 
 ### Train via API
 
@@ -325,10 +393,9 @@ outputs/
 Evaluate-all overwrites `model_comparison.json` and each training run overwrites
 its `history_<model>.json`, so those files hold only the latest result. Every run
 is additionally archived as a timestamped JSON snapshot under
-`outputs/eval_history/` and `outputs/train_history/`, which keeps past runs
-browsable by date and time through the Admin UI or the history endpoints below.
-Snapshots are small, so retention defaults to keeping all of them. Set a limit
-with `BERTH_HISTORY_MAX`.
+`outputs/eval_history/` and `outputs/train_history/`, browsable through the Admin
+UI or the history endpoints below. Retention defaults to keeping all snapshots.
+Set a limit with `BERTH_HISTORY_MAX`.
 
 ### Training environment variables
 
@@ -377,10 +444,8 @@ occupancy classification and anomaly detection.
 ### Orientation layer
 
 Besides slot ROIs, the editor can draw a display-only orientation layer holding an
-outer perimeter, entry/exit gates, traffic-flow arrows, and an anchor marker. It
-is rendered on the lot map (admin and public views) to make the map easier to
-read. The layer is stored separately from the slot ROIs and is never fed to
-inference.
+outer perimeter, entry/exit gates, traffic-flow arrows, and an anchor marker. The
+layer is stored separately from the slot ROIs and is never fed to inference.
 
 ### Auto-propose ROIs
 
@@ -396,10 +461,9 @@ curl -X POST "http://localhost:8001/api/roi/default/propose?use_line_detection=t
   -F "file=@parking_lot_snapshot.jpg"
 ```
 
-Proposals are returned for review and are not persisted automatically, so saving
-is a separate step. They are driven by vehicle detections, so they reliably cover
-occupied slots. Empty slots are only detected with `use_line_detection=true` and
-clearly visible markings.
+Proposals are returned for review and are not persisted automatically. They are
+driven by vehicle detections, so they reliably cover occupied slots. Empty slots
+are only detected with `use_line_detection=true` and clearly visible markings.
 
 ---
 
@@ -476,9 +540,6 @@ Each active camera streams via its own WebSocket at `/ws/cameras/<camera_id>`.
 When enabled, the vehicle detector locates every vehicle in each frame and the
 system flags those that are not parked squarely inside a marked slot.
 
-Every vehicle outside the ROI markings is flagged for review, and the admin
-decides whether a given flag is a real violation.
-
 ### Enable via UI
 
 Admin > Settings > Controls > Anomaly toggle.
@@ -498,9 +559,7 @@ as parked-in-bounds.
 
 Overlap between a vehicle and a slot is the fraction of the *vehicle's* box area
 that falls inside the slot polygon. A vehicle parked squarely in a slot reads
-close to 1.0, and one straddling two slots reads about 0.5 in each. The vehicle
-box is clipped against the slot's polygon edges, so overlap stays accurate for
-angled (e.g. 45°) slots and for slots drawn larger than the vehicles using them.
+close to 1.0, and one straddling two slots reads about 0.5 in each.
 
 | Status | Reason | Condition |
 |--------|--------|-----------|
@@ -508,12 +567,12 @@ angled (e.g. 45°) slots and for slots drawn larger than the vehicles using them
 | `misparked` | `straddling` | ≥ 35% of the vehicle lies inside each of ≥ 2 slots |
 | `misparked` | `outside` | best single-slot overlap < `park_thresh`, covering both a vehicle half-out of a slot and one with no slot overlap at all |
 
-Both reasons share one bucket. Each is highlighted orange on the video feed and
-lot map, and they are counted together in the Misparked metric card.
+Both reasons are highlighted orange on the video feed and lot map, and are counted
+together in the Misparked metric card.
 
 The detector reads from `backend/models/best_yolo26_detect.pt`, overridable with
-`BERTH_VEHICLE_DETECT_PATH`. It is a single-class ("vehicle") model fine-tuned at
-640 px on hand-corrected labels via the `yolo26_detect` training pipeline.
+`BERTH_VEHICLE_DETECT_PATH`, and is fine-tuned at 640 px by the `yolo26_detect`
+pipeline.
 
 ### Occupancy sensitivity
 
@@ -543,18 +602,15 @@ unsynced rows to the hub every 60 s when `BERTH_EDGE_HUB_URL` is set. If the hub
 is unreachable, rows stay buffered and retry on the following cycle.
 
 On the most constrained boards (e.g. the Pi Zero 2 W) set
-`BERTH_SNAPSHOT_INTERVAL=<seconds>` to enable snapshot mode. The processor then
-grabs a single frame every N seconds instead of decoding the stream continuously,
-which frees the CPU for inference.
+`BERTH_SNAPSHOT_INTERVAL=<seconds>` to enable snapshot mode.
 
 The **hub** receives those rows via the ingest endpoints (`POST
 /api/ingest/occupancy`, `POST /api/ingest/alerts`).
 
 ### Exporting models for the edge
 
-Trained models are exported to NCNN (CNN models via `torch.jit.trace` + pnnx,
-YOLO models via Ultralytics export). This happens automatically after a
-successful training run, or it can be run manually via the CLI or the export endpoint:
+Trained models are exported to NCNN automatically after a successful training run,
+or manually via the CLI or the export endpoint:
 
 ```bash
 cd backend
@@ -574,7 +630,8 @@ the Pi 5). See [Docker Deployment](#docker-deployment) for the RPi image.
 
 `backend/edge_eval/` benchmarks exported models directly on an edge device,
 without FastAPI and torch-free by default, against a crops dataset (`occupied/` +
-`vacant/` folders):
+`vacant/` folders). The `--dataset` paths below are examples, to be pointed at
+whichever crop set is shipped to the device.
 
 | Script | Runs on | Purpose |
 |--------|---------|---------|
@@ -585,22 +642,20 @@ without FastAPI and torch-free by default, against a crops dataset (`occupied/` 
 
 ```bash
 # On the edge device (service auto-stopped / restarted, args passed through)
-./edge_eval/run_eval.sh --dataset data/t12lot_subset --model yolo26n_classify
+./edge_eval/run_eval.sh --dataset data/<crop_set> --model yolo26n_classify
 
 # Direct, e.g. on a dev laptop. Pick the runtime to benchmark
-python edge_eval/eval_edge.py --dataset data/t12lot_subset --runtime ncnn
-python edge_eval/eval_edge.py --dataset data/t12lot_subset --runtime torch
+python edge_eval/eval_edge.py --dataset data/<crop_set> --runtime ncnn
+python edge_eval/eval_edge.py --dataset data/<crop_set> --runtime torch
 
 # PyTorch → NCNN conversion drift: goldens on the hub, --parity on the edge
-python edge_eval/make_goldens.py --dataset data/t12lot_subset --model yolo26n_classify
-python edge_eval/eval_edge.py --dataset data/t12lot_subset \
+python edge_eval/make_goldens.py --dataset data/<crop_set> --model yolo26n_classify
+python edge_eval/eval_edge.py --dataset data/<crop_set> \
   --parity eval_results/goldens_yolo26n_classify.json
 ```
 
-`--runtime` selects the inference backend, either `ncnn` (default, torch-free) or
-`torch` (imported lazily, for benchmarking the same model with PyTorch on a dev
-laptop or Pi 5). Results land in
-`backend/eval_results/<device>_<model>_<runtime>_<timestamp>/` (gitignored).
+Results land in `backend/eval_results/<device>_<model>_<runtime>_<timestamp>/`
+(gitignored).
 
 > The full per-device runbook covers shipping the scripts and datasets, the Docker
 > and native run procedures, parity checks, and the native PyTorch comparison on
@@ -610,6 +665,8 @@ laptop or Pi 5). Results land in
 ---
 
 ## API Reference
+
+Unknown `/api/` or `/ws/` path: `404`. Non-`GET` request to an unknown path: `405`.
 
 ### Auth
 
@@ -654,15 +711,15 @@ laptop or Pi 5). Results land in
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/upload-video` | Upload a video file as the default source |
-| POST | `/api/use-camera` | Switch default processor to the local webcam |
 | GET | `/api/cameras` | List all cameras |
 | POST | `/api/cameras` | Register a new camera |
 | PATCH | `/api/cameras/{id}` | Update a camera (partial) |
 | DELETE | `/api/cameras/{id}` | Remove a camera |
 | POST | `/api/cameras/{id}/activate` | Start streaming from camera |
 | POST | `/api/cameras/{id}/deactivate` | Stop camera stream |
-| WS | `/ws/video` | Default video stream (metrics JSON + binary JPEG) |
-| WS | `/ws/cameras/{camera_id}` | Per-camera video stream |
+| POST | `/api/cameras/{id}/data-gathering` | Enable / disable periodic frame capture for a camera |
+| GET | `/api/cameras/{id}/frame` | Grab a single JPEG frame from an active camera |
+| WS | `/ws/cameras/{camera_id}` | Per-camera video stream (metrics JSON + binary JPEG) |
 
 ### Models and training
 
@@ -675,7 +732,9 @@ laptop or Pi 5). Results land in
 | GET | `/api/train/status` | Training progress |
 | POST | `/api/train/cancel` | Cancel an in-progress training run, server only |
 | POST | `/api/evaluate/all` | Evaluate all trained models, server only |
+| POST | `/api/evaluate/detector` | Evaluate the YOLO26 detect model, server only |
 | GET | `/api/eval/datasets` | List datasets available for evaluation |
+| GET | `/api/eval/detector/datasets` | List datasets available for detector evaluation |
 | GET | `/api/evaluate/excel` | Download comparison as an Excel file (`?file=` for an archived snapshot) |
 | POST | `/api/export/ncnn` | Export trained models to NCNN for the edge, server only |
 | GET | `/api/export/status` | NCNN export progress |
@@ -693,6 +752,7 @@ laptop or Pi 5). Results land in
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| GET | `/api/roi` | List every saved per-camera ROI config |
 | GET | `/api/roi/{camera_id}` | Get saved ROIs for a camera |
 | POST | `/api/roi/{camera_id}` | Save ROIs for a camera |
 | GET | `/api/roi/{camera_id}/orientation` | Get the display-only orientation layer (perimeter / gates / flow / anchor) |
@@ -707,10 +767,22 @@ laptop or Pi 5). Results land in
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/dataset/upload` | Upload labeled classifier training images |
-| POST | `/api/dataset/upload-yolo` | Upload a YOLO detect dataset (images + annotations.json) |
 | GET | `/api/dataset/browse` | List dataset folders and counts |
 | POST | `/api/dataset/prepare` | Organize a source dataset or generate a sample dataset |
+
+### Auto-labeling
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/label-batch/{lot_id}` | Start an ROI batch labeling run (classifier crops) |
+| GET | `/api/label-batch/{lot_id}/calibrate` | Sample the image set and suggest a brightness cut-off |
+| GET | `/api/label-batch/{lot_id}/manifest` | Current manifest with per-bucket counts |
+| GET | `/api/label-batch/{lot_id}/last-run` | Summary of the most recent labeling run |
+| GET | `/api/label-batch/{lot_id}/crop/{crop_id}` | Fetch a single labeled crop image |
+| POST | `/api/label-batch/{lot_id}/crop/{crop_id}/reassign` | Move a crop to another bucket (`?status=`) |
+| DELETE | `/api/label-batch/{lot_id}/crop/{crop_id}` | Drop a crop from the manifest |
+| POST | `/api/label-batch/{lot_id}/bootstrap-vehicles` | Sample and pre-label whole frames (detector labels) |
+| GET | `/api/label-batch/{lot_id}/vehicle-report` | Report from the most recent bootstrap run |
 
 ### Settings
 
@@ -733,7 +805,7 @@ laptop or Pi 5). Results land in
 ## Project Structure
 
 ```
-School Project/
+<repo root>/
 ├── backend/
 │   ├── main.py                          # FastAPI app assembly, WebSockets, SPA fallback
 │   ├── config.py                        # Centralized config (paths, env vars, profiles)
@@ -787,12 +859,13 @@ School Project/
 │   ├── dev/                             # Server-only tree: training, evaluation, export, labeling
 │   │   ├── routers/
 │   │   │   ├── training.py              # train / evaluate / export / dataset / run history
-│   │   │   └── labeling.py              # ROI batch auto-labeling (/api/label-batch/*)
+│   │   │   └── labeling.py              # Auto-labeling (/api/label-batch/*)
 │   │   ├── data_prep/
 │   │   │   ├── dataset.py               # PyTorch Dataset + augmentation
 │   │   │   ├── preprocessor.py          # Train/val/test split + DataLoaders
 │   │   │   ├── downloader.py            # dataset organizer + sample generator
-│   │   │   └── yolo_converter.py        # Build YOLO detect dataset from annotations
+│   │   │   ├── vehicle_bootstrap.py     # Sample + pre-label whole frames for the detector
+│   │   │   └── build_vehicle_dataset.py # Corrected export → single-class vehicle dataset
 │   │   ├── train/
 │   │   │   ├── trainer.py               # Training loop + early stopping
 │   │   │   └── train_manager.py         # Background training + evaluation
@@ -967,8 +1040,8 @@ BERTH_API_KEY=                               # only needed for machine clients (
 
 Compose reads variables for `${BERTH_API_KEY:-}`, `${BERTH_ADMIN_PASSWORD:-}`, and
 `${BERTH_AUTH_SECRET:-}` from a `.env` in the directory compose is run from, which should
-always be the repo root, or from the shell. A fresh clone carries no `.env`, since the file is
-gitignored and private to each machine, so write your own at the repo root:
+always be the repo root, or from the shell. A fresh clone carries no `.env`, so create one at
+the repo root:
 
 ```bash
 # .env, repo root
@@ -981,7 +1054,7 @@ BERTH_AUTH_SECRET=paste-a-long-random-string
 docker compose -f deploy/edge/docker/docker-compose.rpi.yml up -d
 ```
 
-The file name is `.env` here and on the Pi. Nothing is renamed or copied between the two.
+The file name is `.env` here and on the Pi.
 
 `frontend/.env` holds no secret. The browser authenticates with the session token
 from login, so there is nothing to bake into the bundle.
@@ -1032,9 +1105,8 @@ reachable on a single origin/port. **Inside every container the backend listens 
 `8000`** (the `8001` default applies only to bare-metal `python main.py`).
 
 Secrets are passed as container env, never baked into the image. With compose,
-`${BERTH_*}` placeholders are interpolated from a `.env` file in the directory compose
-is run from (the repo root) or from the shell. This is a *different* file from
-`backend/.env`. See [Environment and Secrets](#environment-and-secrets-env).
+`${BERTH_*}` placeholders are interpolated from a `.env` file in the directory compose is
+run from (the repo root). See [Environment and Secrets](#environment-and-secrets-env).
 
 ### 1. Server, on a normal machine (x86-64)
 
@@ -1056,8 +1128,7 @@ docker compose -f deploy/docker/docker-compose.yml up -d --build
 
 `deploy/docker/docker-compose.yml` binds to `127.0.0.1:9000`, so the app is reachable at
 `http://localhost:9000` and not exposed on the network. A reverse proxy in front is
-required for remote access. It bind-mounts `backend/{data,models,outputs,uploads}` so
-datasets, weights, and runs persist on the host.
+required for remote access. It bind-mounts `backend/{data,models,outputs,uploads}`.
 
 ### 2. Edge node, on a Raspberry Pi 5 (ARM64)
 
@@ -1065,8 +1136,8 @@ The edge image (`deploy/edge/docker/Dockerfile.rpi`) runs the `edge` profile
 (inference-only, NCNN). It is not built on the Pi. Cross-build it on an x86 machine and
 ship the prebuilt image (see [§3](#3-baking-the-edge-image-on-x86-and-shipping-it-to-the-pi)
 below). The Pi needs only the image, the compose file, and a `.env`. The container reaches
-webcams through a `/dev` passthrough (a USB camera plugged in after start is opened when a
-camera is activated) and keeps the SQLite DB + ROI/camera config in named volumes.
+webcams through a `/dev` passthrough and keeps the SQLite DB + ROI/camera config in named
+volumes.
 
 Once it is up, the app is reachable at `http://<pi-ip>:8001`. The `.env` next to the compose
 file on the Pi must set `BERTH_ADMIN_PASSWORD`, otherwise login returns `503`. Recommended
@@ -1082,11 +1153,8 @@ before cross-building.
 
 ### 3. Baking the edge image on x86 and shipping it to the Pi
 
-Building on the Pi is slow. Cross-compile on a faster x86 machine, save the image
-to a tarball, copy it over, and load it on the Pi:
-
-Run these from the repo root (the build context), which writes the tarball into
-`deploy/edge/docker/`, next to the compose file that consumes it:
+Building on the Pi is slow. Run these from the repo root (the build context), which
+writes the tarball into `deploy/edge/docker/`, next to the compose file that consumes it:
 
 ```bash
 # On the x86 build machine: cross-compile for ARM64
@@ -1107,13 +1175,8 @@ docker compose -f docker-compose.rpi.yml up -d   # no --build: uses the loaded i
 ```
 
 The compose file references `image: berth-rpi:latest`, so once the image is loaded the compose
-run picks it up without rebuilding. Its `build.context` points at a repo tree that is not on
-the Pi, which is harmless while the image is present. Building on the Pi instead, with
-`docker build -t berth-rpi:latest -f deploy/edge/docker/Dockerfile.rpi .` from a checkout, also
-works, just slower.
-
-> The `.tar`/`.tar.gz` artifacts are gitignored and should not be committed. Rebuild
-> after any frontend or backend change so the image is not stale.
+run picks it up without rebuilding. Failure modes and the Pi-side `.env` are covered in
+[deploy/edge/docker/README.md](deploy/edge/docker/README.md).
 
 ---
 

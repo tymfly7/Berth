@@ -7,7 +7,7 @@ backend runs directly under **systemd** instead.
 
 On this hardware the failure mode is usually a freeze rather than a crash. When RAM runs out
 and the board swaps to the SD card, the symptom is "no logs, SSH dead, UI gone", which is hard
-to tell from a hang. The steps below aim to turn that freeze into a recoverable service restart.
+to tell from a hang.
 
 Throughout: the user is `edge`, the host is `IP` (the Zero 2 W), the project lives in
 `~/berth`, and the backend listens on port `8001`. Adjust these to the local setup. The 3B
@@ -43,9 +43,6 @@ journalctl -u berth -f
 
 > If bash reports `bad interpreter` / `\r`, the script picked up CRLF line endings on
 > Windows: run `dos2unix install.sh` on the Pi first.
-
-The rest of this document is the reference for what `install.sh` automates, plus the parts
-that stay manual (code transfer, updates, recovery).
 
 ---
 
@@ -92,11 +89,7 @@ silently ignored and `systemctl show berth -p MemoryCurrent` returns `[not set]`
 > grep memory /proc/cgroups     # last column 1 = enabled
 > ```
 
-Accounting overhead is ~1–2 % of RAM. In exchange, a runaway backend is killed at its cap and
-restarted by systemd instead of dragging the board into a swap freeze.
-
-zram and the cgroup both need a reboot, which is why `install.sh` stops after step 3 and asks
-for a reboot, then finishes on the second run.
+Accounting overhead is ~1–2 % of RAM.
 
 ## 4. Install the backend
 
@@ -166,9 +159,8 @@ ssh USER@HOST 'mkdir -p ~/berth && tar -xzf ~/native.tar.gz -C ~/berth && rm ~/n
 Remove-Item native.tar.gz
 ```
 
-Plain `scp` and `ssh` invocations work unchanged in PowerShell. Only the `tar … | ssh` pipes need
-this treatment. The excludes are unquoted on purpose, since PowerShell does not glob-expand
-arguments, so `--exclude=backend/*.pt` reaches `tar` intact.
+The excludes are unquoted on purpose, since PowerShell does not glob-expand arguments, so
+`--exclude=backend/*.pt` reaches `tar` intact.
 
 ### Secrets: the `.env` file
 
@@ -215,8 +207,8 @@ curl -i -X POST http://HOST:8001/api/auth/login \
 ### Python environment + smoke test
 
 `install.sh` steps [4/5]–[5/5] create `~/berth/venv` and `pip install -r
-backend/requirements.edge.txt` (all prebuilt aarch64 wheels, slow on SD, one-time). To smoke
-test in the foreground before enabling the service:
+backend/requirements.edge.txt` (slow on SD, one-time). To smoke test in the foreground before
+enabling the service:
 
 ```bash
 cd ~/berth/backend
@@ -279,8 +271,7 @@ BERTH_AUTH_SECRET=<regenerate>
 ```
 
 `BERTH_DEPLOYMENT` and `BERTH_MODEL` do not belong in this file. The unit already sets both on
-its `Environment=` line, and `load_dotenv()` never overrides a variable already in the
-environment, so `.env` values for them are ignored. Both boards therefore run
+its `Environment=` line, so `.env` values for them are ignored. Both boards therefore run
 `yolo26n_classify`. To change the model on the 3B, edit `berth.service`.
 
 The 3B has the same 4× Cortex-A53 CPU as the Zero, so every CPU lever (snapshot mode above
@@ -296,8 +287,6 @@ scp backend/config.py USER@HOST:~/berth/backend/config.py
 scp backend/src/inference/video_processor.py USER@HOST:~/berth/backend/src/inference/video_processor.py
 ssh USER@HOST 'sudo systemctl restart berth'
 ```
-
-`scp` overwrites exactly those files, and everything else stays byte-for-byte.
 
 ### 6b. Full resync: delete-then-extract
 
@@ -378,6 +367,6 @@ ssh USER@HOST 'mkdir -p ~/berth/backend/static && tar -xzf ~/dist.tar.gz -C ~/be
 Remove-Item dist.tar.gz
 ```
 
-Restart the service, and the UI is then at `http://HOST:8001/`. Serving pre-built static
-files costs almost nothing at runtime. (Same-origin from the device: no `VITE_API_BASE`, no CORS.)
+Restart the service, and the UI is then at `http://HOST:8001/`. Same-origin from the device:
+no `VITE_API_BASE`, no CORS.
 

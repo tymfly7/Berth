@@ -29,16 +29,37 @@ from src.db import database as db
 # multiple_requests;0  — disable persistent HTTP connections so YouTube CDN
 #   host changes between HLS segments don't cause reconnect warnings.
 # fflags;nobuffer  — return packets immediately without input buffering.
-# live_start_index;-1  — ride the live edge of the HLS manifest (last segment).
+# live_start_index;-3  — start three segments back from the live edge. At the
+#   edge the next segment does not exist until the encoder publishes it, so the
+#   reader waits out every segment interval and delivery arrives in stalls. A
+#   few segments back they are already published and fetch on demand. Costs a
+#   fixed ~15 s of delay, which occupancy does not care about. Matches the value
+#   docker-compose.rpi.yml already sets.
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-    "multiple_requests;0|fflags;nobuffer|live_start_index;-1"
+    "multiple_requests;0|fflags;nobuffer|live_start_index;-3"
     "|probesize;500000|analyzeduration;500000"
     "|reconnect;1|reconnect_streamed;1|reconnect_delay_max;5",
 )
 
 logger = logging.getLogger("berth.video")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+
+# HLS display pacing. YouTube live ships ~5 s segments as a burst followed by a
+# comparable stall, so the display only runs continuously if it can buffer a
+# whole cycle. That much buffering is affordable only at a low content rate, and
+# parking occupancy does not need a high one. Ingest, buffer depth and drain are
+# all pinned to this rate, so supply matches demand and the depth settles at
+# whatever the cycle requires.
+_HLS_FPS = 5
+_HLS_BUFFER_SECS = 8
+# Prime before draining, as a media player prebuffers. Ingest and drain share a
+# rate, so with no reservoir the buffer empties to almost exactly zero before
+# each segment lands and any lateness in a fetch shows as a hold. Holding this
+# much back moves the trough above zero, at the cost of the same much latency.
+# Two seconds, against a worst observed deficit of 0.83 s. One second left the
+# buffer drying out about twice a minute.
+_HLS_PRIME_FRAMES = _HLS_FPS * 2
 
 
 def default_metrics() -> dict:
@@ -96,15 +117,14 @@ class VideoProcessor:
         self._latest_raw_lock = threading.Lock()
         self._infer_event = threading.Event()
 
-        # Jitter buffer: source pushes every raw frame here; display pops at
-        # STREAM_FPS. Absorbs bursty HLS segment delivery so the display
-        # thread drains the buffer smoothly during the inter-segment gap
-        # instead of freezing. maxlen caps memory. The display loop trims down
-        # to _jitter_target so a source faster than STREAM_FPS cannot pin the
-        # buffer full and hold a permanent maxlen-deep lag.
-        _jitter_secs = 2
-        self._jitter_buffer: deque = deque(maxlen=config.STREAM_FPS * _jitter_secs)
-        self._jitter_target = max(1, config.STREAM_FPS // 2)
+        # Jitter buffer, HLS only. Absorbs bursty segment delivery so the
+        # display thread keeps moving through the inter-segment stall instead of
+        # freezing. maxlen holds a full burst-and-stall cycle, which is the
+        # depth that actually covers the stall. There is no read-end trim: the
+        # old trim discarded over 90% of each segment and capped usable depth at
+        # a fraction of a second, which is what produced the fast-forward.
+        self._jitter_buffer: deque = deque(maxlen=_HLS_FPS * _HLS_BUFFER_SECS)
+        self._jitter_primed = False
         self._jitter_lock = threading.Lock()
         self._last_display_raw: np.ndarray | None = None
 
@@ -305,9 +325,10 @@ class VideoProcessor:
             )
         with self._latest_raw_lock:
             self._latest_raw = frame
-        # Snapshot mode: skip the jitter buffer — one frame per interval has
-        # nothing to smooth, and the undrained buffer would just pin memory.
-        if not self._snapshot_mode():
+        # The jitter buffer only serves the HLS display path. Snapshot mode has
+        # one frame per interval and nothing to smooth, and live USB/RTSP read
+        # _latest_raw directly, so filling it for either just pins memory.
+        if self._is_youtube() and not self._snapshot_mode():
             with self._jitter_lock:
                 self._jitter_buffer.append(frame)
         self._infer_event.set()
@@ -418,23 +439,27 @@ class VideoProcessor:
 
         stop_grab = threading.Event()
 
-        # Content decimation. The reader runs unthrottled, so frames arrive in
-        # segment-sized bursts. Pushing every frame of a 30 fps source into a
-        # buffer the display drains at STREAM_FPS leaves the trim discarding in
-        # clumps, which shows as jerky motion. Taking every Nth frame keeps the
-        # spacing even in content time. A source that does not report its FPS
-        # falls back to 1, which is the old behaviour.
+        # Decimate to _HLS_FPS by content, not by arrival time. The reader runs
+        # unthrottled, so a whole segment lands in a fraction of a second; a
+        # wall-clock gate would admit a handful of frames spanning seconds of
+        # motion and throw the rest away. POS_MSEC is the frame's timestamp
+        # inside the stream, so gating on it keeps the spacing even in content
+        # time however unevenly frames arrive. Captures that do not report it
+        # fall back to a fixed stride off the declared FPS.
+        _push_gap_ms = 1000.0 / _HLS_FPS
+
         def _stride(cap) -> int:
             fps = cap.get(cv2.CAP_PROP_FPS) if cap else 0
             if not 1 <= fps <= 120:
                 return 1
-            return max(1, round(fps / config.STREAM_FPS))
+            return max(1, int(fps // _HLS_FPS))
 
         def _grab():
             fails = 0
             seen = 0
+            last_pos = float("-inf")
             stride = _stride(cap_holder[0])
-            logger.info(f"YouTube ingest stride {stride} for '{self._source}'")
+            logger.info(f"YouTube ingest: {_HLS_FPS} fps, stride fallback {stride}")
             while not stop_grab.is_set():
                 cap = cap_holder[0]
                 if cap is None:
@@ -442,8 +467,9 @@ class VideoProcessor:
                     if new:
                         cap_holder[0] = new
                         stride = _stride(new)
+                        last_pos = float("-inf")
                         fails = 0
-                        logger.info(f"YouTube stream connected: {self._source}, stride {stride}")
+                        logger.info(f"YouTube stream connected: {self._source}, stride fallback {stride}")
                     else:
                         stop_grab.wait(2.0)
                     continue
@@ -459,7 +485,14 @@ class VideoProcessor:
                     # jitter buffer. cap.read() blocks on the fetch, so this
                     # cannot spin.
                     seen += 1
-                    if seen % stride == 0:
+                    pos = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    if pos and pos > 0:
+                        take = pos - last_pos >= _push_gap_ms
+                        if take:
+                            last_pos = pos
+                    else:
+                        take = seen % stride == 0
+                    if take:
                         self._ingest_raw_frame(frame)
                 else:
                     fails += 1
@@ -497,14 +530,20 @@ class VideoProcessor:
     def _display_loop(self):
         """
         Timer-driven at STREAM_FPS. For YouTube HLS sources the jitter buffer
-        absorbs burst segment delivery. For all other sources the latest raw
-        frame is used directly so live feeds have no buffering lag.
+        absorbs burst segment delivery and drains at _HLS_FPS, matching the
+        decimated ingest rate. For all other sources the latest raw frame is
+        used directly so live feeds have no buffering lag.
         """
         # Snapshot mode: frames arrive every SNAPSHOT_INTERVAL seconds, so a
         # 1 Hz tick is plenty and re-encoding the same still at STREAM_FPS
         # would waste CPU.
         snapshot_mode = self._snapshot_mode()
-        frame_interval = 1.0 if snapshot_mode else 1.0 / config.STREAM_FPS
+        if snapshot_mode:
+            frame_interval = 1.0
+        elif self._is_youtube():
+            frame_interval = 1.0 / _HLS_FPS
+        else:
+            frame_interval = 1.0 / config.STREAM_FPS
 
         while self.running:
             t0 = time.time()
@@ -519,18 +558,21 @@ class VideoProcessor:
 
             if self._is_youtube() and not snapshot_mode:
                 # YouTube HLS: drain jitter buffer to smooth inter-segment gaps.
+                # Depth grows while a segment lands and pays that back during
+                # the stall. Nothing is discarded here, maxlen is the only cap.
                 with self._jitter_lock:
-                    has_new = bool(self._jitter_buffer)
+                    if not self._jitter_primed:
+                        self._jitter_primed = (
+                            len(self._jitter_buffer) >= _HLS_PRIME_FRAMES
+                        )
+                    has_new = self._jitter_primed and bool(self._jitter_buffer)
                     if has_new:
-                        # Discard the surplus above the target depth. A 30 fps
-                        # source drained at STREAM_FPS otherwise keeps the
-                        # buffer full, so every frame shown is maxlen old and
-                        # maxlen eviction drops frames at the read end.
-                        while len(self._jitter_buffer) > self._jitter_target:
-                            self._jitter_buffer.popleft()
                         raw = self._jitter_buffer.popleft()
                         self._last_display_raw = raw
                     else:
+                        # Ran dry. Rebuild the reservoir before drawing again,
+                        # otherwise the display tracks every fetch wobble.
+                        self._jitter_primed = False
                         raw = self._last_display_raw
             else:
                 # Live USB/RTSP/file: always show the newest available frame.

@@ -260,6 +260,11 @@ async def camera_ws(websocket: WebSocket, camera_id: str, token: str = ""):
 # ── SPA fallback (registered last so it never shadows API/router routes) ──
 @app.get("/{full_path:path}")
 def spa_fallback(full_path: str):
+    # Registration order only stops this shadowing routes that exist. An unknown
+    # /api/ path matches nothing, falls through here, and would otherwise answer a
+    # broken API call with 200 + the SPA shell. Those stay real 404s.
+    if full_path.startswith(("api/", "ws/")):
+        raise HTTPException(status_code=404, detail="Not found")
     index = _static_dir / "index.html"
     if index.exists():
         return FileResponse(index)
