@@ -1,0 +1,125 @@
+{
+  "dataset": "data\\vehicle_dataset\\dataset.yaml",
+  "split": "val",
+  "weights": "D:\\Documents\\School Project\\backend\\models\\best_yolo26_detect.pt",
+  "imgsz": 640,
+  "images": 41,
+  "timestamp": "2026-07-31T16:37:30",
+  "baseline": {
+    "map50": 98.39,
+    "map50_95": 94.41,
+    "precision": 96.13,
+    "recall": 93.99
+  },
+  "sweep": {
+    "points": [
+      {
+        "conf": 0.1,
+        "precision": 83.9,
+        "recall": 97.29,
+        "f1": 90.1
+      },
+      {
+        "conf": 0.15,
+        "precision": 86.02,
+        "recall": 96.85,
+        "f1": 91.11
+      },
+      {
+        "conf": 0.2,
+        "precision": 88.45,
+        "recall": 96.42,
+        "f1": 92.26
+      },
+      {
+        "conf": 0.25,
+        "precision": 90.11,
+        "recall": 95.98,
+        "f1": 92.95
+      },
+      {
+        "conf": 0.3,
+        "precision": 91.86,
+        "recall": 95.55,
+        "f1": 93.67
+      },
+      {
+        "conf": 0.35,
+        "precision": 92.88,
+        "recall": 94.9,
+        "f1": 93.88
+      },
+      {
+        "conf": 0.4,
+        "precision": 93.52,
+        "recall": 94.03,
+        "f1": 93.77
+      },
+      {
+        "conf": 0.45,
+        "precision": 94.21,
+        "recall": 93.7,
+        "f1": 93.96
+      },
+      {
+        "conf": 0.5,
+        "precision": 95.51,
+        "recall": 92.4,
+        "f1": 93.93
+      },
+      {
+        "conf": 0.55,
+        "precision": 97.21,
+        "recall": 90.77,
+        "f1": 93.88
+      },
+      {
+        "conf": 0.6,
+        "precision": 97.4,
+        "recall": 89.47,
+        "f1": 93.27
+      }
+    ],
+    "best_conf": 0.45,
+    "best_f1": 93.96,
+    "config_conf": 0.25
+  },
+  "bands": [
+    {
+      "band": "night",
+      "images": 2,
+      "instances": 10,
+      "map50": 81.56,
+      "map50_95": 40.14,
+      "precision": 63.95,
+      "recall": 90.0
+    },
+    {
+      "band": "dusk",
+      "images": 5,
+      "instances": 32,
+      "map50": 92.63,
+      "map50_95": 86.32,
+      "precision": 85.88,
+      "recall": 96.88
+    },
+    {
+      "band": "overcast",
+      "images": 25,
+      "instances": 742,
+      "map50": 98.42,
+      "map50_95": 94.97,
+      "precision": 94.59,
+      "recall": 96.88
+    },
+    {
+      "band": "bright",
+      "images": 9,
+      "instances": 137,
+      "map50": 98.87,
+      "map50_95": 95.71,
+      "precision": 98.71,
+      "recall": 94.12
+    }
+  ]
+}

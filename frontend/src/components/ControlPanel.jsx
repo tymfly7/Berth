@@ -262,12 +262,12 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
     }
   }
 
-  const handleDeleteLot = async (lotId) => {
+  const handleDeleteLot = (lotId) => {
     const lot = lots.find(l => l.id === lotId)
     if (!lot) return
-    try {
-      await apiFetch(`${apiBase}/api/roi/${lotId}`, { method: 'DELETE' })
-    } catch { /* file may not exist yet — still remove from list */ }
+    // Fire the delete in the background so the list updates on click instead of
+    // waiting out the round trip. A failure is ignored — the file may not exist yet.
+    apiFetch(`${apiBase}/api/roi/${lotId}`, { method: 'DELETE' }).catch(() => {})
     const updated = lots.filter(l => l.id !== lotId)
     setLots(updated)
     localStorage.setItem(LOTS_KEY, JSON.stringify(updated))
@@ -633,7 +633,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               value={selectedLotId}
               onChange={e => setSelectedLotId(e.target.value)}
               className="panel-select"
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 0 }}
             >
               {lots.map(l => (
                 <option key={l.id} value={l.id}>{l.name}</option>

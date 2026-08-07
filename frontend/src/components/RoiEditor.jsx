@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   ROI_COLOR, HIT_PX,
-  pointInPolygon, getCentroid, ptDistPx,
+  pointInPolygon, getCentroid, ptDistPx, cornerGuides,
   divideQuad, smoothRois, regularizeRows,
 } from './roiGeometry'
 import { drawScene } from './roiDraw'
@@ -10,6 +10,17 @@ import RoiToolbar from './RoiToolbar'
 // Re-exported so existing importers (and the test suite) keep pulling these from
 // this module; the implementations live in roiGeometry.
 export { divideQuad, smoothRois, regularizeRows }
+
+const MAX_ZOOM = 12
+
+// Keep the zoomed image covering the canvas. At zoom k the visible window is 1/k
+// of the image, so the offset can only run from 1-k to 0. Both collapse to 0 at
+// k=1, which is what snaps the view back when the wheel scrolls all the way out.
+const clampView = (k, ox, oy) => ({
+  k,
+  ox: Math.min(0, Math.max(1 - k, ox)),
+  oy: Math.min(0, Math.max(1 - k, oy)),
+})
 
 export default function RoiEditor({
   backgroundImage = null,
@@ -27,6 +38,7 @@ export default function RoiEditor({
   const bgImgRef = useRef(null)
   const dragRef = useRef(null)
   const didDragRef = useRef(false)
+  const panRef = useRef(null)
   const [mode, setMode] = useState('polygon')
   const [selectedId, setSelectedId] = useState(null)
   const [selectedProposalId, setSelectedProposalId] = useState(null)
@@ -38,6 +50,9 @@ export default function RoiEditor({
   const [past, setPast] = useState([])
   const [future, setFuture] = useState([])
   const [divideN, setDivideN] = useState(4)
+  // Wheel zoom. An image point maps onto the canvas as point * k + offset.
+  const [view, setView] = useState({ k: 1, ox: 0, oy: 0 })
+  const [guide, setGuide] = useState(null)   // nearby corner / alignment hints under the cursor
   // ── Orientation layer (display-only frame: perimeter, gates, flow, anchor) ──
   const orientEnabled = !!onOrientationChange
   const [layer, setLayer] = useState('slots')            // 'slots' | 'orientation'
@@ -57,11 +72,31 @@ export default function RoiEditor({
     const rect = canvas.getBoundingClientRect()
     // Touch events carry coords on touches/changedTouches; mouse falls through to e.
     const src = e.touches?.[0] || e.changedTouches?.[0] || e
+    // Invert the zoom so every handler keeps working in image coordinates.
     return [
-      (src.clientX - rect.left) / rect.width,
-      (src.clientY - rect.top) / rect.height,
+      ((src.clientX - rect.left) / rect.width - view.ox) / view.k,
+      ((src.clientY - rect.top) / rect.height - view.oy) / view.k,
     ]
-  }, [])
+  }, [view])
+
+  // Hit tests measure distances in screen pixels, so the canvas span they compare
+  // normalised points against has to grow with the zoom.
+  const hitSpan = useCallback(() => {
+    const canvas = canvasRef.current
+    return [(canvas ? canvas.width : 1) * view.k, (canvas ? canvas.height : 1) * view.k]
+  }, [view.k])
+
+  // Show where the cursor sits relative to neighbouring corners. Advisory only:
+  // the point lands wherever the user clicks, the guides just make "on the corner"
+  // and "lined up with it" visible.
+  const guideAt = useCallback((pt, excludeId = null) => {
+    const [W, H] = hitSpan()
+    const polys = [
+      ...rois.filter(r => r.id !== excludeId).map(r => r.polygon),
+      ...proposals.map(p => p.polygon),
+    ]
+    return cornerGuides(pt[0], pt[1], polys, W, H)
+  }, [rois, proposals, hitSpan])
 
   const redraw = useCallback(() => {
     const canvas = canvasRef.current
@@ -71,10 +106,10 @@ export default function RoiEditor({
       bgImg: bgImgRef.current,
       rois, proposals, selectedId, selectedProposalId, inProgress, livePoint,
       liveRect, mode, editPolygon, orientEnabled, layer, O, oGates, oFlow,
-      perimDraft, flowStart,
+      perimDraft, flowStart, view, guide,
     })
   }, [rois, proposals, selectedId, selectedProposalId, inProgress, livePoint, liveRect, mode, editPolygon,
-      orientEnabled, layer, orientation, perimDraft, flowStart, oPerims, O.anchor, oGates, oFlow])
+      orientEnabled, layer, orientation, perimDraft, flowStart, oPerims, O.anchor, oGates, oFlow, view, guide])
 
   const syncSize = useCallback(() => {
     const container = containerRef.current
@@ -110,6 +145,36 @@ export default function RoiEditor({
     }
     return () => { window.removeEventListener('resize', handleResize); cancelAnimationFrame(raf); ro?.disconnect() }
   }, [syncSize, redraw])
+
+  // A different background (another lot, or a re-upload) starts back at 1:1.
+  useEffect(() => { setView({ k: 1, ox: 0, oy: 0 }) }, [backgroundImage])
+
+  // Wheel zoom anchored on the cursor. Registered natively with passive:false —
+  // React's synthetic wheel listener is passive, so preventDefault from an onWheel
+  // prop would not stop the page behind the editor from scrolling.
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const onWheel = (e) => {
+      e.preventDefault()
+      const rect = canvas.getBoundingClientRect()
+      // A horizontal wheel, or shift+wheel, scrolls a zoomed image sideways.
+      if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        const d = (e.deltaX || e.deltaY) / rect.width
+        setView(v => clampView(v.k, v.ox - d, v.oy))
+        return
+      }
+      const cx = (e.clientX - rect.left) / rect.width
+      const cy = (e.clientY - rect.top) / rect.height
+      setView(v => {
+        const k = Math.min(MAX_ZOOM, Math.max(1, v.k * Math.exp(-e.deltaY * 0.0015)))
+        // Pin the image point under the cursor so the picture grows away from it.
+        return clampView(k, cx - ((cx - v.ox) / v.k) * k, cy - ((cy - v.oy) / v.k) * k)
+      })
+    }
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
+  }, [])
 
   const commitChange = useCallback((newRois) => {
     setPast(p => [...p, rois])
@@ -169,6 +234,7 @@ export default function RoiEditor({
         // Cancel any in-progress drawing (slot polygon or perimeter/flow draft).
         setInProgress([])
         setLivePoint(null)
+        setGuide(null)
         setPerimDraft([])
         setFlowStart(null)
         if (dragRef.current) { dragRef.current = null; setEditPolygon(null) }
@@ -327,9 +393,7 @@ export default function RoiEditor({
   // ── Orientation authoring ──
   const handleOrientClick = useCallback((pt) => {
     const [x, y] = pt
-    const canvas = canvasRef.current
-    const W = canvas ? canvas.width : 1
-    const H = canvas ? canvas.height : 1
+    const [W, H] = hitSpan()
     const oid = () => `o_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
     const near = (ax, ay) => ptDistPx(x, y, ax, ay, W, H) < 16
 
@@ -359,7 +423,7 @@ export default function RoiEditor({
       const pi = oPerims.findIndex(poly => Array.isArray(poly) && poly.length >= 3 && pointInPolygon(x, y, poly))
       if (pi >= 0) commitOrient({ perimeters: oPerims.filter((_, i) => i !== pi) })
     }
-  }, [orientTool, perimDraft, flowStart, oPerims, oGates, oFlow, O.anchor, commitOrient])
+  }, [orientTool, perimDraft, flowStart, oPerims, oGates, oFlow, O.anchor, commitOrient, hitSpan])
 
   const changeLayer = useCallback((l) => {
     setLayer(l)
@@ -408,9 +472,7 @@ export default function RoiEditor({
       }
 
       if (inProgress.length >= 3) {
-        const canvas = canvasRef.current
-        const W = canvas ? canvas.width : 1
-        const H = canvas ? canvas.height : 1
+        const [W, H] = hitSpan()
         const [fx, fy] = inProgress[0]
         const dx = (pt[0] - fx) * W
         const dy = (pt[1] - fy) * H
@@ -424,7 +486,7 @@ export default function RoiEditor({
 
       setInProgress(prev => [...prev, pt])
     }
-  }, [mode, inProgress, rois, proposals, getPoint, makeRoi, layer, handleOrientClick])
+  }, [mode, inProgress, rois, proposals, getPoint, makeRoi, layer, handleOrientClick, hitSpan])
 
   const handleDblClick = useCallback((e) => {
     if (layer === 'orientation') {
@@ -443,13 +505,25 @@ export default function RoiEditor({
   }, [mode, inProgress, makeRoi, layer, orientTool, perimDraft, oPerims, commitOrient])
 
   const handleMouseMove = useCallback((e) => {
+    if (panRef.current) {
+      const rect = canvasRef.current.getBoundingClientRect()
+      const p = panRef.current
+      setView(v => clampView(
+        v.k,
+        p.ox + (e.clientX - p.x) / rect.width,
+        p.oy + (e.clientY - p.y) / rect.height,
+      ))
+      return
+    }
+
     const pt = getPoint(e)
 
     if (layer === 'orientation') { setLivePoint(pt); return }
 
     if (mode === 'edit' && dragRef.current) {
-      const { type, vertexIdx, origPolygon, startPt } = dragRef.current
+      const { type, vertexIdx, origPolygon, startPt, roiId } = dragRef.current
       if (type === 'vertex') {
+        setGuide(guideAt(pt, roiId))
         const cx = Math.max(0, Math.min(1, pt[0]))
         const cy = Math.max(0, Math.min(1, pt[1]))
         setEditPolygon(origPolygon.map((v, i) => i === vertexIdx ? [cx, cy] : v))
@@ -465,20 +539,29 @@ export default function RoiEditor({
     }
 
     if (mode === 'polygon') {
+      setGuide(guideAt(pt))
       setLivePoint(pt)
-    } else if (mode === 'rect' && rectStart) {
-      setLiveRect({ x1: rectStart[0], y1: rectStart[1], x2: pt[0], y2: pt[1] })
+    } else if (mode === 'rect') {
+      setGuide(guideAt(pt))
+      if (rectStart) setLiveRect({ x1: rectStart[0], y1: rectStart[1], x2: pt[0], y2: pt[1] })
     }
-  }, [mode, rectStart, getPoint, layer])
+  }, [mode, rectStart, getPoint, layer, guideAt])
 
   const handleMouseDown = useCallback((e) => {
+    // Ctrl + left-drag pans a zoomed image. didDragRef swallows the click that
+    // follows, so the pan doesn't also drop a polygon point or change selection.
+    if (e.ctrlKey && e.button === 0) {
+      e.preventDefault()
+      panRef.current = { x: e.clientX, y: e.clientY, ox: view.ox, oy: view.oy }
+      didDragRef.current = true
+      return
+    }
+
     if (mode === 'edit') {
       const pt = getPoint(e)
       const roi = selectedId ? rois.find(r => r.id === selectedId) : null
       if (roi) {
-        const canvas = canvasRef.current
-        const W = canvas ? canvas.width : 1
-        const H = canvas ? canvas.height : 1
+        const [W, H] = hitSpan()
         const poly = roi.polygon
 
         // vertex handle hit
@@ -519,9 +602,12 @@ export default function RoiEditor({
     if (mode !== 'rect') return
     setRectStart(getPoint(e))
     setLiveRect(null)
-  }, [mode, selectedId, rois, getPoint])
+  }, [mode, selectedId, rois, getPoint, hitSpan, view])
 
   const handleMouseUp = useCallback((e) => {
+    if (panRef.current) { panRef.current = null; return }
+    setGuide(null)
+
     if (mode === 'edit' && dragRef.current) {
       if (editPolygon) {
         const { roiId } = dragRef.current
@@ -581,6 +667,7 @@ export default function RoiEditor({
     setRectStart(null)
     setLiveRect(null)
     setLivePoint(null)
+    setGuide(null)
     setEditPolygon(null)
     dragRef.current = null
   }

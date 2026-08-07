@@ -1,0 +1,30 @@
+[
+  {
+    "id": "bilder-8ddb6b",
+    "name": "bilder",
+    "source": "0",
+    "type": "usb",
+    "roi_camera_id": "bilder-8ddb6b",
+    "active": false,
+    "added_at": "2026-06-07T12:33:10.666882+00:00"
+  },
+  {
+    "id": "rtslot-60b576",
+    "name": "RTSLot",
+    "source": "rtsp://127.0.0.1:8554/",
+    "type": "rtsp",
+    "roi_camera_id": "rtslot-60b576",
+    "active": false,
+    "added_at": "2026-06-17T16:44:56.218034+00:00"
+  },
+  {
+    "id": "krom-1f88a3",
+    "name": "Krom",
+    "source": "https://youtu.be/gQUoJ6inXK4",
+    "type": "youtube",
+    "roi_camera_id": "krom-1f88a3",
+    "active": false,
+    "added_at": "2026-06-23T17:41:51.815508+00:00",
+    "data_gathering": true
+  }
+]

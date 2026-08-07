@@ -35,6 +35,28 @@ export function ptDistPx(ax, ay, bx, by, W, H) {
   return Math.sqrt(dx * dx + dy * dy)
 }
 
+// Drawing aids for (x,y) against the corners of `polys`: the corner it is closest
+// to, and the corner columns/rows it currently lines up with. Purely advisory —
+// nothing here moves the point, the cursor stays where the user put it. Returns
+// null when there is nothing to show. Thresholds are screen pixels, so pass the
+// zoomed canvas span to keep the guides consistent at any zoom.
+export function cornerGuides(x, y, polys, W, H, nearPx = 18, alignPx = 5) {
+  let corner = null, bestD = nearPx
+  let vx = null, bestVx = alignPx
+  let hy = null, bestHy = alignPx
+  for (const poly of polys) {
+    for (const [px, py] of poly) {
+      const d = ptDistPx(x, y, px, py, W, H)
+      if (d < bestD) { bestD = d; corner = [px, py] }
+      const dx = Math.abs(x - px) * W
+      if (dx < bestVx) { bestVx = dx; vx = px }
+      const dy = Math.abs(y - py) * H
+      if (dy < bestHy) { bestHy = dy; hy = py }
+    }
+  }
+  return (corner || vx !== null || hy !== null) ? { corner, vx, hy } : null
+}
+
 // Split a 4-corner quad into n stalls along its longer axis. Returns an array
 // of n polygons, or null if the input isn't a quad / n < 2. Interpolating along
 // the drawn edges keeps dividers converging toward the vanishing point, so

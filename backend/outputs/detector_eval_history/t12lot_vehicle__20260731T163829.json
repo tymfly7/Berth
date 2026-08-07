@@ -1,0 +1,125 @@
+{
+  "dataset": "t12lot_vehicle",
+  "timestamp": "2026-07-31T16:38:29",
+  "result": {
+    "dataset": "data\\t12lot_vehicle\\dataset.yaml",
+    "split": "test",
+    "weights": "D:\\Documents\\School Project\\backend\\models\\best_yolo26_detect.pt",
+    "imgsz": 640,
+    "images": 101,
+    "timestamp": "2026-07-31T16:38:02",
+    "baseline": {
+      "map50": 82.27,
+      "map50_95": 60.88,
+      "precision": 82.64,
+      "recall": 77.81
+    },
+    "sweep": {
+      "points": [
+        {
+          "conf": 0.1,
+          "precision": 77.5,
+          "recall": 76.79,
+          "f1": 77.14
+        },
+        {
+          "conf": 0.15,
+          "precision": 81.39,
+          "recall": 74.69,
+          "f1": 77.9
+        },
+        {
+          "conf": 0.2,
+          "precision": 83.99,
+          "recall": 72.96,
+          "f1": 78.08
+        },
+        {
+          "conf": 0.25,
+          "precision": 86.17,
+          "recall": 71.37,
+          "f1": 78.08
+        },
+        {
+          "conf": 0.3,
+          "precision": 87.92,
+          "recall": 69.58,
+          "f1": 77.68
+        },
+        {
+          "conf": 0.35,
+          "precision": 89.26,
+          "recall": 68.0,
+          "f1": 77.19
+        },
+        {
+          "conf": 0.4,
+          "precision": 90.16,
+          "recall": 66.51,
+          "f1": 76.55
+        },
+        {
+          "conf": 0.45,
+          "precision": 90.39,
+          "recall": 64.93,
+          "f1": 75.57
+        },
+        {
+          "conf": 0.5,
+          "precision": 90.89,
+          "recall": 63.24,
+          "f1": 74.59
+        },
+        {
+          "conf": 0.55,
+          "precision": 91.03,
+          "recall": 61.2,
+          "f1": 73.19
+        },
+        {
+          "conf": 0.6,
+          "precision": 91.27,
+          "recall": 58.79,
+          "f1": 71.52
+        }
+      ],
+      "best_conf": 0.2,
+      "best_f1": 78.08,
+      "config_conf": 0.25
+    },
+    "bands": [
+      {
+        "band": "night",
+        "images": 0,
+        "instances": 0
+      },
+      {
+        "band": "dusk",
+        "images": 1,
+        "instances": 8,
+        "map50": 39.29,
+        "map50_95": 30.59,
+        "precision": 32.85,
+        "recall": 55.25
+      },
+      {
+        "band": "overcast",
+        "images": 2,
+        "instances": 17,
+        "map50": 63.74,
+        "map50_95": 51.09,
+        "precision": 57.56,
+        "recall": 64.71
+      },
+      {
+        "band": "bright",
+        "images": 98,
+        "instances": 1931,
+        "map50": 82.51,
+        "map50_95": 61.08,
+        "precision": 84.01,
+        "recall": 77.83
+      }
+    ]
+  }
+}

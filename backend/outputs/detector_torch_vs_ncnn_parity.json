@@ -1,0 +1,183 @@
+{
+  "measurement": "torch vs ncnn parity and latency, single-class vehicle detector",
+  "timestamp": "2026-07-31T17:33:11",
+  "machine": "Windows dev machine, CPU only, 12th Gen Intel Core i7-12850HX",
+  "torch": "2.12.0+cpu",
+  "ultralytics": "8.4.56",
+  "torch_weights": "D:\\Documents\\School Project\\backend\\models\\best_yolo26_detect.pt",
+  "ncnn_weights": "D:\\Documents\\School Project\\backend\\edge_models\\best_yolo26_detect_ncnn_model",
+  "export_matches_checkpoint": true,
+  "notes": [
+    "Metrics are Ultralytics .val(). Latency is a separate plain predict loop over the same frames, first 5 discarded as warm-up.",
+    "wall_ms is the whole predict call, infer_ms is the Ultralytics inference stage alone.",
+    "Edge hardware out of scope. These are x86 timings and do not predict ARM.",
+    "The shipped NCNN export is baked at 640x640. Running it at imgsz 1280 returns near-zero mAP with no error raised (row export_imgsz 640 / imgsz 1280, valid false).",
+    "T12Lot precision is bounded near 83 percent by annotation scope, so figures around there are expected and are not an NCNN artefact.",
+    "Does not supersede detector_eval_vehicle_dataset.json or detector_eval_t12lot_vehicle.json, which hold the deployment-size baseline, sweep and luminance bands."
+  ],
+  "rows": [
+    {
+      "dataset": "vehicle_dataset",
+      "lot": "t10lot",
+      "split": "val",
+      "imgsz": 640,
+      "backend": "torch",
+      "export_imgsz": null,
+      "frames": 41,
+      "valid": true,
+      "map50": 98.39,
+      "map50_95": 94.41,
+      "precision": 96.13,
+      "recall": 93.99,
+      "latency": {
+        "timed_frames": 36,
+        "wall_median_ms": 84.9,
+        "wall_mean_ms": 87.2,
+        "infer_median_ms": 73.2,
+        "infer_mean_ms": 74.4
+      }
+    },
+    {
+      "dataset": "vehicle_dataset",
+      "lot": "t10lot",
+      "split": "val",
+      "imgsz": 640,
+      "backend": "ncnn",
+      "export_imgsz": 640,
+      "frames": 41,
+      "valid": true,
+      "map50": 98.16,
+      "map50_95": 93.51,
+      "precision": 97.91,
+      "recall": 96.17,
+      "latency": {
+        "timed_frames": 36,
+        "wall_median_ms": 111.8,
+        "wall_mean_ms": 113.3,
+        "infer_median_ms": 97.6,
+        "infer_mean_ms": 98.9
+      }
+    },
+    {
+      "dataset": "t12lot_vehicle",
+      "lot": "t12lot",
+      "split": "test",
+      "imgsz": 640,
+      "backend": "torch",
+      "export_imgsz": null,
+      "frames": 101,
+      "valid": true,
+      "map50": 82.27,
+      "map50_95": 60.88,
+      "precision": 82.64,
+      "recall": 77.81,
+      "latency": {
+        "timed_frames": 96,
+        "wall_median_ms": 70.9,
+        "wall_mean_ms": 71.2,
+        "infer_median_ms": 61.1,
+        "infer_mean_ms": 61.1
+      }
+    },
+    {
+      "dataset": "t12lot_vehicle",
+      "lot": "t12lot",
+      "split": "test",
+      "imgsz": 640,
+      "backend": "ncnn",
+      "export_imgsz": 640,
+      "frames": 101,
+      "valid": true,
+      "map50": 83.39,
+      "map50_95": 61.76,
+      "precision": 82.42,
+      "recall": 79.4,
+      "latency": {
+        "timed_frames": 96,
+        "wall_median_ms": 108.3,
+        "wall_mean_ms": 108.5,
+        "infer_median_ms": 94.5,
+        "infer_mean_ms": 94.3
+      }
+    },
+    {
+      "dataset": "t12lot_vehicle",
+      "lot": "t12lot",
+      "split": "test",
+      "imgsz": 1280,
+      "backend": "torch",
+      "export_imgsz": null,
+      "frames": 101,
+      "valid": true,
+      "map50": 91.8,
+      "map50_95": 84.37,
+      "precision": 84.15,
+      "recall": 89.78,
+      "latency": {
+        "timed_frames": 96,
+        "wall_median_ms": 259.5,
+        "wall_mean_ms": 329.7,
+        "infer_median_ms": 243.9,
+        "infer_mean_ms": 308.4
+      }
+    },
+    {
+      "dataset": "t12lot_vehicle",
+      "lot": "t12lot",
+      "split": "test",
+      "imgsz": 1280,
+      "backend": "ncnn",
+      "export_imgsz": 640,
+      "frames": 101,
+      "valid": false,
+      "invalid_reason": "shipped export is baked at 640x640, so imgsz 1280 produces near-empty output rather than an error; kept to document the silent failure, not as a parity result",
+      "map50": 0.0,
+      "map50_95": 0.0,
+      "precision": 0.31,
+      "recall": 0.36,
+      "latency": {
+        "timed_frames": 96,
+        "wall_median_ms": 368.4,
+        "wall_mean_ms": 380.5,
+        "infer_median_ms": 346.7,
+        "infer_mean_ms": 357.1
+      }
+    },
+    {
+      "dataset": "t12lot_vehicle",
+      "lot": "t12lot",
+      "split": "test",
+      "imgsz": 1280,
+      "backend": "ncnn",
+      "export_imgsz": 1280,
+      "frames": 101,
+      "valid": true,
+      "note": "scratch export built at imgsz 1280 for a like-for-like comparison; not present under backend/edge_models",
+      "map50": 89.84,
+      "map50_95": 80.56,
+      "precision": 85.29,
+      "recall": 88.92,
+      "latency": {
+        "timed_frames": 96,
+        "wall_median_ms": 661.0,
+        "wall_mean_ms": 599.6,
+        "infer_median_ms": 633.6,
+        "infer_mean_ms": 572.7
+      }
+    }
+  ],
+  "finding": {
+    "safe_at_640": true,
+    "summary": "At the deployed 640 the two backends agree to about one point on mAP on both datasets, and every metric moving more than one point moves in the safe direction. Parity does not hold at 1280, where NCNN loses 1.96 mAP50 and 3.81 mAP50-95 against torch.",
+    "moves_over_one_point": [
+      {"combo": "t10lot 640", "metric": "recall", "torch": 93.99, "ncnn": 96.17, "delta": 2.18, "direction": "safe"},
+      {"combo": "t10lot 640", "metric": "precision", "torch": 96.13, "ncnn": 97.91, "delta": 1.78, "direction": "safe"},
+      {"combo": "t12lot 640", "metric": "recall", "torch": 77.81, "ncnn": 79.4, "delta": 1.59, "direction": "safe"},
+      {"combo": "t12lot 640", "metric": "map50", "torch": 82.27, "ncnn": 83.39, "delta": 1.12, "direction": "safe"},
+      {"combo": "t12lot 1280", "metric": "map50_95", "torch": 84.37, "ncnn": 80.56, "delta": -3.81, "direction": "unsafe"},
+      {"combo": "t12lot 1280", "metric": "map50", "torch": 91.8, "ncnn": 89.84, "delta": -1.96, "direction": "unsafe"},
+      {"combo": "t12lot 1280", "metric": "precision", "torch": 84.15, "ncnn": 85.29, "delta": 1.14, "direction": "safe"}
+    ],
+    "latency_cost_at_640": "NCNN is slower on this x86 machine, not faster: median wall time 84.9 to 111.8 ms on t10lot and 70.9 to 108.3 ms on t12lot, roughly 1.3x to 1.5x. NCNN is tuned for ARM NEON, so no edge conclusion follows."
+  }
+}

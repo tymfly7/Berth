@@ -1,0 +1,597 @@
+{
+ "what": "Classifier accuracy when the whole frame is resized before the bays are cropped, which is what the ingest path does. Heights are source heights in pixels; 'native' is the unresized frame.",
+ "produced_by": "python -m dev.eval.frame_resolution_eval",
+ "commands": {
+  "t10lot": "python -m dev.eval.frame_resolution_eval --dataset <t10 yolo detect dataset> --models <roster> --heights 360 480 540 720 0",
+  "t12lot": "python -m dev.eval.frame_resolution_eval --coco data/t12lot/labels_t12lot_labeled_2026-07-04-08-35-32.json data/t12lot --models <roster> --heights 360 480 540 720 1080 0"
+ },
+ "operating_points": {
+  "edge_profile": 540,
+  "server_profile": 720,
+  "note": "config.FRAME_HEIGHT, 540 on edge and 720 on server, is applied before the bays are cropped"
+ },
+ "caveats": [
+  "T10Lot bays come from the detection dataset's axis-aligned boxes, not the perspective-warped quads used for the training crops, so absolute values are not comparable to tab:model_comparison. Columns are comparable to each other within a row.",
+  "T12Lot carries 746 bays, so the 95% interval is roughly +/-1.5 points. Movements smaller than that are not evidence."
+ ],
+ "arms": {
+  "t10lot": {
+   "frames": 472,
+   "bays": 14686,
+   "occupied": 9225,
+   "vacant": 5461,
+   "threshold": 0.5,
+   "models": {
+    "cnn_scratch": {
+     "480": {
+      "accuracy": 95.86,
+      "false_positives": 500,
+      "false_negatives": 108,
+      "n": 14686
+     },
+     "720": {
+      "accuracy": 95.51,
+      "false_positives": 574,
+      "false_negatives": 86,
+      "n": 14686
+     },
+     "native": {
+      "accuracy": 95.24,
+      "false_positives": 621,
+      "false_negatives": 78,
+      "n": 14686
+     },
+     "360": {
+      "accuracy": 96.0,
+      "false_positives": 464,
+      "false_negatives": 124,
+      "n": 14686
+     },
+     "540": {
+      "accuracy": 95.76,
+      "false_positives": 526,
+      "false_negatives": 96,
+      "n": 14686
+     }
+    },
+    "resnet50": {
+     "480": {
+      "accuracy": 95.09,
+      "false_positives": 676,
+      "false_negatives": 45,
+      "n": 14686
+     },
+     "720": {
+      "accuracy": 96.16,
+      "false_positives": 504,
+      "false_negatives": 60,
+      "n": 14686
+     },
+     "native": {
+      "accuracy": 96.58,
+      "false_positives": 423,
+      "false_negatives": 79,
+      "n": 14686
+     },
+     "360": {
+      "accuracy": 94.22,
+      "false_positives": 803,
+      "false_negatives": 46,
+      "n": 14686
+     },
+     "540": {
+      "accuracy": 95.38,
+      "false_positives": 631,
+      "false_negatives": 48,
+      "n": 14686
+     }
+    },
+    "mobilenetv4s": {
+     "480": {
+      "accuracy": 96.33,
+      "false_positives": 475,
+      "false_negatives": 64,
+      "n": 14686
+     },
+     "720": {
+      "accuracy": 96.59,
+      "false_positives": 413,
+      "false_negatives": 88,
+      "n": 14686
+     },
+     "native": {
+      "accuracy": 96.59,
+      "false_positives": 392,
+      "false_negatives": 109,
+      "n": 14686
+     },
+     "360": {
+      "accuracy": 95.95,
+      "false_positives": 544,
+      "false_negatives": 51,
+      "n": 14686
+     },
+     "540": {
+      "accuracy": 96.53,
+      "false_positives": 445,
+      "false_negatives": 65,
+      "n": 14686
+     }
+    },
+    "mobilenetv4m": {
+     "480": {
+      "accuracy": 94.52,
+      "false_positives": 761,
+      "false_negatives": 44,
+      "n": 14686
+     },
+     "720": {
+      "accuracy": 94.98,
+      "false_positives": 689,
+      "false_negatives": 48,
+      "n": 14686
+     },
+     "native": {
+      "accuracy": 95.37,
+      "false_positives": 605,
+      "false_negatives": 75,
+      "n": 14686
+     },
+     "360": {
+      "accuracy": 94.4,
+      "false_positives": 787,
+      "false_negatives": 35,
+      "n": 14686
+     },
+     "540": {
+      "accuracy": 94.65,
+      "false_positives": 745,
+      "false_negatives": 41,
+      "n": 14686
+     }
+    },
+    "resnet18": {
+     "360": {
+      "accuracy": 93.65,
+      "false_positives": 908,
+      "false_negatives": 25,
+      "n": 14686
+     },
+     "480": {
+      "accuracy": 94.44,
+      "false_positives": 787,
+      "false_negatives": 30,
+      "n": 14686
+     },
+     "540": {
+      "accuracy": 94.46,
+      "false_positives": 780,
+      "false_negatives": 34,
+      "n": 14686
+     },
+     "720": {
+      "accuracy": 94.72,
+      "false_positives": 736,
+      "false_negatives": 39,
+      "n": 14686
+     },
+     "native": {
+      "accuracy": 95.09,
+      "false_positives": 670,
+      "false_negatives": 51,
+      "n": 14686
+     }
+    },
+    "yolo26n_classify": {
+     "360": {
+      "accuracy": 95.34,
+      "false_positives": 573,
+      "false_negatives": 112,
+      "n": 14686
+     },
+     "480": {
+      "accuracy": 95.28,
+      "false_positives": 592,
+      "false_negatives": 101,
+      "n": 14686
+     },
+     "540": {
+      "accuracy": 95.22,
+      "false_positives": 600,
+      "false_negatives": 102,
+      "n": 14686
+     },
+     "720": {
+      "accuracy": 95.12,
+      "false_positives": 616,
+      "false_negatives": 100,
+      "n": 14686
+     },
+     "native": {
+      "accuracy": 95.07,
+      "false_positives": 628,
+      "false_negatives": 96,
+      "n": 14686
+     }
+    },
+    "yolo26s_classify": {
+     "360": {
+      "accuracy": 95.04,
+      "false_positives": 627,
+      "false_negatives": 102,
+      "n": 14686
+     },
+     "480": {
+      "accuracy": 94.98,
+      "false_positives": 642,
+      "false_negatives": 95,
+      "n": 14686
+     },
+     "540": {
+      "accuracy": 94.95,
+      "false_positives": 645,
+      "false_negatives": 96,
+      "n": 14686
+     },
+     "720": {
+      "accuracy": 94.89,
+      "false_positives": 656,
+      "false_negatives": 95,
+      "n": 14686
+     },
+     "native": {
+      "accuracy": 94.78,
+      "false_positives": 672,
+      "false_negatives": 94,
+      "n": 14686
+     }
+    },
+    "yolo26m_classify": {
+     "360": {
+      "accuracy": 95.66,
+      "false_positives": 548,
+      "false_negatives": 90,
+      "n": 14686
+     },
+     "480": {
+      "accuracy": 95.44,
+      "false_positives": 582,
+      "false_negatives": 87,
+      "n": 14686
+     },
+     "540": {
+      "accuracy": 95.42,
+      "false_positives": 587,
+      "false_negatives": 85,
+      "n": 14686
+     },
+     "720": {
+      "accuracy": 95.37,
+      "false_positives": 597,
+      "false_negatives": 83,
+      "n": 14686
+     },
+     "native": {
+      "accuracy": 95.26,
+      "false_positives": 614,
+      "false_negatives": 82,
+      "n": 14686
+     }
+    }
+   }
+  },
+  "t12lot": {
+   "frames": 45,
+   "bays": 746,
+   "occupied": 502,
+   "vacant": 244,
+   "threshold": 0.5,
+   "models": {
+    "cnn_scratch": {
+     "360": {
+      "accuracy": 95.17,
+      "false_positives": 17,
+      "false_negatives": 19,
+      "n": 746
+     },
+     "480": {
+      "accuracy": 95.84,
+      "false_positives": 22,
+      "false_negatives": 9,
+      "n": 746
+     },
+     "540": {
+      "accuracy": 95.84,
+      "false_positives": 22,
+      "false_negatives": 9,
+      "n": 746
+     },
+     "720": {
+      "accuracy": 95.58,
+      "false_positives": 27,
+      "false_negatives": 6,
+      "n": 746
+     },
+     "1080": {
+      "accuracy": 95.71,
+      "false_positives": 27,
+      "false_negatives": 5,
+      "n": 746
+     },
+     "native": {
+      "accuracy": 95.44,
+      "false_positives": 29,
+      "false_negatives": 5,
+      "n": 746
+     }
+    },
+    "resnet50": {
+     "360": {
+      "accuracy": 91.02,
+      "false_positives": 20,
+      "false_negatives": 47,
+      "n": 746
+     },
+     "480": {
+      "accuracy": 92.49,
+      "false_positives": 25,
+      "false_negatives": 31,
+      "n": 746
+     },
+     "540": {
+      "accuracy": 94.24,
+      "false_positives": 27,
+      "false_negatives": 16,
+      "n": 746
+     },
+     "720": {
+      "accuracy": 95.84,
+      "false_positives": 26,
+      "false_negatives": 5,
+      "n": 746
+     },
+     "1080": {
+      "accuracy": 97.05,
+      "false_positives": 17,
+      "false_negatives": 5,
+      "n": 746
+     },
+     "native": {
+      "accuracy": 96.78,
+      "false_positives": 18,
+      "false_negatives": 6,
+      "n": 746
+     }
+    },
+    "mobilenetv4s": {
+     "360": {
+      "accuracy": 96.25,
+      "false_positives": 19,
+      "false_negatives": 9,
+      "n": 746
+     },
+     "480": {
+      "accuracy": 97.05,
+      "false_positives": 17,
+      "false_negatives": 5,
+      "n": 746
+     },
+     "540": {
+      "accuracy": 96.92,
+      "false_positives": 17,
+      "false_negatives": 6,
+      "n": 746
+     },
+     "720": {
+      "accuracy": 97.05,
+      "false_positives": 16,
+      "false_negatives": 6,
+      "n": 746
+     },
+     "1080": {
+      "accuracy": 97.18,
+      "false_positives": 15,
+      "false_negatives": 6,
+      "n": 746
+     },
+     "native": {
+      "accuracy": 96.78,
+      "false_positives": 17,
+      "false_negatives": 7,
+      "n": 746
+     }
+    },
+    "mobilenetv4m": {
+     "360": {
+      "accuracy": 95.31,
+      "false_positives": 30,
+      "false_negatives": 5,
+      "n": 746
+     },
+     "480": {
+      "accuracy": 95.44,
+      "false_positives": 30,
+      "false_negatives": 4,
+      "n": 746
+     },
+     "540": {
+      "accuracy": 95.31,
+      "false_positives": 29,
+      "false_negatives": 6,
+      "n": 746
+     },
+     "720": {
+      "accuracy": 95.58,
+      "false_positives": 28,
+      "false_negatives": 5,
+      "n": 746
+     },
+     "1080": {
+      "accuracy": 95.31,
+      "false_positives": 27,
+      "false_negatives": 8,
+      "n": 746
+     },
+     "native": {
+      "accuracy": 95.31,
+      "false_positives": 27,
+      "false_negatives": 8,
+      "n": 746
+     }
+    },
+    "yolo26n_classify": {
+     "360": {
+      "accuracy": 95.04,
+      "false_positives": 4,
+      "false_negatives": 33,
+      "n": 746
+     },
+     "480": {
+      "accuracy": 96.11,
+      "false_positives": 4,
+      "false_negatives": 25,
+      "n": 746
+     },
+     "540": {
+      "accuracy": 96.11,
+      "false_positives": 4,
+      "false_negatives": 25,
+      "n": 746
+     },
+     "720": {
+      "accuracy": 96.65,
+      "false_positives": 4,
+      "false_negatives": 21,
+      "n": 746
+     },
+     "1080": {
+      "accuracy": 96.78,
+      "false_positives": 4,
+      "false_negatives": 20,
+      "n": 746
+     },
+     "native": {
+      "accuracy": 96.65,
+      "false_positives": 5,
+      "false_negatives": 20,
+      "n": 746
+     }
+    },
+    "resnet18": {
+     "360": {
+      "accuracy": 85.52,
+      "false_positives": 106,
+      "false_negatives": 2,
+      "n": 746
+     },
+     "480": {
+      "accuracy": 89.14,
+      "false_positives": 78,
+      "false_negatives": 3,
+      "n": 746
+     },
+     "540": {
+      "accuracy": 92.63,
+      "false_positives": 52,
+      "false_negatives": 3,
+      "n": 746
+     },
+     "720": {
+      "accuracy": 93.83,
+      "false_positives": 41,
+      "false_negatives": 5,
+      "n": 746
+     },
+     "1080": {
+      "accuracy": 95.44,
+      "false_positives": 28,
+      "false_negatives": 6,
+      "n": 746
+     },
+     "native": {
+      "accuracy": 95.31,
+      "false_positives": 28,
+      "false_negatives": 7,
+      "n": 746
+     }
+    },
+    "yolo26s_classify": {
+     "360": {
+      "accuracy": 95.71,
+      "false_positives": 16,
+      "false_negatives": 16,
+      "n": 746
+     },
+     "480": {
+      "accuracy": 95.71,
+      "false_positives": 16,
+      "false_negatives": 16,
+      "n": 746
+     },
+     "540": {
+      "accuracy": 95.84,
+      "false_positives": 15,
+      "false_negatives": 16,
+      "n": 746
+     },
+     "720": {
+      "accuracy": 95.84,
+      "false_positives": 15,
+      "false_negatives": 16,
+      "n": 746
+     },
+     "1080": {
+      "accuracy": 95.98,
+      "false_positives": 14,
+      "false_negatives": 16,
+      "n": 746
+     },
+     "native": {
+      "accuracy": 96.11,
+      "false_positives": 14,
+      "false_negatives": 15,
+      "n": 746
+     }
+    },
+    "yolo26m_classify": {
+     "360": {
+      "accuracy": 92.76,
+      "false_positives": 4,
+      "false_negatives": 50,
+      "n": 746
+     },
+     "480": {
+      "accuracy": 92.9,
+      "false_positives": 5,
+      "false_negatives": 48,
+      "n": 746
+     },
+     "540": {
+      "accuracy": 93.43,
+      "false_positives": 5,
+      "false_negatives": 44,
+      "n": 746
+     },
+     "720": {
+      "accuracy": 93.16,
+      "false_positives": 5,
+      "false_negatives": 46,
+      "n": 746
+     },
+     "1080": {
+      "accuracy": 93.43,
+      "false_positives": 5,
+      "false_negatives": 44,
+      "n": 746
+     },
+     "native": {
+      "accuracy": 93.57,
+      "false_positives": 6,
+      "false_negatives": 42,
+      "n": 746
+     }
+    }
+   }
+  }
+ }
+}

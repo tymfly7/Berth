@@ -1,0 +1,26 @@
+{
+  "model": "smoketest_model",
+  "timestamp": "2026-07-09T16:50:29",
+  "history": {
+    "train_acc": [
+      1,
+      2,
+      3
+    ],
+    "val_acc": [
+      9,
+      8,
+      7
+    ],
+    "train_loss": [
+      0.1
+    ],
+    "val_loss": [
+      0.2
+    ],
+    "epoch_times": [
+      5,
+      6
+    ]
+  }
+}

@@ -18,6 +18,11 @@ services:
       # webcam alongside two existing feeds; lower to 2 or deactivate a feed if
       # the board struggles.
       - BERTH_MAX_ACTIVE_CAMERAS=3
+      # Ingest downscale. config.py defaults this to 720, which also caps the
+      # full-frame snapshots written by data-gathering mode, since those are
+      # taken after the resize. 1080 keeps captures at the camera's own
+      # resolution for offline evaluation.
+      - BERTH_MAX_FRAME_HEIGHT=1080
       # Force RTSP over TCP (avoids H264 packet loss / corrupt macroblocks on
       # UDP). Keeps the app's YouTube/HLS tuning; rtsp_transport is ignored by
       # non-RTSP sources.
