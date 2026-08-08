@@ -133,9 +133,9 @@ class EdgeYoloClassifier:
     """
     Torch-free NCNN replacement for the YOLO26 classify head on edge nodes.
 
-    Mirrors the Ultralytics classify path in ParkingClassifier (letterbox-to-square
-    then resize to YOLO_CLASSIFY_IMG_SIZE) but runs the exported NCNN model directly,
-    so the edge image needs neither torch nor ultralytics.
+    Mirrors the Ultralytics classify path in ParkingClassifier (resize the short side
+    to YOLO_CLASSIFY_IMG_SIZE, then centre-crop) but runs the exported NCNN model
+    directly, so the edge image needs neither torch nor ultralytics.
 
     Interface mirrors ParkingClassifier: load(), predict(), predict_batch(),
     is_loaded(), model_name, threshold.
@@ -185,20 +185,25 @@ class EdgeYoloClassifier:
     # ── Preprocessing ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def _letterbox_square(pil_img: Image.Image) -> Image.Image:
-        """Pad to a square with neutral gray (114) so the resize doesn't squash
-        non-square crops — matches ParkingClassifier._letterbox_square."""
+    def _resize_center_crop(pil_img: Image.Image, size: int) -> Image.Image:
+        """Resize the short side to `size`, then centre-crop to size x size.
+
+        This is what Ultralytics applies on the torch classify path, so the edge
+        preprocessing has to match it or the two backends stop agreeing. Rounding
+        follows torchvision Resize (truncate) and CenterCrop (round)."""
         w, h = pil_img.size
-        if w == h:
-            return pil_img
-        side = max(w, h)
-        canvas = Image.new("RGB", (side, side), (114, 114, 114))
-        canvas.paste(pil_img, ((side - w) // 2, (side - h) // 2))
-        return canvas
+        if w < h:
+            ow, oh = size, int(size * h / w)
+        else:
+            oh, ow = size, int(size * w / h)
+        pil_img = pil_img.resize((ow, oh), Image.BILINEAR)
+        left = int(round((ow - size) / 2.0))
+        top  = int(round((oh - size) / 2.0))
+        return pil_img.crop((left, top, left + size, top + size))
 
     def _preprocess(self, image) -> np.ndarray:
-        pil = self._letterbox_square(EdgeClassifier._to_pil(image)).resize(
-            (config.YOLO_CLASSIFY_IMG_SIZE, config.YOLO_CLASSIFY_IMG_SIZE), Image.BILINEAR
+        pil = self._resize_center_crop(
+            EdgeClassifier._to_pil(image), config.YOLO_CLASSIFY_IMG_SIZE
         )
         # Ultralytics classify normalisation is /255 only (no ImageNet mean/std).
         arr = np.array(pil, dtype=np.float32) / 255.0

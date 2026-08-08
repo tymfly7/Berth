@@ -35,7 +35,7 @@ function getColor(conf) {
 export default function ConfidenceGauge({ confidence, inferFps, inferMs, inferCap, showNav, onPrev, onNext }) {
   const hasData = (confidence || 0) > 0
   const pct = hasData ? Math.round(confidence * 100) : 0
-  const color = hasData ? getColor(confidence) : 'rgba(255,255,255,0.18)'
+  const color = hasData ? getColor(confidence) : 'var(--surface-3)'
 
   // SVG arc
   const radius = 40
@@ -56,7 +56,7 @@ export default function ConfidenceGauge({ confidence, inferFps, inferMs, inferCa
           <path
             d="M 10 50 A 40 40 0 0 1 90 50"
             fill="none"
-            stroke="rgba(255,255,255,0.06)"
+            stroke="var(--surface-2)"
             strokeWidth="8"
             strokeLinecap="round"
           />

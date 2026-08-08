@@ -12,7 +12,8 @@
  },
  "caveats": [
   "T10Lot bays come from the detection dataset's axis-aligned boxes, not the perspective-warped quads used for the training crops, so absolute values are not comparable to tab:model_comparison. Columns are comparable to each other within a row.",
-  "T12Lot carries 746 bays, so the 95% interval is roughly +/-1.5 points. Movements smaller than that are not evidence."
+  "T12Lot carries 746 bays, so the 95% interval is roughly +/-1.5 points. Movements smaller than that are not evidence.",
+  "The three YOLO26 classify rows were re-measured 2026-08-07 after a square-padding step was removed from the classify path; it was measured to cost 2 to 8 points on every scale, lot and surface. The five non-YOLO rows never used that step and are unchanged."
  ],
  "arms": {
   "t10lot": {
@@ -184,97 +185,97 @@
     },
     "yolo26n_classify": {
      "360": {
-      "accuracy": 95.34,
-      "false_positives": 573,
-      "false_negatives": 112,
-      "n": 14686
-     },
-     "480": {
-      "accuracy": 95.28,
-      "false_positives": 592,
-      "false_negatives": 101,
-      "n": 14686
-     },
-     "540": {
-      "accuracy": 95.22,
-      "false_positives": 600,
-      "false_negatives": 102,
-      "n": 14686
-     },
-     "720": {
-      "accuracy": 95.12,
-      "false_positives": 616,
+      "accuracy": 96.9,
+      "false_positives": 355,
       "false_negatives": 100,
       "n": 14686
      },
+     "480": {
+      "accuracy": 96.79,
+      "false_positives": 379,
+      "false_negatives": 92,
+      "n": 14686
+     },
+     "540": {
+      "accuracy": 96.79,
+      "false_positives": 382,
+      "false_negatives": 90,
+      "n": 14686
+     },
+     "720": {
+      "accuracy": 96.72,
+      "false_positives": 394,
+      "false_negatives": 88,
+      "n": 14686
+     },
      "native": {
-      "accuracy": 95.07,
-      "false_positives": 628,
-      "false_negatives": 96,
+      "accuracy": 96.61,
+      "false_positives": 412,
+      "false_negatives": 86,
       "n": 14686
      }
     },
     "yolo26s_classify": {
      "360": {
-      "accuracy": 95.04,
-      "false_positives": 627,
-      "false_negatives": 102,
+      "accuracy": 96.28,
+      "false_positives": 456,
+      "false_negatives": 90,
       "n": 14686
      },
      "480": {
-      "accuracy": 94.98,
-      "false_positives": 642,
-      "false_negatives": 95,
+      "accuracy": 96.26,
+      "false_positives": 461,
+      "false_negatives": 88,
       "n": 14686
      },
      "540": {
-      "accuracy": 94.95,
-      "false_positives": 645,
-      "false_negatives": 96,
+      "accuracy": 96.23,
+      "false_positives": 465,
+      "false_negatives": 88,
       "n": 14686
      },
      "720": {
-      "accuracy": 94.89,
-      "false_positives": 656,
-      "false_negatives": 95,
+      "accuracy": 96.21,
+      "false_positives": 468,
+      "false_negatives": 88,
       "n": 14686
      },
      "native": {
-      "accuracy": 94.78,
-      "false_positives": 672,
-      "false_negatives": 94,
+      "accuracy": 96.13,
+      "false_positives": 483,
+      "false_negatives": 86,
       "n": 14686
      }
     },
     "yolo26m_classify": {
      "360": {
-      "accuracy": 95.66,
-      "false_positives": 548,
-      "false_negatives": 90,
+      "accuracy": 97.07,
+      "false_positives": 336,
+      "false_negatives": 95,
       "n": 14686
      },
      "480": {
-      "accuracy": 95.44,
-      "false_positives": 582,
-      "false_negatives": 87,
+      "accuracy": 96.9,
+      "false_positives": 363,
+      "false_negatives": 92,
       "n": 14686
      },
      "540": {
-      "accuracy": 95.42,
-      "false_positives": 587,
-      "false_negatives": 85,
+      "accuracy": 96.81,
+      "false_positives": 378,
+      "false_negatives": 91,
       "n": 14686
      },
      "720": {
-      "accuracy": 95.37,
-      "false_positives": 597,
-      "false_negatives": 83,
+      "accuracy": 96.76,
+      "false_positives": 389,
+      "false_negatives": 87,
       "n": 14686
      },
      "native": {
-      "accuracy": 95.26,
-      "false_positives": 614,
-      "false_negatives": 82,
+      "accuracy": 96.65,
+      "false_positives": 401,
+      "false_negatives": 91,
       "n": 14686
      }
     }
@@ -441,39 +442,39 @@
     },
     "yolo26n_classify": {
      "360": {
-      "accuracy": 95.04,
-      "false_positives": 4,
-      "false_negatives": 33,
+      "accuracy": 98.12,
+      "false_positives": 1,
+      "false_negatives": 13,
       "n": 746
      },
      "480": {
-      "accuracy": 96.11,
-      "false_positives": 4,
-      "false_negatives": 25,
+      "accuracy": 98.93,
+      "false_positives": 1,
+      "false_negatives": 7,
       "n": 746
      },
      "540": {
-      "accuracy": 96.11,
-      "false_positives": 4,
-      "false_negatives": 25,
+      "accuracy": 98.79,
+      "false_positives": 2,
+      "false_negatives": 7,
       "n": 746
      },
      "720": {
-      "accuracy": 96.65,
-      "false_positives": 4,
-      "false_negatives": 21,
+      "accuracy": 99.06,
+      "false_positives": 2,
+      "false_negatives": 5,
       "n": 746
      },
      "1080": {
-      "accuracy": 96.78,
-      "false_positives": 4,
-      "false_negatives": 20,
+      "accuracy": 98.93,
+      "false_positives": 3,
+      "false_negatives": 5,
       "n": 746
      },
      "native": {
-      "accuracy": 96.65,
-      "false_positives": 5,
-      "false_negatives": 20,
+      "accuracy": 99.06,
+      "false_positives": 3,
+      "false_negatives": 4,
       "n": 746
      }
     },
@@ -517,77 +518,77 @@
     },
     "yolo26s_classify": {
      "360": {
-      "accuracy": 95.71,
-      "false_positives": 16,
-      "false_negatives": 16,
+      "accuracy": 97.86,
+      "false_positives": 6,
+      "false_negatives": 10,
       "n": 746
      },
      "480": {
-      "accuracy": 95.71,
-      "false_positives": 16,
-      "false_negatives": 16,
+      "accuracy": 98.12,
+      "false_positives": 6,
+      "false_negatives": 8,
       "n": 746
      },
      "540": {
-      "accuracy": 95.84,
-      "false_positives": 15,
-      "false_negatives": 16,
+      "accuracy": 97.99,
+      "false_positives": 6,
+      "false_negatives": 9,
       "n": 746
      },
      "720": {
-      "accuracy": 95.84,
-      "false_positives": 15,
-      "false_negatives": 16,
+      "accuracy": 98.26,
+      "false_positives": 6,
+      "false_negatives": 7,
       "n": 746
      },
      "1080": {
-      "accuracy": 95.98,
-      "false_positives": 14,
-      "false_negatives": 16,
+      "accuracy": 98.39,
+      "false_positives": 5,
+      "false_negatives": 7,
       "n": 746
      },
      "native": {
-      "accuracy": 96.11,
-      "false_positives": 14,
-      "false_negatives": 15,
+      "accuracy": 98.53,
+      "false_positives": 5,
+      "false_negatives": 6,
       "n": 746
      }
     },
     "yolo26m_classify": {
      "360": {
-      "accuracy": 92.76,
-      "false_positives": 4,
-      "false_negatives": 50,
+      "accuracy": 97.45,
+      "false_positives": 2,
+      "false_negatives": 17,
       "n": 746
      },
      "480": {
-      "accuracy": 92.9,
-      "false_positives": 5,
-      "false_negatives": 48,
+      "accuracy": 98.39,
+      "false_positives": 2,
+      "false_negatives": 10,
       "n": 746
      },
      "540": {
-      "accuracy": 93.43,
-      "false_positives": 5,
-      "false_negatives": 44,
+      "accuracy": 98.53,
+      "false_positives": 2,
+      "false_negatives": 9,
       "n": 746
      },
      "720": {
-      "accuracy": 93.16,
-      "false_positives": 5,
-      "false_negatives": 46,
+      "accuracy": 98.79,
+      "false_positives": 2,
+      "false_negatives": 7,
       "n": 746
      },
      "1080": {
-      "accuracy": 93.43,
-      "false_positives": 5,
-      "false_negatives": 44,
+      "accuracy": 98.79,
+      "false_positives": 2,
+      "false_negatives": 7,
       "n": 746
      },
      "native": {
-      "accuracy": 93.57,
-      "false_positives": 6,
-      "false_negatives": 42,
+      "accuracy": 98.79,
+      "false_positives": 2,
+      "false_negatives": 7,
       "n": 746
      }
     }

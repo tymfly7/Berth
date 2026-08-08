@@ -127,7 +127,7 @@ const style = {
     fontSize: '0.8rem',
     padding: '6px 12px',
     borderRadius: 'var(--radius-sm)',
-    background: 'rgba(99,102,241,0.1)',
+    background: 'var(--accent-tint)',
     color: 'var(--accent-primary)',
     wordBreak: 'break-word',
   },
@@ -568,8 +568,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 title="Clear image"
                 style={{
                   position: 'absolute', top: 6, right: 6,
-                  background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%',
-                  color: '#fff', width: 24, height: 24, cursor: 'pointer',
+                  background: 'var(--media-scrim)', border: 'none', borderRadius: '50%',
+                  color: 'var(--on-media)', width: 24, height: 24, cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: '0.75rem', lineHeight: 1,
                 }}
@@ -579,8 +579,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 title="Rotate left 90°"
                 style={{
                   position: 'absolute', top: 6, left: 6,
-                  background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%',
-                  color: '#fff', width: 28, height: 28, cursor: 'pointer',
+                  background: 'var(--media-scrim)', border: 'none', borderRadius: '50%',
+                  color: 'var(--on-media)', width: 28, height: 28, cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: '1rem', lineHeight: 1,
                 }}
@@ -590,8 +590,8 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 title="Rotate right 90°"
                 style={{
                   position: 'absolute', top: 6, left: 40,
-                  background: 'rgba(0,0,0,0.6)', border: 'none', borderRadius: '50%',
-                  color: '#fff', width: 28, height: 28, cursor: 'pointer',
+                  background: 'var(--media-scrim)', border: 'none', borderRadius: '50%',
+                  color: 'var(--on-media)', width: 28, height: 28, cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: '1rem', lineHeight: 1,
                 }}
@@ -620,7 +620,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 <div style={{
                   position: 'absolute', bottom: '110%', left: '50%',
                   transform: 'translateX(-50%)',
-                  background: 'rgba(0,0,0,0.75)', color: '#fff',
+                  background: 'var(--tooltip-bg)', color: 'var(--tooltip-text)',
                   fontSize: '0.7rem', whiteSpace: 'nowrap',
                   padding: '4px 8px', borderRadius: 'var(--radius-sm)',
                   pointerEvents: 'none',
@@ -670,7 +670,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
             <div style={{
               ...style.statusMsg,
               color: roiIsError ? 'var(--color-occupied)' : 'var(--color-vacant)',
-              background: roiIsError ? 'rgba(244,63,94,0.1)' : 'rgba(16,185,129,0.1)',
+              background: roiIsError ? 'var(--color-occupied-tint)' : 'var(--color-vacant-tint)',
             }}>
               {roiMsg}
             </div>
@@ -690,7 +690,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
           background: 'var(--bg-card)',
           border: '1px solid var(--border-color)',
           borderRadius: 'var(--radius-md)',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
+          boxShadow: 'var(--shadow-modal)',
           overflow: 'hidden',
         }}>
           <div style={{
@@ -724,7 +724,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               title="Close"
               style={{
                 flexShrink: 0,
-                background: 'rgba(255,255,255,0.07)',
+                background: 'var(--surface-2)',
                 border: '1px solid var(--border-color)',
                 borderRadius: 'var(--radius-sm)',
                 color: 'var(--text-secondary)',
@@ -733,7 +733,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               }}
             >✕</button>
           </div>
-          <div style={{ background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--media-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <img
               src={`data:image/jpeg;base64,${resultImage}`}
               alt="Analyzed"
@@ -748,7 +748,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
       {roiModalOpen && createPortal(
         <div style={{
           position: 'fixed', inset: 0, zIndex: 9999,
-          background: 'rgba(0,0,0,0.75)',
+          background: 'var(--scrim)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
@@ -758,7 +758,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
             background: 'var(--bg-card)',
             borderRadius: 'var(--radius-md)',
             overflow: 'hidden',
-            boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
+            boxShadow: 'var(--shadow-modal)',
             border: '1px solid var(--border-color)',
           }}>
             <div style={{
@@ -766,7 +766,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
               padding: '8px 12px', borderBottom: '1px solid var(--border-color)',
               flexShrink: 0, gap: 8,
             }}>
-              <style>{`.roi-name-input::placeholder{color:rgba(200,210,225,0.6)}`}</style>
+              <style>{`.roi-name-input::placeholder{color:var(--text-muted)}`}</style>
               <input
                 type="text"
                 className="roi-name-input"
@@ -831,7 +831,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
                 title="Cancel"
                 style={{
                   flexShrink: 0,
-                  background: 'rgba(255,255,255,0.07)',
+                  background: 'var(--surface-2)',
                   border: '1px solid var(--border-color)',
                   borderRadius: 'var(--radius-sm)',
                   color: 'var(--text-secondary)',
@@ -845,7 +845,7 @@ export default function ControlPanel({ apiAction, apiBase, modelInfo, fetchModel
             {/* Canvas area: matches the uploaded image's aspect ratio so static
                 uploads aren't stretched; capped to the viewport (both dimensions,
                 so portrait images stay un-stretched too) and centered. */}
-            <div style={{ display: 'flex', justifyContent: 'center', background: '#000', flexShrink: 0 }}>
+            <div style={{ display: 'flex', justifyContent: 'center', background: 'var(--media-bg)', flexShrink: 0 }}>
               <div style={{ position: 'relative', width: '100%', aspectRatio: imgAspect || 16 / 9, maxWidth: `calc(78vh * ${imgAspect || 16 / 9})`, maxHeight: '78vh' }}>
                 <div style={{ position: 'absolute', inset: 0 }}>
                 <RoiEditor

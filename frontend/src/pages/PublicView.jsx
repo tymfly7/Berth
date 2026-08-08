@@ -230,7 +230,7 @@ export default function PublicView() {
                   {allCameraSlots.map((c, i) => (
                     <button key={c.cameraId} onClick={() => setLotMapIdx(i)} title={c.name}
                       style={{ width: 10, height: 10, borderRadius: '50%', border: 'none', cursor: 'pointer', padding: 0,
-                        background: i === safeIdx ? 'var(--accent-primary)' : 'rgba(255,255,255,0.2)', transition: 'background 0.2s' }} />
+                        background: i === safeIdx ? 'var(--accent-primary)' : 'var(--surface-3)', transition: 'background 0.2s' }} />
                   ))}
                 </div>
               </div>

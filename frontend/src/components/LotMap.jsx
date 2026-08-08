@@ -72,8 +72,8 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
   return (
     <div style={{
       width: '100%',
-      background: 'rgba(17,24,39,0.55)',
-      border: '1px solid rgba(255,255,255,0.07)',
+      background: 'var(--lotmap-panel)',
+      border: '1px solid var(--border-color)',
       borderRadius: 'var(--radius-lg)',
       padding: '18px 20px 14px',
       boxSizing: 'border-box',
@@ -89,7 +89,7 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
         {roiOnly && (
           <span style={{
             fontSize: '0.6rem', color: 'var(--text-muted)',
-            background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)',
+            background: 'var(--surface-2)', border: '1px solid var(--border-color)',
             borderRadius: 4, padding: '1px 6px', fontWeight: 600,
             letterSpacing: '0.5px', textTransform: 'uppercase',
           }}>ROI</span>
@@ -103,7 +103,7 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
         <rect
           x={minX - pad} y={minY - pad}
           width={maxX - minX + pad * 2} height={maxY - minY + pad * 2}
-          rx={10} fill="rgba(12,18,28,0.55)" stroke="rgba(255,255,255,0.04)" strokeWidth={1}
+          rx={10} fill="var(--lotmap-plate)" stroke="var(--lotmap-plate-border)" strokeWidth={1}
         />
 
         {/* ── Orientation layer (display only — never processed) ── */}
@@ -115,7 +115,7 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
                 key={`perim-${i}`}
                 points={poly.map(([x, y]) => `${x},${y}`).join(' ')}
                 fill="none"
-                stroke="rgba(148,163,184,0.55)"
+                stroke="var(--lotmap-line)"
                 strokeWidth={2.5}
                 strokeDasharray="10,7"
                 strokeLinejoin="round"
@@ -151,7 +151,7 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
                 <g key={g.id || `gate-${i}`}>
                   <rect x={g.x - w / 2} y={g.y - 12} width={w} height={24} rx={12} fill={gs.fill} />
                   <text x={g.x} y={g.y} textAnchor="middle" dominantBaseline="middle"
-                    fill="#fff" fontSize={12} fontFamily="system-ui,sans-serif" fontWeight="700">
+                    fill="var(--on-accent)" fontSize={12} fontFamily="system-ui,sans-serif" fontWeight="700">
                     {text}
                   </text>
                 </g>
@@ -162,9 +162,9 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
             {orient.anchor && (
               <g>
                 <circle cx={orient.anchor.x} cy={orient.anchor.y} r={9}
-                  fill="rgba(250,204,21,0.9)" stroke="#fff" strokeWidth={2} />
+                  fill="rgba(250,204,21,0.9)" stroke="var(--on-accent)" strokeWidth={2} />
                 <text x={orient.anchor.x} y={orient.anchor.y + 24} textAnchor="middle"
-                  fill="rgba(250,204,21,0.95)" fontSize={11} fontFamily="system-ui,sans-serif" fontWeight="700">
+                  fill="var(--color-warning)" fontSize={11} fontFamily="system-ui,sans-serif" fontWeight="700">
                   {orient.anchor.label || 'You are here'}
                 </text>
               </g>
@@ -217,13 +217,13 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
               <rect
                 x={cx - fs * 2.2} y={labelY - fs * 0.8}
                 width={fs * 4.4} height={fs * 1.6}
-                rx={fs * 0.35} fill="rgba(0,0,0,0.52)"
+                rx={fs * 0.35} fill="var(--media-scrim)"
               />
               {/* Label text */}
               <text
                 x={cx} y={labelY}
                 textAnchor="middle" dominantBaseline="middle"
-                fill="#ffffff" fontSize={fs}
+                fill="var(--on-media)" fontSize={fs}
                 fontFamily="system-ui,sans-serif" fontWeight="700"
                 letterSpacing="0.2"
               >
@@ -290,7 +290,7 @@ export default function LotMap({ slots, orientation = null, roiOnly = false, tit
 
         {/* Divider */}
         {(hasReserved || hasHandicap) && (
-          <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.12)', margin: '0 2px' }} />
+          <div style={{ width: 1, height: 14, background: 'var(--surface-3)', margin: '0 2px' }} />
         )}
 
         {/* Type entries — only shown if at least one of that type exists */}

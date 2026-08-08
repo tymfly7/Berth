@@ -71,7 +71,7 @@ function StreamCarousel({ streams }) {
       {streams.length > 1 && (
         <div style={{ display: 'flex', justifyContent: 'center', gap: 4, marginTop: 4 }}>
           {streams.map((_, i) => (
-            <div key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: i === safeIdx ? 'var(--color-vacant)' : 'rgba(255,255,255,0.18)' }} />
+            <div key={i} style={{ width: 4, height: 4, borderRadius: '50%', background: i === safeIdx ? 'var(--color-vacant)' : 'var(--surface-3)' }} />
           ))}
         </div>
       )}
@@ -84,7 +84,7 @@ const CARDS = [
     key: 'total',
     label: 'Total Spots',
     icon: '🅿️',
-    iconBg: 'rgba(99,102,241,0.15)',
+    iconBg: 'var(--accent-tint-strong)',
     color: 'var(--accent-primary)',
     getValue: (m) => m.total,
   },
@@ -108,7 +108,7 @@ const CARDS = [
     key: 'occupancy',
     label: 'Occupancy',
     icon: '📊',
-    iconBg: 'rgba(245,158,11,0.15)',
+    iconBg: 'var(--color-warning-tint)',
     color: 'var(--color-warning)',
     getValue: (m) => `${Math.round(m.occupancy_percent ?? 0)}%`,
   },
@@ -116,7 +116,7 @@ const CARDS = [
     key: 'streams',
     label: 'Streams',
     icon: '📡',
-    iconBg: 'rgba(16,185,129,0.15)',
+    iconBg: 'var(--color-vacant-glow)',
     color: 'var(--color-vacant)',
     getValue: (_, s) => Array.isArray(s) ? s.length : '–',
   },
@@ -160,9 +160,9 @@ export default function MetricCards({ metrics, streams, showMisparked = true }) 
         <div className="glass-card fade-in" style={cardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <span style={labelStyle}>Misparked</span>
-            <div style={{ ...iconWrap, background: 'rgba(251,146,60,0.15)' }}>⚠️</div>
+            <div style={{ ...iconWrap, background: 'var(--color-warning-tint)' }}>⚠️</div>
           </div>
-          <div className="count-animate" style={{ ...bigNum, color: '#f97316' }}>
+          <div className="count-animate" style={{ ...bigNum, color: 'var(--color-warning)' }}>
             {metrics.misparked_count ?? 0}
           </div>
         </div>

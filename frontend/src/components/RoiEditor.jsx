@@ -719,7 +719,7 @@ export default function RoiEditor({
       {/* ── Canvas ── */}
       <div ref={containerRef} style={overlay
         ? { position: 'relative', flex: 1, minHeight: 0, zIndex: 1 }
-        : { position: 'relative', width: '100%', minHeight: 300, background: 'rgba(0,0,0,0.25)', borderRadius: 4 }
+        : { position: 'relative', width: '100%', minHeight: 300, background: 'var(--surface-sunken)', borderRadius: 4 }
       }>
         <canvas
           ref={canvasRef}

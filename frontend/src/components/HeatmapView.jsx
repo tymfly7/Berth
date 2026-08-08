@@ -26,7 +26,7 @@ function ArrowBtn({ side, onClick }) {
   return (
     <button onClick={onClick} style={{
       position: 'absolute', [side]: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 2,
-      background: 'rgba(255,255,255,0.08)', border: '1px solid var(--border-color)',
+      background: 'var(--surface-2)', border: '1px solid var(--border-color)',
       color: 'var(--text-secondary)', borderRadius: 'var(--radius-sm)',
       padding: '4px 10px', cursor: 'pointer', fontSize: '1.1rem',
     }}>

@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { apiFetch } from '../api'
 import { API_BASE } from '../config'
+import { useTheme } from '../theme'
 
 function aggregateByMonth(data) {
   const now = new Date()
@@ -84,6 +85,12 @@ const TABS = [
   { key: 'month', label: 'Month' },
 ]
 
+// Canvas cannot resolve CSS variables, so the chart ink is read off the root
+// element on every draw. The theme hook below re-runs the draw on a switch.
+function ink(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
 function drawChart(canvas, data, tab = 'live') {
   if (!canvas || !data || data.length === 0) return
 
@@ -106,7 +113,8 @@ function drawChart(canvas, data, tab = 'live') {
   const hasData = data.some(d => d.available > 0 || d.occupied > 0)
 
   // Grid lines + Y labels
-  ctx.strokeStyle = 'rgba(255,255,255,0.05)'
+  const inkAxis = ink('--chart-axis')
+  ctx.strokeStyle = ink('--chart-grid')
   ctx.lineWidth = 1
   for (let i = 0; i <= 4; i++) {
     const y = pad.top + (plotH / 4) * i
@@ -114,7 +122,7 @@ function drawChart(canvas, data, tab = 'live') {
     ctx.moveTo(pad.left, y)
     ctx.lineTo(w - pad.right, y)
     ctx.stroke()
-    ctx.fillStyle = 'rgba(255,255,255,0.3)'
+    ctx.fillStyle = inkAxis
     ctx.font = '10px Inter, sans-serif'
     ctx.textAlign = 'right'
     ctx.fillText(Math.round(maxVal - (maxVal / 4) * i), pad.left - 6, y + 3)
@@ -166,7 +174,7 @@ function drawChart(canvas, data, tab = 'live') {
   const isBars = tab === 'week' || tab === 'month'
 
   if (!hasData) {
-    ctx.fillStyle = 'rgba(255,255,255,0.22)'
+    ctx.fillStyle = ink('--chart-bar-idle')
     ctx.font = '12px Inter, sans-serif'
     ctx.textAlign = 'center'
     ctx.fillText('No data available for this period', w / 2, pad.top + plotH / 2)
@@ -203,7 +211,7 @@ function drawChart(canvas, data, tab = 'live') {
       ? [0]
       : Array.from({ length: maxLabels }, (_, i) => Math.round(i * (data.length - 1) / (maxLabels - 1)))
   }
-  ctx.fillStyle = 'rgba(255,255,255,0.3)'
+  ctx.fillStyle = inkAxis
   ctx.font = '9px Inter, sans-serif'
   ctx.textAlign = 'center'
   labelIdxs.forEach(i => {
@@ -226,21 +234,23 @@ function drawChart(canvas, data, tab = 'live') {
 
   // Legend
   const legendY = h - 8
+  const inkLegend = ink('--chart-ink')
   ctx.textAlign = 'left'
   ctx.fillStyle = 'rgba(16,185,129,1)'
   ctx.fillRect(pad.left, legendY - 6, 12, 3)
-  ctx.fillStyle = 'rgba(255,255,255,0.5)'
+  ctx.fillStyle = inkLegend
   ctx.font = '10px Inter, sans-serif'
   ctx.fillText('Available', pad.left + 16, legendY)
   ctx.fillStyle = 'rgba(244,63,94,1)'
   ctx.fillRect(pad.left + 90, legendY - 6, 12, 3)
-  ctx.fillStyle = 'rgba(255,255,255,0.5)'
+  ctx.fillStyle = inkLegend
   ctx.fillText('Occupied', pad.left + 106, legendY)
 }
 
 export default function AnalyticsChart({ connected = false, cameras = [], trendsUrl = '/api/trends' }) {
   const canvasRef = useRef(null)
   const chartDataRef = useRef({ data: [], tab: 'live' })
+  const theme = useTheme()
   const [tab, setTab] = useState('live')
   const [selectedCamId, setSelectedCamId] = useState(null)
   const [trendData, setTrendData] = useState(null)
@@ -298,7 +308,7 @@ export default function AnalyticsChart({ connected = false, cameras = [], trends
     data = data.map(d => ({ ...d, available: Math.round(d.available || 0), occupied: Math.round(d.occupied || 0) }))
     chartDataRef.current = { data, tab }
     drawChart(canvasRef.current, data, tab)
-  }, [activeData, tab, connected, cameras.length])
+  }, [activeData, tab, connected, cameras.length, theme])
 
   const handleMouseMove = useCallback((e) => {
     const canvas = canvasRef.current
@@ -357,8 +367,8 @@ export default function AnalyticsChart({ connected = false, cameras = [], trends
     borderRadius: 'var(--radius-sm)',
     border: 'none',
     cursor: 'pointer',
-    background: tab === key ? 'var(--accent-primary)' : 'rgba(255,255,255,0.07)',
-    color: tab === key ? '#fff' : 'var(--text-muted)',
+    background: tab === key ? 'var(--accent-primary)' : 'var(--surface-2)',
+    color: tab === key ? 'var(--on-accent)' : 'var(--text-muted)',
     transition: 'background 0.15s',
   })
 
@@ -370,8 +380,8 @@ export default function AnalyticsChart({ connected = false, cameras = [], trends
     borderRadius: 'var(--radius-sm)',
     border: 'none',
     cursor: 'pointer',
-    background: selectedCamId === id ? 'rgba(99,102,241,0.85)' : 'rgba(255,255,255,0.06)',
-    color: selectedCamId === id ? '#fff' : 'var(--text-muted)',
+    background: selectedCamId === id ? 'var(--accent-primary)' : 'var(--surface-2)',
+    color: selectedCamId === id ? 'var(--on-accent)' : 'var(--text-muted)',
     transition: 'background 0.15s',
   })
 
@@ -417,16 +427,16 @@ export default function AnalyticsChart({ connected = false, cameras = [], trends
             ref={canvasRef}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
-            style={{ width: '100%', height: chartH, borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.2)', display: 'block' }}
+            style={{ width: '100%', height: chartH, borderRadius: 'var(--radius-sm)', background: 'var(--chart-bg)', display: 'block' }}
           />
           {tooltip.visible && (
             <div style={{
               position: 'absolute', left: tooltip.x, top: tooltip.y,
-              background: 'rgba(12,18,32,0.95)', border: '1px solid rgba(255,255,255,0.1)',
+              background: 'var(--tooltip-bg)', border: '1px solid var(--tooltip-border)',
               borderRadius: 6, padding: '6px 10px', pointerEvents: 'none',
-              fontSize: '0.72rem', color: '#fff', lineHeight: 1.7, zIndex: 10, minWidth: 105,
+              fontSize: '0.72rem', color: 'var(--tooltip-text)', lineHeight: 1.7, zIndex: 10, minWidth: 105,
             }}>
-              <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: '0.68rem', marginBottom: 2 }}>{tooltip.label}</div>
+              <div style={{ color: 'var(--tooltip-label)', fontSize: '0.68rem', marginBottom: 2 }}>{tooltip.label}</div>
               <div><span style={{ color: 'rgba(16,185,129,1)' }}>&#9646;</span> Available: <strong>{tooltip.available}</strong></div>
               <div><span style={{ color: 'rgba(244,63,94,1)' }}>&#9646;</span> Occupied: <strong>{tooltip.occupied}</strong></div>
             </div>

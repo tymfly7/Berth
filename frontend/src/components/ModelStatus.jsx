@@ -30,7 +30,7 @@ const style = {
   },
   accordion: {
     padding: '8px 10px 10px',
-    background: 'rgba(99,102,241,0.05)',
+    background: 'var(--accent-tint-weak)',
     borderRadius: '0 0 4px 4px',
     marginTop: -1,
     marginBottom: 2,
@@ -53,7 +53,7 @@ const style = {
     marginTop: 8,
     padding: '6px 10px',
     borderRadius: 'var(--radius-sm)',
-    background: 'rgba(99,102,241,0.1)',
+    background: 'var(--accent-tint)',
     color: 'var(--accent-primary)',
     fontSize: '0.78rem',
   },
@@ -117,7 +117,7 @@ function CompResultsTable({ rows }) {
         <col style={{ width: '16%' }} />
       </colgroup>
       <thead>
-        <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)', verticalAlign: 'top' }}>
+        <tr style={{ color: 'var(--text-secondary)', background: 'var(--accent-tint-weak)', verticalAlign: 'top' }}>
           <th style={{ ...th, textAlign: 'left', padding: '5px 4px' }}>Model</th>
           <th style={th}>Acc/mAP<span style={style.pctSub}>%</span></th>
           <th style={th}>Prec<span style={style.pctSub}>%</span></th>
@@ -170,7 +170,7 @@ function DetectorResults({ result }) {
       </div>
       <table style={style.compTable}>
         <thead>
-          <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)', verticalAlign: 'top' }}>
+          <tr style={{ color: 'var(--text-secondary)', background: 'var(--accent-tint-weak)', verticalAlign: 'top' }}>
             <th style={{ ...th, textAlign: 'left', padding: '5px 4px' }}>Conf</th>
             <th style={th}>Prec<span style={style.pctSub}>%</span></th>
             <th style={th}>Rec<span style={style.pctSub}>%</span></th>
@@ -184,7 +184,7 @@ function DetectorResults({ result }) {
             return (
               <tr key={p.conf} style={{
                 borderBottom: '1px solid var(--border-color)',
-                background: isBest ? 'rgba(99,102,241,0.08)' : 'transparent',
+                background: isBest ? 'var(--accent-tint)' : 'transparent',
               }}>
                 <td style={{ padding: '4px 4px', fontWeight: isBest ? 700 : 400 }}>
                   {p.conf.toFixed(2)}
@@ -205,7 +205,7 @@ function DetectorResults({ result }) {
       </div>
       <table style={style.compTable}>
         <thead>
-          <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)', verticalAlign: 'top' }}>
+          <tr style={{ color: 'var(--text-secondary)', background: 'var(--accent-tint-weak)', verticalAlign: 'top' }}>
             <th style={{ ...th, textAlign: 'left', padding: '5px 4px' }}>Band</th>
             <th style={th}>Frames</th>
             <th style={th}>Boxes</th>
@@ -513,7 +513,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
             <div
               style={{
                 ...style.modelRow,
-                background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent',
+                background: isActive ? 'var(--accent-tint)' : 'transparent',
                 borderRadius: isActive && !isOpen ? 4 : 0,
                 padding: isActive ? '8px 6px' : undefined,
               }}
@@ -695,7 +695,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
         <div style={{
           ...style.evalStatus,
           color: 'var(--color-occupied)',
-          background: 'rgba(244,63,94,0.1)',
+          background: 'var(--color-occupied-tint)',
         }}>
           {detError}
         </div>
@@ -708,7 +708,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
         <div style={{
           ...style.evalStatus,
           color: exportStatus.status === 'error' ? 'var(--color-occupied)' : 'var(--accent-primary)',
-          background: exportStatus.status === 'error' ? 'rgba(244,63,94,0.1)' : 'rgba(99,102,241,0.1)',
+          background: exportStatus.status === 'error' ? 'var(--color-occupied-tint)' : 'var(--accent-tint)',
         }}>
           {exportStatus.message}
           {isExporting && (
@@ -730,7 +730,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
         <div style={{
           ...style.evalStatus,
           color: evalStatus.status === 'error' ? 'var(--color-occupied)' : 'var(--accent-primary)',
-          background: evalStatus.status === 'error' ? 'rgba(244,63,94,0.1)' : 'rgba(99,102,241,0.1)',
+          background: evalStatus.status === 'error' ? 'var(--color-occupied-tint)' : 'var(--accent-tint)',
         }}>
           {evalStatus.message}
           {isEvaluating && (
@@ -800,7 +800,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
               <col style={{ width: '14%' }} />
             </colgroup>
             <thead>
-              <tr style={{ color: 'var(--text-secondary)', background: 'rgba(99,102,241,0.06)', verticalAlign: 'top' }}>
+              <tr style={{ color: 'var(--text-secondary)', background: 'var(--accent-tint-weak)', verticalAlign: 'top' }}>
                 <th style={{ textAlign: 'left',  padding: '5px 4px', borderBottom: '1px solid var(--border-color)' }}>Model</th>
                 <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Acc<span style={style.pctSub}>%</span></th>
                 <th style={{ textAlign: 'right', padding: '5px 2px', borderBottom: '1px solid var(--border-color)' }}>Prec<span style={style.pctSub}>%</span></th>
@@ -818,7 +818,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
                     key={r.model}
                     style={{
                       borderBottom: '1px solid var(--border-color)',
-                      background: isActive ? 'rgba(99,102,241,0.08)' : 'transparent',
+                      background: isActive ? 'var(--accent-tint)' : 'transparent',
                     }}
                   >
                     <td style={{ padding: '4px 4px', fontWeight: isActive ? 700 : 600, fontSize: '0.72rem', overflowWrap: 'anywhere', lineHeight: 1.25 }}
@@ -860,7 +860,7 @@ export default function ModelStatus({ modelInfo, fetchModelInfo, apiBase }) {
             <div key={r.model} style={{
               marginTop: 8,
               padding: '6px 8px',
-              background: 'rgba(99,102,241,0.05)',
+              background: 'var(--accent-tint-weak)',
               borderRadius: 4,
               fontSize: '0.72rem',
             }}>

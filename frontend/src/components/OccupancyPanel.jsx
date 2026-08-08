@@ -87,7 +87,7 @@ export default function OccupancyPanel({ apiBase }) {
           fontSize: '0.75rem',
           padding: '6px 10px',
           borderRadius: 'var(--radius-sm)',
-          background: isError ? 'rgba(244,63,94,0.1)' : 'rgba(16,185,129,0.1)',
+          background: isError ? 'var(--color-occupied-tint)' : 'var(--color-vacant-tint)',
           color: isError ? 'var(--color-occupied)' : 'var(--color-vacant)',
           wordBreak: 'break-word',
         }}>

@@ -124,10 +124,10 @@ export default function AnomalyPanel({ apiBase }) {
           padding: '6px 10px',
           borderRadius: 'var(--radius-sm)',
           background: isError
-            ? 'rgba(244,63,94,0.1)'
+            ? 'var(--color-occupied-tint)'
             : enabled
-              ? 'rgba(16,185,129,0.1)'
-              : 'rgba(99,102,241,0.1)',
+              ? 'var(--color-vacant-tint)'
+              : 'var(--accent-tint)',
           color: isError
             ? 'var(--color-occupied)'
             : enabled

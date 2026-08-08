@@ -178,9 +178,10 @@ def main():
             "Both backends are driven through the classifier pair the deployment actually uses: "
             "ParkingClassifier for torch, EdgeClassifier / EdgeYoloClassifier for NCNN. Preprocessing "
             "is matched by construction, so drift is attributable to the export, not the harness.",
-            "The YOLO classify torch rows add the _letterbox_square step that the published table's raw "
-            "Ultralytics predict() did not, so those may sit slightly off published_accuracy. The "
-            "torch/ncnn pair stays internally consistent either way.",
+            "The square-padding step that used to precede the YOLO classify path was removed after it "
+            "was measured to cost 2 to 8 points on every scale, lot and surface. Both backends now use "
+            "the Ultralytics transform (resize short side, centre-crop), and the YOLO rows reproduce "
+            "published_accuracy exactly.",
             "Both classifiers round probability to 4 decimals before returning, so drift below 5e-5 "
             "reads as 0.0000. That is the resolution of max_prob_drift, not a claim of bit equality.",
             "Edge hardware out of scope. These are x86 timings and do not predict ARM.",

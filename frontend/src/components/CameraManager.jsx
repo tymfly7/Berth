@@ -44,7 +44,7 @@ const s = {
     borderRadius: 99,
     fontSize: '0.72rem',
     fontWeight: 600,
-    background: active ? 'var(--color-vacant-glow)' : 'rgba(255,255,255,0.05)',
+    background: active ? 'var(--color-vacant-glow)' : 'var(--surface-2)',
     color: active ? 'var(--color-vacant)' : 'var(--text-muted)',
     border: `1px solid ${active ? 'var(--color-vacant)' : 'transparent'}`,
   }),
@@ -57,12 +57,12 @@ const s = {
     fontWeight: 600,
     marginRight: 6,
     background:
-      variant === 'danger'  ? 'rgba(244,63,94,0.15)' :
+      variant === 'danger'  ? 'var(--color-occupied-glow)' :
       variant === 'primary' ? 'var(--accent-primary)' :
-      'rgba(255,255,255,0.07)',
+      'var(--surface-2)',
     color:
       variant === 'danger'  ? 'var(--color-occupied)' :
-      variant === 'primary' ? '#fff' :
+      variant === 'primary' ? 'var(--on-accent)' :
       'var(--text-primary)',
     transition: 'opacity 0.15s',
   }),
@@ -82,7 +82,7 @@ const s = {
     gridTemplateColumns: '1fr 1fr',
     gap: 10,
     padding: '14px',
-    background: 'rgba(0,0,0,0.2)',
+    background: 'var(--surface-sunken)',
     borderRadius: 'var(--radius-sm)',
     border: '1px solid var(--border-color)',
   },
@@ -95,7 +95,7 @@ const s = {
   input: {
     width: '100%',
     padding: '6px 10px',
-    background: 'rgba(255,255,255,0.05)',
+    background: 'var(--surface-2)',
     border: '1px solid var(--border-color)',
     borderRadius: 'var(--radius-sm)',
     color: 'var(--text-primary)',
@@ -317,8 +317,8 @@ export default function CameraManager({ onCamerasChange, onEditRois, compact = f
                       cursor: 'pointer',
                       fontSize: '0.72rem',
                       fontWeight: 700,
-                      background: cam.active ? 'rgba(46,204,113,0.18)' : 'rgba(244,63,94,0.18)',
-                      color: cam.active ? '#2ecc71' : '#f43f5e',
+                      background: cam.active ? 'var(--color-vacant-glow)' : 'var(--color-occupied-glow)',
+                      color: cam.active ? 'var(--color-vacant)' : 'var(--color-occupied)',
                     }}
                   >
                     {cam.active ? 'On' : 'Off'}
@@ -339,8 +339,8 @@ export default function CameraManager({ onCamerasChange, onEditRois, compact = f
                     title={cam.data_gathering ? 'Data gathering on — click to stop' : 'Data gathering off — click to start'}
                     style={{
                       ...s.btn(), fontSize: '0.72rem', padding: compact ? '2px 7px' : '4px 12px', marginRight: 4,
-                      color: cam.data_gathering ? '#2ecc71' : 'var(--text-muted)',
-                      borderColor: cam.data_gathering ? '#2ecc71' : undefined,
+                      color: cam.data_gathering ? 'var(--color-vacant)' : 'var(--text-muted)',
+                      borderColor: cam.data_gathering ? 'var(--color-vacant)' : undefined,
                     }}
                     onClick={() => handleDataGathering(cam)}
                   >
@@ -354,7 +354,7 @@ export default function CameraManager({ onCamerasChange, onEditRois, compact = f
               const colSpan = compact ? 4 : 5
               return (
                 <tr key={`${editingCamId}-edit`}>
-                  <td colSpan={colSpan} style={{ ...compactTd, background: 'rgba(0,0,0,0.25)', borderTop: '1px solid var(--border-color)' }}>
+                  <td colSpan={colSpan} style={{ ...compactTd, background: 'var(--surface-sunken)', borderTop: '1px solid var(--border-color)' }}>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
                       <div>
                         <label style={{ ...s.label, fontSize: '0.7rem' }}>Name *</label>

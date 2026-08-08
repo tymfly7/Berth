@@ -24,9 +24,9 @@ const MODELS = [
 ]
 
 const BUCKETS = [
-  { id: 'occupied', label: 'Occupied', color: 'var(--text-occupied, #e05a5a)' },
-  { id: 'vacant',   label: 'Vacant',   color: 'var(--text-vacant, #3fbf6f)'   },
-  { id: 'review',   label: 'Review',   color: '#d6a73a' },
+  { id: 'occupied', label: 'Occupied', color: 'var(--color-occupied)' },
+  { id: 'vacant',   label: 'Vacant',   color: 'var(--color-vacant)'   },
+  { id: 'review',   label: 'Review',   color: 'var(--color-warning)' },
   { id: 'too_dark', label: 'Too Dark', color: 'var(--text-secondary)' },
 ]
 
@@ -55,7 +55,7 @@ function AuthedImg({ src, alt, onClick, style }) {
 
 const labelStyle = { fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }
 const fieldStyle = { width: '100%', padding: '6px 8px', fontSize: '0.8rem', marginBottom: 10,
-  background: 'var(--bg-secondary, #1a1a1a)', color: 'var(--text-primary)',
+  background: 'var(--bg-input)', color: 'var(--text-primary)',
   border: '1px solid var(--border-color)', borderRadius: 4 }
 
 export default function LabelingPanel({ apiBase }) {
@@ -331,7 +331,7 @@ export default function LabelingPanel({ apiBase }) {
               .sort((a, b) => a[0] - b[0])
               .map(([h, n]) => `${h.padStart(2, '0')}:${n}`).join('  ')}</div>
           {vreport.zero_detection.length > 0 && (
-            <div style={{ marginTop: 4, color: '#d6a73a' }}>
+            <div style={{ marginTop: 4, color: 'var(--color-warning)' }}>
               {vreport.zero_detection.length} frames with zero detections — empty lot or a
               detector failure, check each one.
             </div>
@@ -358,10 +358,10 @@ export default function LabelingPanel({ apiBase }) {
 
       {galleryOpen && manifest && createPortal(
         <div onClick={() => setGalleryOpen(false)}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', zIndex: 9999,
+          style={{ position: 'fixed', inset: 0, background: 'var(--scrim)', zIndex: 9999,
             overflow: 'auto', padding: 20 }}>
           <div onClick={e => e.stopPropagation()}
-            style={{ maxWidth: 1100, margin: '0 auto', background: 'var(--bg-primary, #111)',
+            style={{ maxWidth: 1100, margin: '0 auto', background: 'var(--bg-primary)',
               borderRadius: 8, padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0 }}>Review — {lotId} ({totalCrops} crops)</h3>
@@ -392,7 +392,7 @@ export default function LabelingPanel({ apiBase }) {
                             </>
                           )}
                           <button title="Delete" onClick={() => deleteCrop(c.crop_id)}
-                            style={{ flex: 1, fontSize: '0.6rem', cursor: 'pointer', color: 'var(--text-occupied)' }}>✕</button>
+                            style={{ flex: 1, fontSize: '0.6rem', cursor: 'pointer', color: 'var(--color-occupied)' }}>✕</button>
                         </div>
                       </div>
                     ))}
@@ -408,7 +408,7 @@ export default function LabelingPanel({ apiBase }) {
           </div>
           {enlarged && (
             <div onClick={(e) => { e.stopPropagation(); setEnlarged(null) }}
-              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.92)', zIndex: 10000,
+              style={{ position: 'fixed', inset: 0, background: 'var(--media-scrim-strong)', zIndex: 10000,
                 display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <AuthedImg src={enlarged} alt="" style={{ maxWidth: '90%', maxHeight: '90%' }} />
             </div>

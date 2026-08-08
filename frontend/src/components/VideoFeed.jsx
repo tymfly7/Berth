@@ -10,9 +10,9 @@ const FRAME_H = 720
 const roiBtnStyle = {
   padding: '3px 10px',
   borderRadius: 4,
-  border: '1px solid rgba(255,255,255,0.35)',
-  background: 'rgba(0,0,0,0.55)',
-  color: '#fff',
+  border: '1px solid var(--border-strong)',
+  background: 'var(--surface-2)',
+  color: 'var(--text-primary)',
   fontSize: '0.7rem',
   fontWeight: 600,
   cursor: 'pointer',
@@ -59,13 +59,13 @@ function PickerCell({ cameraId, name, apiBase, onClick }) {
       onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent-primary)'}
       onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
     >
-      <div style={{ aspectRatio: '16/9', background: '#000', position: 'relative' }}>
+      <div style={{ aspectRatio: '16/9', background: 'var(--media-bg)', position: 'relative' }}>
         {frame
           ? <img src={frame} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} alt={name} />
           : <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '0.72rem' }}>Connecting…</div>
         }
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.32)' }}>
-          <span style={{ background: 'rgba(99,102,241,0.88)', color: '#fff', padding: '4px 12px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700, pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--media-veil)' }}>
+          <span style={{ background: 'var(--accent-primary)', color: 'var(--on-accent)', padding: '4px 12px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700, pointerEvents: 'none' }}>
             ✎ Edit ROIs
           </span>
         </div>
@@ -289,13 +289,13 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
 
         {/* Normal live view */}
         {!roiOpen && !picking && connected && (
-          <span className="badge badge-occupied" style={{ background: 'rgba(239,68,68,0.9)', color: '#fff', fontSize: '0.65rem' }}>
+          <span className="badge badge-occupied" style={{ background: 'var(--color-critical)', color: 'var(--on-accent)', fontSize: '0.65rem' }}>
             ● LIVE
           </span>
         )}
         {!roiOpen && !picking && activeCams.length > 0 && (
           <button
-            style={{ ...roiBtnStyle, background: 'rgba(255,255,255,0.07)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
+            style={{ ...roiBtnStyle, background: 'var(--surface-2)', border: '1px solid var(--border-color)', color: 'var(--text-primary)' }}
             onClick={openRoiEditor}
             title="Select a camera feed and draw parking slot ROIs"
           >
@@ -322,13 +322,13 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
               ROI Editor — {editCam?.name || cameraId}
             </span>
             <button
-              style={{ ...roiBtnStyle, borderColor: 'rgba(100,200,255,0.5)', color: proposing ? 'rgba(100,200,255,0.4)' : '#64c8ff', background: 'rgba(100,200,255,0.08)', cursor: proposing ? 'default' : 'pointer' }}
+              style={{ ...roiBtnStyle, borderColor: 'var(--color-proposal-border)', color: proposing ? 'var(--text-muted)' : 'var(--color-proposal)', background: 'var(--color-proposal-tint)', cursor: proposing ? 'default' : 'pointer' }}
               disabled={proposing}
               onClick={handleAutoDetect}
             >
               {proposing ? 'Detecting…' : 'Auto-detect'}
             </button>
-            <button style={{ ...roiBtnStyle, background: 'var(--accent-primary, #3498db)', border: 'none' }} onClick={handleSave}>
+            <button style={{ ...roiBtnStyle, background: 'var(--accent-primary)', color: 'var(--on-accent)', border: 'none' }} onClick={handleSave}>
               Save
             </button>
             <button style={roiBtnStyle} onClick={() => { setRoiOpen(false); setPicking(false) }}>
@@ -338,7 +338,7 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
         )}
 
         {saveMsg && (
-          <span style={{ fontSize: '0.75rem', marginLeft: 4, color: isError(saveMsg) ? 'var(--color-occupied, #e74c3c)' : 'var(--color-vacant, #2ecc71)' }}>
+          <span style={{ fontSize: '0.75rem', marginLeft: 4, color: isError(saveMsg) ? 'var(--color-occupied)' : 'var(--color-vacant)' }}>
             {saveMsg}
           </span>
         )}
@@ -357,7 +357,7 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
                   padding: '3px 12px',
                   borderRadius: 4,
                   border: isActive ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)',
-                  background: isActive ? 'rgba(99,102,241,0.18)' : 'rgba(255,255,255,0.04)',
+                  background: isActive ? 'var(--accent-tint-strong)' : 'var(--surface-1)',
                   color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
                   fontSize: '0.72rem',
                   fontWeight: 600,
@@ -422,17 +422,17 @@ export default function VideoFeed({ connected, activeCamera, apiBase, cameras = 
                     style={{
                       display: 'flex', alignItems: 'center', gap: 6,
                       padding: '3px 8px', borderRadius: 4,
-                      background: 'rgba(255,255,255,0.06)',
-                      border: `1px solid ${roi.color || 'rgba(255,255,255,0.15)'}`,
+                      background: 'var(--surface-2)',
+                      border: `1px solid ${roi.color || 'var(--border-strong)'}`,
                       fontSize: '0.75rem',
                     }}
                   >
-                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: roi.color || '#888', flexShrink: 0 }} />
+                    <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: roi.color || 'var(--text-muted)', flexShrink: 0 }} />
                     <span style={{ color: 'var(--text-primary)' }}>{roi.label}</span>
                     <button
                       onClick={() => handleDeleteRoi(roi.id)}
                       title={`Delete ${roi.label}`}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-occupied, #e74c3c)', fontSize: '0.7rem', padding: '0 2px', lineHeight: 1 }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-occupied)', fontSize: '0.7rem', padding: '0 2px', lineHeight: 1 }}
                     >
                       ✕
                     </button>

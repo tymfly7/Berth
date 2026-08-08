@@ -44,7 +44,7 @@ const style = {
   container: {},
   row: { display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' },
   logBox: {
-    background: 'rgba(0,0,0,0.3)',
+    background: 'var(--surface-sunken)',
     borderRadius: 'var(--radius-sm)',
     padding: '10px 12px',
     maxHeight: 150,

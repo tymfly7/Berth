@@ -1,9 +1,10 @@
 /* ═══════════════════════════════════════════════════════════
    Berth — Design System
-   Premium dark theme with glassmorphism + micro-animations
+   Glassmorphism + micro-animations. Dark is the default theme,
+   light is opted into with data-theme="light" on <html>.
    ═══════════════════════════════════════════════════════════ */
 
-/* ── CSS Custom Properties ─────────────────────────────── */
+/* ── CSS Custom Properties (dark) ──────────────────────── */
 :root {
   /* Base colors */
   --bg-primary: #06090f;
@@ -55,6 +56,175 @@
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Raised surfaces, for subtle fills sitting on top of a card */
+  --surface-1: rgba(255, 255, 255, 0.04);
+  --surface-2: rgba(255, 255, 255, 0.07);
+  --surface-3: rgba(255, 255, 255, 0.12);
+  --surface-sunken: rgba(0, 0, 0, 0.22);
+  --bg-input: #131b2e;
+
+  /* Hairline stronger than --border-color */
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  /* Accent tints */
+  --accent-tint-weak: rgba(99, 102, 241, 0.06);
+  --accent-tint: rgba(99, 102, 241, 0.1);
+  --accent-tint-strong: rgba(99, 102, 241, 0.18);
+  --accent-border: rgba(99, 102, 241, 0.2);
+  --accent2-tint: rgba(6, 182, 212, 0.1);
+  --accent2-border: rgba(6, 182, 212, 0.25);
+
+  /* Status tints, weaker than the matching -glow */
+  --color-vacant-tint: rgba(16, 185, 129, 0.1);
+  --color-occupied-tint: rgba(244, 63, 94, 0.1);
+  --color-warning-tint: rgba(245, 158, 11, 0.15);
+  --color-warning-border: rgba(245, 158, 11, 0.22);
+  --color-info-tint: rgba(59, 130, 246, 0.15);
+
+  /* Cyan used for AI slot proposals */
+  --color-proposal: #64c8ff;
+  --color-proposal-tint: rgba(100, 200, 255, 0.08);
+  --color-proposal-border: rgba(100, 200, 255, 0.5);
+
+  /* Modal scrim and elevation */
+  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow-modal: 0 8px 40px rgba(0, 0, 0, 0.7);
+  --shadow-drawer: -8px 0 28px rgba(0, 0, 0, 0.55);
+  --shadow-fab: 0 4px 18px rgba(0, 0, 0, 0.45);
+
+  /* Lot map plate */
+  --lotmap-panel: rgba(17, 24, 39, 0.55);
+  --lotmap-plate: rgba(12, 18, 28, 0.55);
+  --lotmap-plate-border: rgba(255, 255, 255, 0.04);
+  --lotmap-line: rgba(148, 163, 184, 0.55);
+
+  /* Analytics chart ink. The canvas reads these with getComputedStyle. */
+  --chart-bg: rgba(0, 0, 0, 0.2);
+  --chart-grid: rgba(255, 255, 255, 0.05);
+  --chart-axis: rgba(255, 255, 255, 0.3);
+  --chart-ink: rgba(255, 255, 255, 0.5);
+  --chart-bar-idle: rgba(255, 255, 255, 0.22);
+  --tooltip-bg: rgba(12, 18, 32, 0.95);
+  --tooltip-border: rgba(255, 255, 255, 0.1);
+  --tooltip-text: #fff;
+  --tooltip-label: rgba(255, 255, 255, 0.45);
+
+  /* ── Theme-independent ──────────────────────────────────
+     Anything painted on top of a camera frame keeps one set of
+     values in both themes, because it sits over the image and
+     not over the page. Spot type colours are here too so the
+     buttons always match what the ROI canvas draws. */
+  --media-bg: #000;
+  --media-veil: rgba(0, 0, 0, 0.32);
+  --media-scrim: rgba(0, 0, 0, 0.55);
+  --media-scrim-strong: rgba(0, 0, 0, 0.75);
+  --on-media: #fff;
+  --on-media-dim: rgba(255, 255, 255, 0.5);
+  --on-media-border: rgba(255, 255, 255, 0.2);
+  --on-media-border-strong: rgba(255, 255, 255, 0.35);
+  --on-media-surface: rgba(255, 255, 255, 0.07);
+  --on-media-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  --on-accent: #fff;
+  --color-normal: #2ecc71;
+  --color-reserved: #e6a817;
+  --color-handicap: #1a7fc1;
+}
+
+/* ── CSS Custom Properties (light) ─────────────────────── */
+:root[data-theme='light'] {
+  /* Base colors */
+  --bg-primary: #f4f6fa;
+  --bg-secondary: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.78);
+  --bg-card-hover: rgba(255, 255, 255, 0.95);
+  --bg-glass: rgba(15, 23, 42, 0.03);
+
+  /* Borders */
+  --border-color: rgba(15, 23, 42, 0.12);
+  --border-glow: rgba(79, 70, 229, 0.45);
+
+  /* Text */
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+
+  /* Accent: Indigo to Cyan, darkened to hold contrast on white */
+  --accent-primary: #4f46e5;
+  --accent-secondary: #0891b2;
+  --gradient-accent: linear-gradient(135deg, #4f46e5, #0891b2);
+
+  /* Status: Green for Vacant */
+  --color-vacant: #047857;
+  --color-vacant-glow: rgba(5, 150, 105, 0.15);
+  --gradient-vacant: linear-gradient(135deg, #059669, #10b981);
+
+  /* Status: Red/Rose for Occupied */
+  --color-occupied: #be123c;
+  --color-occupied-glow: rgba(225, 29, 72, 0.12);
+  --gradient-occupied: linear-gradient(135deg, #e11d48, #f43f5e);
+
+  /* Status: Amber for Warning */
+  --color-warning: #b45309;
+  --color-critical: #dc2626;
+  --color-info: #2563eb;
+
+  /* Shadows */
+  --shadow-card: 0 4px 20px rgba(15, 23, 42, 0.08);
+  --shadow-glow: 0 0 30px rgba(79, 70, 229, 0.08);
+
+  /* Raised surfaces */
+  --surface-1: rgba(15, 23, 42, 0.04);
+  --surface-2: rgba(15, 23, 42, 0.06);
+  --surface-3: rgba(15, 23, 42, 0.1);
+  --surface-sunken: rgba(15, 23, 42, 0.05);
+  --bg-input: #ffffff;
+
+  /* Hairline stronger than --border-color */
+  --border-strong: rgba(15, 23, 42, 0.2);
+
+  /* Accent tints */
+  --accent-tint-weak: rgba(79, 70, 229, 0.05);
+  --accent-tint: rgba(79, 70, 229, 0.08);
+  --accent-tint-strong: rgba(79, 70, 229, 0.14);
+  --accent-border: rgba(79, 70, 229, 0.25);
+  --accent2-tint: rgba(8, 145, 178, 0.09);
+  --accent2-border: rgba(8, 145, 178, 0.3);
+
+  /* Status tints */
+  --color-vacant-tint: rgba(5, 150, 105, 0.1);
+  --color-occupied-tint: rgba(225, 29, 72, 0.09);
+  --color-warning-tint: rgba(180, 83, 9, 0.12);
+  --color-warning-border: rgba(180, 83, 9, 0.3);
+  --color-info-tint: rgba(37, 99, 235, 0.12);
+
+  /* Cyan used for AI slot proposals */
+  --color-proposal: #0284c7;
+  --color-proposal-tint: rgba(2, 132, 199, 0.08);
+  --color-proposal-border: rgba(2, 132, 199, 0.45);
+
+  /* Modal scrim and elevation */
+  --scrim: rgba(15, 23, 42, 0.45);
+  --shadow-modal: 0 8px 40px rgba(15, 23, 42, 0.22);
+  --shadow-drawer: -8px 0 28px rgba(15, 23, 42, 0.16);
+  --shadow-fab: 0 4px 18px rgba(15, 23, 42, 0.18);
+
+  /* Lot map plate */
+  --lotmap-panel: rgba(255, 255, 255, 0.7);
+  --lotmap-plate: rgba(15, 23, 42, 0.05);
+  --lotmap-plate-border: rgba(15, 23, 42, 0.08);
+  --lotmap-line: rgba(71, 85, 105, 0.55);
+
+  /* Analytics chart ink */
+  --chart-bg: rgba(15, 23, 42, 0.04);
+  --chart-grid: rgba(15, 23, 42, 0.08);
+  --chart-axis: rgba(15, 23, 42, 0.45);
+  --chart-ink: rgba(15, 23, 42, 0.6);
+  --chart-bar-idle: rgba(15, 23, 42, 0.18);
+  --tooltip-bg: rgba(255, 255, 255, 0.97);
+  --tooltip-border: rgba(15, 23, 42, 0.12);
+  --tooltip-text: #0f172a;
+  --tooltip-label: rgba(15, 23, 42, 0.5);
 }
 
 /* ── Reset & Base ──────────────────────────────────────── */
@@ -229,12 +399,12 @@ body::before {
 }
 
 .badge-info {
-  background: rgba(59, 130, 246, 0.15);
+  background: var(--color-info-tint);
   color: var(--color-info);
 }
 
 .badge-warning {
-  background: rgba(245, 158, 11, 0.15);
+  background: var(--color-warning-tint);
   color: var(--color-warning);
 }
 
@@ -270,7 +440,7 @@ body::before {
   background: linear-gradient(
     90deg,
     var(--bg-card) 25%,
-    rgba(255,255,255,0.05) 50%,
+    var(--surface-2) 50%,
     var(--bg-card) 75%
   );
   background-size: 200% 100%;
@@ -284,7 +454,7 @@ body::before {
 /* ── Progress bar ──────────────────────────────────────── */
 .progress-bar {
   height: 6px;
-  background: rgba(255,255,255,0.06);
+  background: var(--surface-2);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -306,12 +476,12 @@ body::before {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.1);
+  background: var(--surface-3);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255,255,255,0.2);
+  background: var(--border-strong);
 }
 
 /* ── Utility Classes ───────────────────────────────────── */
@@ -339,7 +509,7 @@ body::before {
 /* ── Panel Select (matches btn-ghost btn-sm) ───────────── */
 .panel-select {
   flex: 1;
-  background: #131b2e;
+  background: var(--bg-input);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -368,7 +538,7 @@ body::before {
 }
 
 select option {
-  background: #131b2e;
+  background: var(--bg-input);
   color: var(--text-primary);
   font-weight: 500;
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useTheme, setTheme } from '../theme'
 
 const style = {
   header: {
@@ -55,10 +56,16 @@ const style = {
     color: 'var(--accent-primary)',
     borderColor: 'var(--accent-primary)',
   },
+  themeBtn: {
+    fontSize: '0.9rem',
+    lineHeight: 1,
+    padding: '5px 10px',
+  },
 }
 
 export default function Header({ connected, model }) {
   const [time, setTime] = useState(new Date())
+  const theme = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -121,6 +128,16 @@ export default function Header({ connected, model }) {
             Logout
           </button>
         )}
+
+        <button
+          className="btn btn-ghost"
+          style={style.themeBtn}
+          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+          title={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+          aria-label={theme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+        >
+          {theme === 'light' ? '☾' : '☀'}
+        </button>
 
         <span style={style.time}>
           {time.toLocaleTimeString()}
