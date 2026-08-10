@@ -158,14 +158,37 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ```
 
-### 3. Set up the frontend
+### 3. Download the model weights
+
+No trained weights ship with the repository. Fetch the archives from the
+[latest release](https://github.com/tymfly7/Berth/releases/latest) and extract each
+one into the directory it belongs to.
+
+```bash
+# From the repository root, after downloading the archives
+unzip berth-yolo26-torch-agpl3.zip -d backend/models
+unzip berth-classifiers-torch.zip  -d backend/models
+
+# Edge deployment only, skip for a development install
+unzip berth-yolo26-ncnn-agpl3.zip -d backend/edge_models
+unzip berth-classifiers-ncnn.zip  -d backend/edge_models
+
+# On Windows, use Expand-Archive instead
+# Expand-Archive berth-yolo26-torch-agpl3.zip -DestinationPath backend\models
+```
+
+Downloads can be verified against the `SHA256SUMS.txt` asset in the same release.
+The weights carry their own licenses and some are AGPL-3.0. See
+[Released model weights](#released-model-weights) before redistributing them.
+
+### 4. Set up the frontend
 
 ```bash
 cd frontend
 npm install
 ```
 
-### 4. Run the application
+### 5. Run the application
 
 **Terminal 1, backend:**
 ```bash
@@ -192,9 +215,11 @@ Open `http://localhost:5173` for the public view, or `http://localhost:5173/admi
 
 > **No trained weights ship with the repository.** `backend/models/` and
 > `backend/edge_models/` are gitignored, so a fresh clone starts with no model.
-> The dashboard runs, but occupancy classification stays unavailable until a model
-> is trained (see [Dataset Setup](#dataset-setup) and [Training Models](#training-models))
-> or trained weights are placed in `backend/models/` by hand.
+> The dashboard runs, but occupancy classification stays unavailable until the
+> released weights are installed (see
+> [3. Download the model weights](#3-download-the-model-weights)) or a model is
+> trained locally (see [Dataset Setup](#dataset-setup) and
+> [Training Models](#training-models)).
 
 ---
 
@@ -1209,9 +1234,47 @@ behavior changes. For larger features or architectural changes, open an issue fi
 
 ## License
 
-Released under the MIT License. See [LICENSE](LICENSE) for the full text. The
-third-party datasets and reference implementations this project builds on retain
-their own licenses (see [Acknowledgements](#acknowledgements)).
+Released under the MIT License. See [LICENSE](LICENSE) for the full text. The MIT
+grant covers the source code in this repository only. The third-party datasets and
+reference implementations this project builds on retain their own licenses (see
+[Acknowledgements](#acknowledgements)).
+
+### Third-party dependencies
+
+The full backend installs `ultralytics` (AGPL-3.0) from PyPI. Deploying the YOLO26
+path as a network service therefore carries AGPL-3.0 section 13 obligations. The
+edge profile in `backend/requirements.edge.txt` declares no `ultralytics`
+dependency and runs every model through NCNN. The remaining dependencies are
+permissive: PyTorch and torchvision (BSD-3-Clause), timm (Apache-2.0) and ncnn
+(BSD-3-Clause).
+
+### Released model weights
+
+Trained weights are distributed through GitHub Releases rather than through git,
+because `backend/models/` and `backend/edge_models/` are gitignored. They are
+available from the [latest release](https://github.com/tymfly7/Berth/releases/latest).
+Extract the PyTorch archives into `backend/models/` and the NCNN archives into
+`backend/edge_models/`.
+
+The weights are not covered by the MIT grant. Each file inherits the license of the
+pretrained model it was fine-tuned from.
+
+| Archive | Models | Derived from | License |
+|---------|--------|--------------|---------|
+| `berth-yolo26-torch-agpl3.zip` | `best_yolo26_detect`, `best_yolo26{n,s,m}_classify`, `yolo26s_vehicle` | Ultralytics YOLO26 | AGPL-3.0 |
+| `berth-yolo26-ncnn-agpl3.zip` | NCNN exports of the above | Ultralytics YOLO26 | AGPL-3.0 |
+| `berth-classifiers-torch.zip` | `best_resnet18`, `best_resnet50` | torchvision ImageNet-1k weights | BSD-3-Clause |
+| | `best_mobilenetv4s`, `best_mobilenetv4m` | timm MobileNetV4 | Apache-2.0 |
+| | `best_cnn_scratch` | trained from scratch | MIT |
+| `berth-classifiers-ncnn.zip` | NCNN exports of the above | as above, per model | BSD-3-Clause, Apache-2.0, MIT |
+
+Conversion to NCNN does not change the license of a model. The exported YOLO26
+`.bin` and `.param` files remain AGPL-3.0, so the torch-free edge image still ships
+AGPL-3.0 weights. The ResNet backbones were pretrained on ImageNet-1k, which is
+released for non-commercial research use.
+
+Downloads can be verified against the `SHA256SUMS.txt` asset published alongside
+the archives.
 
 ---
 

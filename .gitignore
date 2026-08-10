@@ -250,16 +250,7 @@ backend/outputs/**
 README1.md
 log_combined.md
 log_monetization_plan.md
-log_docker_todo.md
-log_pi_zero_setup.md
-lResearch.md
-log_rpi_zero.md
-log_new_edge.md
-log_edge_eval.md
-log_edge_config.md
-log_new_edge_test.md
-deploy_reorg_plan.md
-mediamtx-setup.md
+
 
 # Edge eval CSV/goldens output — generated per run, not deployable
 backend/eval_results/
