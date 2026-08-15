@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { apiFetch } from '../api'
 import { API_BASE } from '../config'
 import { Link } from 'react-router-dom'
+import Header from '../components/Header'
 import MetricCards from '../components/MetricCards'
 import LotMap from '../components/LotMap'
 import AnalyticsChart from '../components/AnalyticsChart'
@@ -91,6 +92,14 @@ export default function PublicView() {
     setLotMapIdx(i => Math.min(i, Math.max(0, allCameraSlots.length - 1)))
   }, [allCameraSlots.length])
 
+  // Drives the header's Live/Offline dot from the lot poll, not a socket.
+  const live = lastUpdate != null && time.getTime() - lastUpdate < 15000
+
+  // Metrics sit at zero until the first poll lands, so occupancy is only
+  // meaningful while the data is fresh. Without this guard an unreachable
+  // backend reads as a full lot.
+  const isFull = live && displayMetrics.available === 0
+
   const availableColor =
     displayMetrics.available === 0
       ? 'var(--color-occupied)'
@@ -98,51 +107,29 @@ export default function PublicView() {
       ? 'var(--color-warning)'
       : 'var(--color-vacant)'
 
-  const isFull = displayMetrics.available === 0
-
   return (
     <div style={{
       minHeight: '100vh',
       background: 'var(--bg-primary)',
       display: 'flex',
       flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '40px clamp(12px, 4vw, 24px)',
-      position: 'relative',
     }}>
-      {/* Heading + clock */}
-      <div style={{ textAlign: 'center', marginBottom: 32 }}>
-        <h1 style={{
-          fontSize: 'clamp(1.6rem, 4vw, 2.4rem)',
-          fontWeight: 800,
-          background: 'var(--gradient-accent)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          marginBottom: 4,
-        }}>
-          Berth
-        </h1>
-        <div style={{ fontSize: '0.95rem', color: 'var(--text-secondary)', fontWeight: 500, letterSpacing: '1px', marginBottom: 10 }}>
-          Find your space.
-        </div>
-        <div style={{ fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: '1rem' }}>
-          {time.toLocaleTimeString()}
-        </div>
-        {(() => {
-          const agoSec = lastUpdate ? Math.max(0, Math.round((time.getTime() - lastUpdate) / 1000)) : null
-          const live = agoSec != null && agoSec < 15
-          const color = live ? 'var(--color-vacant)' : 'var(--text-muted)'
-          return (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 8, fontSize: '0.8rem', color }}>
-              <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: live ? `0 0 8px ${color}` : 'none' }} />
-              {live ? `Live · updated ${agoSec}s ago` : 'Connecting…'}
-            </div>
-          )
-        })()}
+      {/* width/box-sizing restore the block behaviour .app-container has on the
+          admin pages. Its `margin: 0 auto` would otherwise shrink-wrap it here,
+          since auto side-margins cancel a flex item's default stretch. */}
+      <div className="app-container" style={{ width: '100%', boxSizing: 'border-box' }}>
+        <Header publicView connected={live} model={null} />
       </div>
 
-
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '40px clamp(12px, 4vw, 24px)',
+        position: 'relative',
+      }}>
       {/* Available spots — large number */}
       <div style={{
         textAlign: 'center',
@@ -153,21 +140,23 @@ export default function PublicView() {
           fontWeight: 800,
           letterSpacing: '1.5px',
           textTransform: 'uppercase',
-          color: isFull ? 'var(--color-occupied)' : 'var(--color-vacant)',
+          color: !live ? 'var(--text-muted)' : isFull ? 'var(--color-occupied)' : 'var(--color-vacant)',
           marginBottom: 8,
         }}>
-          {isFull ? 'Lot Full' : 'Spaces Available'}
+          {!live ? 'No Live Data' : isFull ? 'Lot Full' : 'Spaces Available'}
         </div>
-        <div style={{
-          fontSize: 'clamp(5rem, 18vw, 10rem)',
-          fontWeight: 900,
-          lineHeight: 1,
-          color: availableColor,
-          textShadow: `0 0 60px ${availableColor}55`,
-          letterSpacing: '-4px',
-        }}>
-          {displayMetrics.available}
-        </div>
+        {live && (
+          <div style={{
+            fontSize: 'clamp(5rem, 18vw, 10rem)',
+            fontWeight: 900,
+            lineHeight: 1,
+            color: availableColor,
+            textShadow: `0 0 60px ${availableColor}55`,
+            letterSpacing: '-4px',
+          }}>
+            {displayMetrics.available}
+          </div>
+        )}
         <div style={{
           fontSize: '1rem',
           color: 'var(--text-secondary)',
@@ -176,7 +165,7 @@ export default function PublicView() {
           textTransform: 'uppercase',
           marginTop: 8,
         }}>
-          spots available
+          {live ? 'spots available' : 'connecting…'}
         </div>
       </div>
 
@@ -272,6 +261,7 @@ export default function PublicView() {
       >
         Admin
       </Link>
+      </div>
     </div>
   )
 }

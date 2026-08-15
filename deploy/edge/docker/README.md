@@ -28,14 +28,14 @@ grants V4L2 (character major 81) through `device_cgroup_rules`, so a USB camera 
 container recreate is needed, and the service still starts on a Pi with no camera attached at
 all.
 
-Ribbon/CSI cameras on Bookworm go through libcamera rather than a plain `/dev/video0`, and this
-image does not carry the libcamera stack. Use a USB webcam or a network stream.
+Ribbon/CSI cameras on Bookworm go through libcamera, which this image does not carry.
+Use a USB webcam or a network stream.
 
 ## Secrets: the `.env` file
 
 Nothing secret is baked into the image. `config.py` reads three env vars at every start, and
-the compose file interpolates them as `${VAR:-}`, which defaults to empty rather than failing.
-A missing file therefore produces a silently broken login rather than an error:
+the compose file interpolates them as `${VAR:-}`, which defaults to empty.
+A missing file therefore produces a silently broken login:
 
 | Var | If unset |
 |-----|----------|
@@ -113,7 +113,7 @@ docker compose -f docker-compose.rpi.yml up -d   # no --build: uses the loaded i
 `docker-compose.rpi.yml` references `image: berth-rpi:latest`, so once the image is loaded the
 compose run picks it up without rebuilding. Its `build.context: ../../..` points at a repo tree
 that does not exist on the Pi. If the load failed or the tag differs, Compose falls back to
-building and fails with a confusing missing-path error rather than "no such image".
+building and fails with a confusing missing-path error.
 `docker images | grep berth-rpi` is the quick check.
 
 A native build on the Pi

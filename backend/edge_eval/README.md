@@ -253,7 +253,7 @@ of the laptop baseline.
 
 ## 7. Parity check: PyTorch to NCNN drift
 
-Confirms the NCNN export did not change the model's predictions.
+Confirms the NCNN export preserves the model's predictions.
 
 1. On the hub or dev machine (needs torch), from `backend/`:
 
@@ -273,8 +273,7 @@ Confirms the NCNN export did not change the model's predictions.
 
 `summary.csv` gains `parity_n`, `parity_max_drift`, `parity_mean_drift` and
 `parity_label_agreement`. Expect drift below roughly 0.02 and agreement 1.0.
-Anything worse points at the NCNN export or a preprocessing mismatch, not at the
-device.
+Anything worse points at the NCNN export or a preprocessing mismatch.
 
 Once on-device probabilities match the dev-side model, later runs can use a subset
 purely for latency.
@@ -314,19 +313,18 @@ Check these before trusting a run:
   the board thermal-throttled mid-run and the latency figures are suspect.
   Rerun after a cool-down.
 - `mem_available_mb` never approaches zero. If it did, the run swapped to SD and
-  the latency is measuring the card, not the model.
+  the latency is measuring the card.
 - `n_images` is what was intended (`--limit 500` on a two-class set gives 1000).
 - `runtime` and `ncnn_threads` are what was intended. Comparing a 3-thread run
   against a 1-thread run is the easiest way to produce a wrong speedup figure.
 - Rows being compared were produced with the same `--dataset` and the same
-  `--limit`. Latency is model-bound rather than dataset-bound, but accuracy is
-  not: the cross-lot set and the in-domain test split give very different
-  accuracy for the same weights, and that gap is domain shift, not the device.
+  `--limit`. Latency is model-bound, but accuracy depends on the dataset: the
+  cross-lot set and the in-domain test split give very different accuracy for the
+  same weights, and that gap is domain shift.
 
-`load_time_ms` is a cold/warm-cache-sensitive number, not a stable property of
-the model. It falls sharply on the second run of the same session because the
-weights and the shared libraries are still in page cache. Do not compare it
-across runs unless the caches were dropped between them.
+`load_time_ms` tracks cache state. It falls sharply on the second run of the same
+session because the weights and the shared libraries are still in page cache.
+Compare it across runs only when the caches were dropped between them.
 
 ---
 
@@ -335,12 +333,11 @@ across runs unless the caches were dropped between them.
 Run this last, and only when a torch-versus-NCNN comparison is required. It puts a
 ~1.5 GB wheel set on the board.
 
-Scope: Pi 5 only. PyTorch is not attempted on the Pi 3B or the Zero 2 W, because
-1 GB and 512 MB of RAM do not realistically hold the torch runtime alongside a
-model.
+Scope: Pi 5 only. The Pi 3B and the Zero 2 W have 1 GB and 512 MB of RAM, too
+little for the torch runtime alongside a model.
 
 The edge image stays torch-free (`backend/requirements.edge.txt`). This path builds
-a throwaway venv on the Pi OS host instead.
+a throwaway venv on the Pi OS host.
 
 ### 10.1 Sync the code and the torch weights
 

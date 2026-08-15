@@ -5,7 +5,7 @@ Native deployment of the Berth edge backend on the low-RAM boards: **Pi Zero 2 W
 path for the Pi 5. On the small boards the Docker daemon alone costs 100–150 MB, so the
 backend runs directly under **systemd** instead.
 
-On this hardware the failure mode is usually a freeze rather than a crash. When RAM runs out
+On this hardware the failure mode is usually a freeze. When RAM runs out
 and the board swaps to the SD card, the symptom is "no logs, SSH dead, UI gone", which is hard
 to tell from a hang.
 
@@ -129,7 +129,7 @@ The ncnn models must be present as `backend/edge_models/*_ncnn_model/` directori
 
 #### From PowerShell
 
-Stage the archive to a file instead of piping it, and keep every exclude on the one line. Windows
+Stage the archive to a file, then copy it, and keep every exclude on the one line. Windows
 ships `tar.exe` (bsdtar) since Windows 10, so nothing needs installing. Run these one at a
 time. Pasted as a block they can merge into a single line, and `backend` fuses onto the next
 command as `backendscp`, which surfaces as a row of `tar.exe: : Couldn't visit directory` errors:
@@ -240,13 +240,13 @@ matters:
 | `MALLOC_ARENA_MAX=2` | glibc otherwise makes up to 8×cores malloc arenas, a known RSS inflator for Python servers. |
 | `MemoryHigh=340M` | Reclaim threshold. Idle RSS is ~294 MB. Setting this below the real footprint makes the kernel reclaim in a permanent loop. |
 | `MemoryMax=420M` + `OOMPolicy=kill` | Hard kill line. 463 MB total − ~80 MB base leaves ~380 MB. |
-| `MemorySwapMax=200M` | `MemoryHigh/Max` cap RAM only. Without this, an over-cap process spills unlimited pages into zram and thrashes instead of dying. This makes the kill fire. |
+| `MemorySwapMax=200M` | `MemoryHigh/Max` cap RAM only. Without this, an over-cap process spills unlimited pages into zram and thrashes indefinitely. This makes the kill fire. |
 
 Three more slimming measures are built into the code (no unit knobs needed): the FastAPI
 sync-endpoint threadpool is capped at 8 threads, each per-thread SQLite connection's page cache
 is 256 KB (not 2 MB), and yt-dlp resolves stream URLs in a subprocess instead of pinning
-~50–80 MB as an in-process import. The worst case is then a dying service (auto-restarted in
-10 s) rather than a frozen board.
+~50–80 MB as an in-process import. The worst case is then a dying service, auto-restarted in
+10 s.
 
 ## Pi 3B profile
 
@@ -260,7 +260,7 @@ MemorySwapMax=200M
 ```
 
 And its `.env`, the same file and location as [Secrets](#secrets-the-env-file), with two extra
-tuning lines (regenerate the secrets rather than hunt for the live values):
+tuning lines (regenerate the secrets):
 
 ```
 BERTH_NCNN_THREADS=1

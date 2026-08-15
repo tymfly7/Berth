@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import Header from '../components/Header'
 
 export default function NotFoundPage() {
   const home = sessionStorage.getItem('admin_authed') === 'true' ? '/admin' : '/'
@@ -6,14 +7,23 @@ export default function NotFoundPage() {
   return (
     <div style={{
       minHeight: '100vh',
+      background: 'var(--bg-primary)',
       display: 'flex',
       flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'var(--bg-primary)',
-      padding: '24px',
-      textAlign: 'center',
     }}>
+      <div className="app-container" style={{ width: '100%', boxSizing: 'border-box' }}>
+        <Header publicView connected={false} model={null} />
+      </div>
+
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '24px',
+        textAlign: 'center',
+      }}>
       <div style={{
         fontSize: '6rem',
         fontWeight: 900,
@@ -47,6 +57,7 @@ export default function NotFoundPage() {
       >
         Go Home
       </Link>
+      </div>
     </div>
   )
 }

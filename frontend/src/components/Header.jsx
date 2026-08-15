@@ -37,6 +37,7 @@ const style = {
     flexWrap: 'wrap',
     justifyContent: 'flex-end',
     gap: '8px 16px',
+    marginLeft: 'auto',
   },
   time: {
     fontSize: '0.8rem',
@@ -63,7 +64,7 @@ const style = {
   },
 }
 
-export default function Header({ connected, model }) {
+export default function Header({ connected, model, publicView = false }) {
   const [time, setTime] = useState(new Date())
   const theme = useTheme()
   const location = useLocation()
@@ -92,36 +93,38 @@ export default function Header({ connected, model }) {
         </div>
       </div>
       <div style={style.right}>
-        {/* Nav links */}
-        <nav style={{ display: 'flex', gap: 8 }}>
-          <Link
-            to="/"
-            style={{
-              ...style.navLink,
-              ...(location.pathname === '/' ? style.navLinkActive : {}),
-            }}
-          >
-            Public View
-          </Link>
-          <Link
-            to="/admin"
-            style={{
-              ...style.navLink,
-              ...(isAdmin ? style.navLinkActive : {}),
-            }}
-          >
-            Admin
-          </Link>
-          <Link
-            to="/admin/docs"
-            style={{
-              ...style.navLink,
-              ...(location.pathname === '/admin/docs' ? style.navLinkActive : {}),
-            }}
-          >
-            Docs
-          </Link>
-        </nav>
+        {/* Nav links — hidden on public screens so admin routes are not advertised */}
+        {!publicView && (
+          <nav style={{ display: 'flex', gap: 8 }}>
+            <Link
+              to="/"
+              style={{
+                ...style.navLink,
+                ...(location.pathname === '/' ? style.navLinkActive : {}),
+              }}
+            >
+              Public View
+            </Link>
+            <Link
+              to="/admin"
+              style={{
+                ...style.navLink,
+                ...(isAdmin ? style.navLinkActive : {}),
+              }}
+            >
+              Admin
+            </Link>
+            <Link
+              to="/admin/docs"
+              style={{
+                ...style.navLink,
+                ...(location.pathname === '/admin/docs' ? style.navLinkActive : {}),
+              }}
+            >
+              Docs
+            </Link>
+          </nav>
+        )}
 
         {isAdmin && isAuthed && (
           <button className="btn btn-ghost" onClick={logout} style={{ fontSize: '0.8rem' }}>
@@ -142,9 +145,11 @@ export default function Header({ connected, model }) {
         <span style={style.time}>
           {time.toLocaleTimeString()}
         </span>
-        <span className={`badge ${!model || model === 'none' ? 'badge-warning' : 'badge-info'}`}>
-          {(model || 'none').toUpperCase()}
-        </span>
+        {model != null && (
+          <span className={`badge ${model === 'none' ? 'badge-warning' : 'badge-info'}`}>
+            {model.toUpperCase()}
+          </span>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div className={`pulse-dot ${connected ? 'connected' : 'disconnected'}`}
                style={{ color: connected ? 'var(--color-vacant)' : 'var(--color-occupied)' }} />
