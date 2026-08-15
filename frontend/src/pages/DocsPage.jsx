@@ -1,3 +1,6 @@
+import { useState, useEffect } from 'react'
+import { apiFetch } from '../api'
+import { API_BASE } from '../config'
 import Header from '../components/Header'
 import '../App.css'
 
@@ -186,9 +189,27 @@ function SectionCard({ num, id, title, children }) {
 }
 
 export default function DocsPage() {
+  // Header dot mirrors the public page: green while some active camera is
+  // delivering metrics. Polled, since this page opens no socket of its own.
+  const [live, setLive] = useState(false)
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const res = await apiFetch(`${API_BASE}/api/public/lots`)
+        if (!res.ok) { setLive(false); return }
+        const lots = await res.json()
+        setLive(lots.some(l => l.metrics))
+      } catch { setLive(false) }
+    }
+    check()
+    const interval = setInterval(check, 10_000)
+    return () => clearInterval(interval)
+  }, [])
+
   return (
     <div style={s.page}>
-      <Header connected={false} model={null} />
+      <Header connected={live} model={null} />
 
       {/* Hero */}
       <div style={s.hero}>
@@ -202,7 +223,7 @@ export default function DocsPage() {
 
       {/* Project Status */}
       <section id="status" style={s.card}>
-        <div style={s.sectionNum}>Project Status · June 2026</div>
+        <div style={s.sectionNum}>Project Status · August 2026</div>
         <h2 style={s.sectionTitle}>Where the Project Stands</h2>
         <p style={s.body}>
           Berth runs in two deployment modes today:
@@ -215,7 +236,8 @@ export default function DocsPage() {
           </li>
           <li style={s.step}>
             <span style={s.label}>Edge</span> (<Code>BERTH_DEPLOYMENT=edge</Code>)
-            — an inference-only node (currently the Raspberry Pi 5 / ARM64). It
+            — an inference-only node. The profile runs natively on the Raspberry
+            Pi 5, the Pi 3B, and the Pi Zero 2 W (ARM64). It
             runs lighter <Code>NCNN</Code> models at reduced resolution and frame
             rate, and a background sync worker pushes occupancy and alerts to a
             central hub every 60 seconds, buffering locally if the hub is
@@ -227,7 +249,7 @@ export default function DocsPage() {
         </p>
         <ul style={{ ...s.steps, listStyleType: 'disc' }}>
           <li style={s.step}>
-            Stream 960×540 @ 10 FPS, inference at 3 FPS (server: 1280×720 @ 20 /
+            Stream 960×540 @ 15 FPS, inference at 4 FPS (server: 1280×720 @ 20 /
             8 FPS).
           </li>
           <li style={s.step}>
@@ -239,10 +261,12 @@ export default function DocsPage() {
           </li>
         </ul>
         <div style={s.callout}>
-          <span style={s.label}>Next phase:</span> extending the edge
-          deployment beyond the Raspberry Pi 5 to lower-power, neural-net-capable
-          devices — starting with the Raspberry Pi Zero 2 W and similar
-          accelerated edge boards (targeted mid-2026).
+          <span style={s.label}>Next phase:</span> moving inference off the CPU
+          onto a dedicated accelerator. The Raspberry Pi AI HAT+ (Hailo-8L /
+          Hailo-8) attaches over PCIe and so fits the Pi 5 alone. For the weaker
+          boards the USB Google Coral Edge TPU is the remaining candidate,
+          though it requires 8-bit quantisation away from the current
+          half-precision <Code>NCNN</Code> path.
         </div>
       </section>
 
