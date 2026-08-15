@@ -304,8 +304,7 @@ export default function DocsPage() {
             Open a browser and navigate to <Code>/admin</Code>.
           </li>
           <li style={s.step}>
-            Enter the admin password when prompted. The password is checked by
-            the backend and is never embedded in the page.
+            Enter the admin password when prompted. The backend checks it.
           </li>
           <li style={s.step}>
             On success the backend returns a short-lived token, stored in{' '}
@@ -348,8 +347,7 @@ export default function DocsPage() {
         </p>
         <p style={s.body}>
           OpenCV reads the device server-side, so the camera must be plugged
-          into the host running the backend — not the laptop where you open the
-          browser.
+          into the host running the backend.
         </p>
         <ol style={s.steps}>
           <li style={s.step}>
@@ -431,9 +429,9 @@ export default function DocsPage() {
           <span style={s.label}>Keeping RTSP credentials secure</span>
         </p>
         <p style={s.body}>
-          Instead of saving a password in the stored source URL, set it as an
-          environment variable on the backend host. The registry will use it
-          at runtime and the on-disk config stays credential-free.
+          Set the password as an environment variable on the backend host. The
+          registry will use it at runtime and the on-disk config stays
+          credential-free.
         </p>
         <div style={{
           fontFamily: 'monospace',
@@ -617,7 +615,7 @@ export default function DocsPage() {
           <li style={s.step}>
             A <span style={s.label}>Misparked</span> count card appears in the
             Metric Cards row. It totals the flagged vehicles across every active
-            camera, not only the one on screen.
+            camera.
           </li>
           <li style={s.step}>
             Flagged vehicles are drawn in <span style={s.label}>orange</span> on
@@ -635,8 +633,7 @@ export default function DocsPage() {
           <span style={s.label}>YOLO26 detector</span> and at least one ROI per
           camera. With no ROIs there is nothing to measure a car against, so
           nothing is flagged. Overlap is measured against each spot’s exact
-          polygon, not its bounding box, so angled stalls don’t trigger false
-          alarms.
+          polygon, so angled stalls don’t trigger false alarms.
         </div>
       </SectionCard>
 
