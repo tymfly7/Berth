@@ -150,7 +150,6 @@ VACANT_CONFIRM_SECS = float(os.getenv("BERTH_VACANT_CONFIRM_SECS", "0.5"))
 # ---------------------------------------------------------------------------
 TRAIN_SPLIT = 0.70
 VAL_SPLIT   = 0.15
-TEST_SPLIT  = 0.15
 
 EPOCHS               = int(os.getenv("BERTH_EPOCHS", "30"))
 YOLO_CLASSIFY_EPOCHS = int(os.getenv("BERTH_YOLO_CLASSIFY_EPOCHS", "30"))

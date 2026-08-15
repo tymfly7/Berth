@@ -59,13 +59,6 @@ class ParkingResNet(nn.Module):
         features = self.backbone(x)
         return self.classifier(features)
 
-    def unfreeze_layers(self, num_layers=3):
-        """Unfreeze the last N layers of the backbone for fine-tuning."""
-        layers = list(self.backbone.children())
-        for layer in layers[-num_layers:]:
-            for param in layer.parameters():
-                param.requires_grad = True
-
     def count_parameters(self):
         total = sum(p.numel() for p in self.parameters())
         trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
@@ -144,14 +137,6 @@ class ParkingMobileNetV4(nn.Module):
     def forward(self, x):
         features = self.backbone(x)
         return self.classifier(features)
-
-    def unfreeze_layers(self, num_layers=3):
-        """Unfreeze the last N backbone blocks for fine-tuning."""
-        self._backbone_frozen = False
-        layers = list(self.backbone.children())
-        for layer in layers[-num_layers:]:
-            for param in layer.parameters():
-                param.requires_grad = True
 
     def count_parameters(self):
         total = sum(p.numel() for p in self.parameters())
