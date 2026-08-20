@@ -90,8 +90,7 @@ the uncorrected machine output and are not read by the build script.
 ## Frames without a label file
 
 {n_labelled} of the {n_sampled} frames came back with a label file. The remaining
-{len(empty_keep) + len(night_exclude)} were inspected and fall into two groups that
-are treated differently.
+{len(empty_keep) + len(night_exclude)} were inspected and fall into two groups.
 """)
     if empty_keep:
         parts.append(f"""
@@ -108,11 +107,11 @@ see in the image. They are excluded from the dataset entirely and appear in no s
 
 {chr(10).join('- `' + s + '`' for s in night_exclude)}
 
-The reason for excluding rather than including them as empty: a COCO pass at
-confidence 0.05 finds one to six vehicles in most of them. Labelling them empty
-would teach the detector that vehicles at night are background, which would undo
-the hand correction done on the {n_night_labelled} night frames that are properly
-labelled. The absent label file records annotator visibility, not an empty lot.
+They are excluded because a COCO pass at confidence 0.05 finds one to six vehicles
+in most of them. Labelling them empty would teach the detector that vehicles at
+night are background. That would undo the hand correction done on the
+{n_night_labelled} night frames that are properly labelled. The absent label file
+records annotator visibility, not an empty lot.
 
 Final size: {n_labelled} labelled + {len(empty_keep)} empty = {total} frames.
 """)
@@ -131,9 +130,8 @@ duplicates on both sides of the split and inflate the validation metric. Whole
 days are assigned, so no day contributes to both splits. The bundle's own
 train/val/test division is the bootstrap's split and is not carried through.
 
-Days are walked in date order and handed to val whenever val sits below its 20%
-share, which spreads validation across the whole capture period rather than
-clustering it in one part of the season.
+Days are walked in date order. A day goes to val whenever val is below its 20%
+share. This spreads validation across the whole capture period.
 
 - train: {len(train_days)} days, {n_train} frames ({n_train / total:.0%})
 - val: {len(val_days)} days, {n_val} frames ({n_val / total:.0%})
@@ -151,8 +149,8 @@ case for this camera. A val set without night frames would not measure it.
 
 Every frame is in one `test` split. This lot is held out to evaluate a detector
 trained on another lot, so there is no train/val division. `dataset.yaml` points
-its `train:` and `val:` keys at the same test images, because Ultralytics refuses
-to load a yaml that omits them. Nothing here is meant to be trained on.
+its `train:` and `val:` keys at the same test images, because Ultralytics will not
+load a yaml that omits them. Nothing here is meant to be trained on.
 
 - test: {len(days)} days, {total} frames
 

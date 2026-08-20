@@ -29,6 +29,7 @@ Usage:
         --rois lot-t12 --offset-rois lot-t12-offset
 """
 import argparse
+from collections import Counter
 from pathlib import Path
 
 import cv2
@@ -90,6 +91,25 @@ def _tally(per_frame, side):
     return len(results), len(flagged), straddling, len(flagged) - straddling
 
 
+def _outcome(result):
+    return result["reason"] if result["status"] == "misparked" else "ok"
+
+
+def _crosstab(per_frame):
+    """Base outcome against offset outcome, per vehicle.
+
+    The negative tally alone is misleading: a car parked where no bay was drawn
+    reads "outside" on both sides and inflates the false positive count without
+    saying anything about the straddle geometry. Pairing the two sides separates
+    those from the cars that really sit on the grid.
+    """
+    pairs = Counter()
+    for f in per_frame:
+        for base, offset in zip(f["base"], f["offset"]):
+            pairs[(_outcome(base), _outcome(offset))] += 1
+    return pairs
+
+
 def _detail(per_frame, side, want_flagged):
     """Per-vehicle lines for the cases the author needs to eyeball."""
     lines = []
@@ -124,6 +144,10 @@ def main():
     print(f"  positive  {args.offset_rois:<24s} {n_offset:2d} bays   "
           f"false negatives {vehicles - hits:3d} / {vehicles}   "
           f"(flagged {hits}: straddling {hit_straddle}, outside {hit_outside})")
+
+    print(f"  {'base':<12} {'offset':<12} {'vehicles':>8}")
+    for (base, offset), n in sorted(_crosstab(per_frame).items(), key=lambda kv: -kv[1]):
+        print(f"  {base:<12} {offset:<12} {n:>8}")
 
     for title, lines in (("false positives (flagged on the correct ROI set)",
                           _detail(per_frame, "base", True)),

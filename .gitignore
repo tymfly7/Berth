@@ -249,6 +249,7 @@ backend/outputs/**
 README1.md
 log_combined.md
 log_monetization_plan.md
+PROJECT_MAP.md
 
 
 # Edge eval CSV/goldens output — generated per run, not deployable
