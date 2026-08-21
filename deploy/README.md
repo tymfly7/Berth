@@ -9,7 +9,7 @@ packaging and runtime tuning change between tiers.
 | Tier | Hardware | Deployment command | Docs |
 |------|----------|-------------------|------|
 | **[Dev](dev/)** | Any laptop | `python backend/main.py` from a checkout | [dev/](dev/) |
-| **[Docker](docker/)** | x86 server / cloud | `docker compose -f deploy/docker/docker-compose.yml up -d` from repo root | [docker/](docker/) |
+| **[Docker](docker/)** | x86 server / cloud | `docker compose -f deploy/docker/docker-compose.yml up -d --build` from repo root | [docker/](docker/) |
 | **[Edge · Pi 5 (Docker)](edge/docker/)** | RPi 5 (arm64) | build image on dev → ship tarball + compose to the Pi → run there | [edge/docker/](edge/docker/) |
 | **[Edge · Zero 2 W / 3B (native)](edge/native/)** | RPi Zero 2 W / 3B | `sudo install.sh` on the Pi, systemd | [edge/native/](edge/native/) |
 
