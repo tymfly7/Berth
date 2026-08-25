@@ -40,4 +40,33 @@ are visible inside the container immediately.
 The container runs uvicorn without `--reload`. Backend edits take effect at the next build. A
 native backend gives a faster development loop.
 
+## Training and evaluation
+
+The container runs under the server profile, so the training and evaluation endpoints are
+active. Edge nodes are the profile that rejects them with 403. Datasets, weights and run
+outputs travel over the bind mounts. A run started inside the container reads `backend/data`
+from the host and writes its results back to `backend/models` and `backend/outputs`.
+
+The admin interface at `http://127.0.0.1:9000` carries the training and evaluation panels.
+Access requires `BERTH_ADMIN_PASSWORD` in the repo-root `.env`, which compose passes through to
+the container.
+
+The same operations are available over REST on host port 9000:
+
+```bash
+curl -X POST "http://127.0.0.1:9000/api/train/start?model_name=yolo26s_classify"
+curl http://127.0.0.1:9000/api/train/status
+curl -X POST http://127.0.0.1:9000/api/evaluate/all
+```
+
+Where the API key is configured, each request must carry it as
+`-H "X-API-Key: $BERTH_API_KEY"`.
+
+The supported model identifiers, the CLI entry point and the output layout are documented in
+[Training Models](../../README.md#training-models). Substitute host port 9000 for the 8001 used
+in that section.
+
+Torch in this image is the CPU-only wheel. Training completes, at CPU speed. The header comment
+in `Dockerfile` describes the modification required for a GPU host.
+
 For Raspberry Pi (arm64) images, see [`../edge/`](../edge/).

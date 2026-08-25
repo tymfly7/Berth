@@ -14,6 +14,8 @@ services:
       - BERTH_PORT=8000
       - BERTH_MODEL=yolo26s_classify
       - BERTH_API_KEY=${BERTH_API_KEY:-}
+      - BERTH_ADMIN_PASSWORD=${BERTH_ADMIN_PASSWORD:-}   # required for admin login (else /api/auth/login → 503)
+      - BERTH_AUTH_SECRET=${BERTH_AUTH_SECRET:-}         # optional: persist token signing across restarts
       - BERTH_EPOCHS=30
       - BERTH_BATCH_SIZE=64
       - BERTH_CAPTURE_DIR=/app/captures

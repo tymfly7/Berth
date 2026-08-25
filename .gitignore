@@ -304,3 +304,6 @@ backend\yolo26s-cls.pt
 
 # frontend modules
 frontend/node_modules
+
+# Portable rules file — copied into other projects, not part of this repo
+/claude.md
